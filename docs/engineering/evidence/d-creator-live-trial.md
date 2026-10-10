@@ -181,3 +181,17 @@ No additional job or provider request is needed to reopen these saved results.
 The bounded development journey is now testable; fresh research would require an
 explicit new allocation because the application's two Lightreel units are consumed.
 This does not establish that the provider's entire trial is exhausted.
+
+## 11 October 2026 trial-authority addendum
+
+The earlier live proof above remains historical evidence for its original Auth0
+preview account. The current Supabase-account implementation disables the legacy
+self-authorized Riff allowance path. A server-only provisioning operation now
+reserves one complete account-scoped run from the shared development pool: six
+ScrapeCreators units and two Lightreel units, expiring at the earliest provider
+expiry and never later than seven days. The high-level `start_riff_creator`
+operation atomically consumes one available grant, preserves exact request replays,
+and limits its managed project to one scan and one recommendation job. Managed
+OpenAI spend remains denied and the cash budget remains zero. This addendum records
+the new authority and budget boundary; it does not claim a new live provider
+completion for the Supabase account.

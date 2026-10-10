@@ -76,7 +76,7 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   assert.deepEqual((home._meta as { 'openai/ui': { entrypoints: unknown[] } })['openai/ui'].entrypoints, [{ type: 'global' }, { type: 'thread' }]);
   const denied = await (await rpc('tools/call', { name: 'save_project', arguments: createInput() })).json() as { result: { isError: boolean; structuredContent?: unknown; _meta: Record<string, string[]> } };
   assert.equal(denied.result.isError, true);
-  assert.equal('structuredContent' in denied.result, false, 'errors must not violate success-only output schemas');
+  assert.deepEqual(denied.result.structuredContent, failure('UNAUTHENTICATED'));
   assert.match(denied.result._meta['mcp/www_authenticate']![0]!, /resource_metadata=.*invalid_token/);
   assert.match(denied.result._meta['mcp/www_authenticate']![0]!, /Riff account/);
   const invalidHttp = await rpc('tools/list', {}, 'bad-token');
@@ -109,19 +109,24 @@ test('Riff profile and Home aliases each perform one verified account-state read
       ...(credential ? { Authorization: `Bearer ${credential}` } : {}),
     }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} } }) }),
     { config, verifier: identity.verifier, operations });
-    return (await response.json() as { result: { structuredContent: unknown; isError?: boolean; _meta?: Record<string, string[]> } }).result;
+    return (await response.json() as { result: { structuredContent: unknown; content?: { text: string }[]; isError?: boolean; _meta?: Record<string, string[]> } }).result;
   };
   const token = await identity.token();
   const profile = await invoke('get_riff_profile', token);
   assert.deepEqual(profile.structuredContent, { id: accountA, name: 'Fictional Riff Creator' });
   assert.deepEqual(calls, [{ name: 'get_account_state', owner: accountA, input: {} }]);
   calls.length = 0;
-  assert.deepEqual((await invoke('open_riff', token)).structuredContent, accountState);
+  const home = await invoke('open_riff', token);
+  assert.deepEqual(home.structuredContent, accountState);
+  assert.match(home.content?.[0]?.text ?? '', /Welcome to Riff.*Start.*Find.*make it yours.*open on the right/i);
   assert.deepEqual(calls, [{ name: 'get_account_state', owner: accountA, input: {} }]);
   calls.length = 0;
   const anonymous = await invoke('get_riff_profile');
   assert.equal(anonymous.isError, true);
   assert.match(anonymous._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   assert.ok(!JSON.stringify(anonymous).includes('00000000-0000-4000-8000-000000000000'));
+  const anonymousHome = await invoke('open_riff');
+  assert.equal(anonymousHome.isError, true);
+  assert.deepEqual(anonymousHome.structuredContent, failure('UNAUTHENTICATED'));
   assert.deepEqual(calls, []);
 });

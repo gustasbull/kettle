@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { CreatorJobOutput, GetCreatorJobInput, type CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
+import { StartRiffCreatorOutput } from '../../packages/contracts/riff-creator.ts';
 
 type Selection = z.infer<typeof GetCreatorJobInput>;
 export interface CreatorPipelineObserver {
@@ -10,15 +11,19 @@ export interface CreatorPipelineObserver {
 export interface CreatorPipelineLimits {
   timeoutMs?: number;
   pollIntervalMs?: number;
+  maxPollIntervalMs?: number;
   maxPolls?: number;
   pollWindowMs?: number;
 }
 
 /** Structured public data only. Neither model text nor private metadata is a fallback. */
-export function creatorJobStructuredOutput(raw: unknown): unknown {
+export function creatorJobStructuredOutput(raw: unknown): z.infer<typeof CreatorJobOutput> | undefined {
   const envelope = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-  const parsed = CreatorJobOutput.safeParse(envelope.structuredContent);
-  return parsed.success && !(envelope.isError === true && parsed.data.ok) ? parsed.data : undefined;
+  const job = CreatorJobOutput.safeParse(envelope.structuredContent);
+  if (job.success) return envelope.isError === true && job.data.ok ? undefined : job.data;
+  const started = StartRiffCreatorOutput.safeParse(envelope.structuredContent);
+  if (!started.success || !started.data.ok || envelope.isError === true) return undefined;
+  return CreatorJobOutput.parse({ ok: true, data: { job: started.data.data.job } });
 }
 export function creatorJobText(raw: unknown): string {
   return JSON.stringify(CreatorJobOutput.parse(raw));
@@ -33,9 +38,12 @@ export function createCreatorPipelineController(
 ) {
   const timeoutMs = limits.timeoutMs ?? 10_000;
   const pollIntervalMs = limits.pollIntervalMs ?? 2_000;
-  const maxPolls = limits.maxPolls ?? 30;
-  const pollWindowMs = limits.pollWindowMs ?? 60_000;
-  if (![timeoutMs, pollIntervalMs, pollWindowMs].every(n => Number.isFinite(n) && n > 0) ||
+  const maxPollIntervalMs = limits.maxPollIntervalMs ?? 15_000;
+  // Forty-two capped exponential polls span about 586 seconds, exceeding the
+  // current provider's 540-second SLA while remaining bounded.
+  const maxPolls = limits.maxPolls ?? 42;
+  const pollWindowMs = limits.pollWindowMs ?? 600_000;
+  if (![timeoutMs, pollIntervalMs, maxPollIntervalMs, pollWindowMs].every(n => Number.isFinite(n) && n > 0) ||
       !Number.isSafeInteger(maxPolls) || maxPolls < 0) throw new Error('Invalid observation limits');
   let selection: Selection | undefined;
   let job: CreatorJobView | undefined;
@@ -65,6 +73,7 @@ export function createCreatorPipelineController(
     if (polls >= maxPolls || Date.now() - started >= pollWindowMs) {
       publish('Automatic updates paused. Refresh or reopen in chat to check this saved job.'); return;
     }
+    const delay = Math.min(maxPollIntervalMs, Math.round(pollIntervalMs * (1.6 ** polls)));
     pollTimer = setTimeout(() => {
       pollTimer = undefined;
       if (Date.now() - started >= pollWindowMs) {
@@ -72,7 +81,7 @@ export function createCreatorPipelineController(
       }
       polls++;
       void refresh(true);
-    }, Math.min(pollIntervalMs, Math.max(1, pollWindowMs - (Date.now() - started))));
+    }, Math.min(delay, Math.max(1, pollWindowMs - (Date.now() - started))));
   }
   function apply(raw: unknown, refreshing: boolean) {
     const parsed = CreatorJobOutput.safeParse(raw);

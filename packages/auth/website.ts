@@ -553,8 +553,11 @@ async function verifiedForm(
   }
 }
 
-function genericError(message: string, status = 401, headers = responseHeaders()) {
-  return html(htmlPage('Riff authentication', `<h1>Riff authentication</h1><p class="status" role="alert">${escapeHtml(message)}</p><p><a href="/auth/sign-in">Return to sign in</a></p>`), status, headers);
+function genericError(message: string, status = 401, headers = responseHeaders(), signInReturnTo?: string) {
+  const signInPath = signInReturnTo
+    ? escapeHtml(authPath('/auth/sign-in', { return_to: signInReturnTo }))
+    : '/auth/sign-in';
+  return html(htmlPage('Riff authentication', `<h1>Riff authentication</h1><p class="status" role="alert">${escapeHtml(message)}</p><p><a href="${signInPath}">Return to sign in</a></p>`), status, headers);
 }
 
 /**
@@ -608,7 +611,8 @@ export async function handleWebsiteAuth(
         ...(result.flowId ? { flowId: result.flowId } : {}) };
       headers.append('Set-Cookie', cookie(TRANSACTION_COOKIE,
         await seal(config, pending, 'riff-website-transaction', EMAIL_CALLBACK_TTL_SECONDS), EMAIL_CALLBACK_TTL_SECONDS));
-      return html(htmlPage('Check your email', '<h1>Check your email</h1><p class="status" role="status">Check your email to confirm your Riff account, then return here to continue.</p>'), 200, headers);
+      const signInPath = escapeHtml(authPath('/auth/sign-in', { return_to: transaction.returnTo }));
+      return html(htmlPage('Check your email', `<h1>Check your email</h1><p class="status" role="status">Check your email to confirm your Riff account, then return here to continue.</p><p><a href="${signInPath}">Continue to sign in</a></p>`), 200, headers);
     } catch {
       return authForm('/auth/sign-up', config, transaction.returnTo,
         'Account creation could not be completed. Check the details or sign in if you already have an account.', 400);
@@ -658,8 +662,12 @@ export async function handleWebsiteAuth(
   if (url.pathname === '/auth/callback' && request.method === 'GET') {
     const headers = responseHeaders();
     headers.append('Set-Cookie', cookie(TRANSACTION_COOKIE, '', 0));
+    let confirmationReturnTo: string | undefined;
     try {
       const transaction = await readTransaction(request, config);
+      if (transaction.kind === 'callback' && transaction.flow === 'confirmation') {
+        confirmationReturnTo = safeReturnPath(transaction.returnTo, config);
+      }
       const codes = url.searchParams.getAll('code');
       if (transaction.kind !== 'callback' || codes.length !== 1 || !codes[0]
         || url.searchParams.has('error')) throw new Error('Invalid callback');
@@ -670,7 +678,8 @@ export async function handleWebsiteAuth(
           'riff-website-session', SESSION_TTL_SECONDS), SESSION_TTL_SECONDS));
       return redirect(transaction.returnTo, headers);
     } catch {
-      return genericError('This email link is invalid or expired. Start again from Riff.', 401, headers);
+      return genericError('This email link is invalid or expired. Start again from Riff.', 401, headers,
+        confirmationReturnTo);
     }
   }
 

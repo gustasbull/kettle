@@ -8,13 +8,24 @@ import { chromium } from 'playwright';
 test('Creator pipeline bridge parent transport, refresh, denial and teardown', async t => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountCreatorPipelineBridge } from './apps/panel/creator-pipeline-bridge.ts';
-    window.bridge = mountCreatorPipelineBridge(document.getElementById('review'), {timeoutMs:500,pollIntervalMs:30,maxPolls:2,pollWindowMs:1000});
+    window.bridge = mountCreatorPipelineBridge(document.getElementById('review'), {timeoutMs:500,pollIntervalMs:30,maxPollIntervalMs:30,maxPolls:2,pollWindowMs:1000});
   ` }, bundle: true, format: 'iife', platform: 'browser', write: false });
   const fixture = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { creatorJobFixture } from './evals/creator-loop/pipeline-fixtures.ts';
     import { creatorFailure } from './packages/application/creator-operations.ts';
     window.makeOutput = kind => ({ok:true,data:{job:creatorJobFixture(kind)}});
     window.output = window.makeOutput('recommendations');
+    window.startInput = {request_id:'00000000-0000-4000-8000-000000000622',source_url:'https://www.tiktok.com/@fixture'};
+    const startJob = window.makeOutput('scan').data.job;
+    startJob.state='queued'; startJob.revision=1; startJob.result=null;
+    const createdAt=startJob.created_at, projectId=startJob.project_id;
+    window.startOutput={ok:true,data:{
+      project:{id:projectId,name:'@fixture creator work',project_type:'brand',current_version:1,created_at:createdAt,updated_at:createdAt,
+        brief_version:{id:'00000000-0000-4000-8000-000000000621',project_id:projectId,version:1,name:'@fixture creator work',created_at:createdAt,
+          brief:{product:'Creator profile @fixture',audience:'Unknown until analysis',goal:'Find a tailored next video direction',tone:'Creator-led',language:'en',duration_seconds:30,filming_constraints:['Treat missing data as unknown'],facts:[]}}},
+      job:startJob,
+      source:{platform:'tiktok',kind:'profile',handle:'fixture',canonical_url:'https://www.tiktok.com/@fixture',profile_url:'https://www.tiktok.com/@fixture',video_url:null}
+    }};
     window.denied = creatorFailure('UNAUTHENTICATED');
   ` }, bundle: true, format: 'iife', platform: 'browser', write: false });
   const server = createServer((req, res) => {
@@ -31,10 +42,11 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
         if(m.method==='ui/initialize' && location.search!=='?silent') window.reply(m.id,{protocolVersion:m.params.protocolVersion,
           hostInfo:{name:'local-fixture',version:'1'},hostCapabilities:{...(location.search==='?no-tools'?{}:{serverTools:{}}),message:{text:{}},experimental:{'openai/message':{}}},hostContext:{theme:'dark',locale:'lt',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],styles:{variables:{'--color-background-primary':'#101010'}}}});
         if(m.method==='ui/notifications/initialized') {
-          window.send('ui/notifications/tool-input',{arguments:{job_id:window.output.data.job.id}});
-          window.send('ui/notifications/tool-result',{structuredContent:window.output,content:[]}); window.ready=true;
+          const direct=location.search==='?start';
+          window.send('ui/notifications/tool-input',{arguments:direct?window.startInput:{job_id:window.output.data.job.id}});
+          window.send('ui/notifications/tool-result',{structuredContent:direct?window.startOutput:window.output,content:[]}); window.ready=true;
         }
-        if(m.method==='tools/call') { window.calls.push(m); if(window.respond) window.reply(m.id,{structuredContent:window.output,content:[]}); }
+        if(m.method==='tools/call') { window.calls.push(m); if(window.respond) window.reply(m.id,{structuredContent:location.search==='?start'?{ok:true,data:{job:window.startOutput.data.job}}:window.output,content:[]}); }
         if(m.method==='ui/request-display-mode') { window.displayRequests.push(m.params); window.reply(m.id,{mode:'fullscreen'}); window.send('ui/notifications/host-context-changed',{displayMode:'fullscreen'}); }
         if(m.method==='ui/message') { window.messages.push(m.params); window.reply(m.id,{}); }
         if(m.method==='ui/notifications/size-changed') window.sizes.push(m.params);
@@ -53,10 +65,16 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
   async function launch(query='') {
     await page.goto(url+'/'+query); await page.waitForFunction(()=>window.ready);
     const frame=page.frames().find(f=>f.url().endsWith('/frame'));
-    await frame.waitForFunction(()=>{const text=document.querySelector('#review').textContent;return text.includes('Discovery')||text.includes('Finding your next directions')});
+    await frame.waitForFunction(()=>{const text=document.querySelector('#review').textContent;return text.includes('Discovery')||text.includes('Finding your next directions')||text.includes('Analyzing your creator context')});
     return frame;
   }
   let frame=await launch();
+  await t.test('direct start input and result select and render the created job', async()=>{
+    frame=await launch('?start');
+    assert.match(await frame.locator('#review').textContent(),/Analyzing your creator context/);
+    assert.doesNotMatch(await frame.locator('#review').textContent(),/invalid or mismatched/);
+  });
+  frame=await launch();
   await t.test('handshake renders without reread, applies theme/locale and sends sizes', async()=>{
     assert.equal(await page.evaluate(()=>window.calls.length),0);
     assert.equal(await frame.evaluate(()=>document.documentElement.lang),'lt');
@@ -148,5 +166,5 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.equal(await page.evaluate(()=>window.sizes.length),count);
   });
   assert.deepEqual(errors,[]);
-  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/frame'].includes(r)));
+  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/?start',url+'/frame'].includes(r)));
 });

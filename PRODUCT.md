@@ -556,23 +556,23 @@ system, but they must not delay proving the creator-video path.
 
 ## Current implementation snapshot
 
-This section records the takeover baseline as of 10 October 2026. It is not the
+This section records the implementation snapshot as of 11 October 2026. It is not the
 definition of the intended experience.
 
 | Capability | Current evidence | Gap to this specification |
 | --- | --- | --- |
-| Authenticated ChatGPT MCP | Live Auth0-backed MCP and account mapping verified; tools, resources, OAuth challenges, and account website now use Riff-facing copy | Remote deployment and production release configuration remain |
-| Durable creator jobs | Scan, recommendation, and script jobs persist with events, retries, receipts, allowances, and budget gates | Cancellation and broader recovery UX are not complete |
-| TikTok creator analysis | One authenticated live trial persisted profile evidence and Creator DNA; the Riff Analysis renderer now presents saved coverage, seed-review provenance, limitations, and six honest dimension slots | General availability and a complete single-video analysis contract are not implemented |
+| Authenticated ChatGPT MCP | Supabase Auth password sign-in and its OAuth 2.1 server share one internal Riff identity; the Worker serves the protected MCP, consent flow, redirect continuation, and Riff account website | Google and Apple sign-in, public release review, and broader live-client regression coverage remain |
+| Durable creator jobs | Scan, recommendation, and script jobs persist with events, idempotent request IDs, receipts, account ownership, allowances, and budget gates | Cancellation and broader recovery UX are not complete |
+| TikTok creator analysis | Authenticated `start_riff_creator` accepts a public TikTok profile or video URL, derives ownership from OAuth, creates a project and queued scan, and opens the saved job UI directly; Analysis renders saved evidence, limitations, and six honest dimension slots | Uploaded-file ingestion, Instagram, general availability, and a complete single-video contract for every Paper field are not implemented |
 | Script creation | ChatGPT can draft and save script variants against a completed job; fullscreen Studio renders real variants and component tabs | Captions, durable save/undo, filmed state, and version-editing UI are absent |
-| First-open onboarding | Portable plugin setup skill and anonymous **Welcome to Riff** MCP App are implemented | No durable account-level “seen” state, automatic one-time trigger, or replay preference |
-| Universal creator input | Fullscreen Home shell is implemented with ChatGPT handoffs for video, profile, product, and idea input | Direct file upload, automatic routing, recent work, and a durable universal input contract are not implemented |
-| Single-video analysis | Analysis UI supports a supplied saved seed review and clearly marks unavailable dimensions | No end-to-end uploaded-video ingestion or full single-video contract matching every Paper field |
+| First-open onboarding | The plugin setup skill opens Home for authorization, renders **Welcome to Riff** in the originating ChatGPT conversation when `onboarding_seen_at` is empty, and marks it seen only after the welcome succeeds | A raw custom MCP URL cannot distribute the package setup skill; it receives first-open prose but not the package-controlled carousel sequence. There is no user-facing replay preference |
+| Universal creator input | Fullscreen Home routes public TikTok profile/video links into the durable start flow, keeps one request ID across ambiguous retries, lists real recent work, and uses explicit ChatGPT handoffs for ideas and supported host file selection | Selected files are handed back to ChatGPT but are not ingested by the backend; product and non-TikTok routes remain handoffs rather than durable universal-input contracts |
+| Single-video analysis | A direct public TikTok video start preserves the exact URL for a saved Lightreel seed review, combines it with bounded profile evidence, and renders six honest dimensions | No end-to-end uploaded-file ingestion or full single-video contract matching every Paper field |
 | Discovery libraries | Saved recommendation jobs render a bounded fullscreen video carousel with attribution, keyboard navigation, and **Make it mine** | Hooks, Product showcases, and CTAs remain labeled ChatGPT handoffs; approved media previews and category contracts are absent |
 | Instagram profile route | Designed in CURRENT Paper | No verified live provider path |
 | Product context | Project and brief foundations exist | Current editable product-context flow is not built |
-| Saved work and recents | Individual records can be reopened by known IDs; save/filmed controls hand off honestly to ChatGPT | No complete Vault/recents listing, durable save toggle, undo, or filmed-status product flow |
-| Billing and usage | Budget and trial-allocation primitives exist | Customer billing, entitlements, and production usage UX are not configured |
+| Saved work and recents | Home lists account-scoped recent work created through the direct TikTok flow, with real loading, empty, failure, retry, pending, and terminal states; known jobs reopen directly; save/filmed controls hand off honestly to ChatGPT | No full Vault, durable save toggle, undo, or filmed-status product flow |
+| Billing and usage | A server-only, account-scoped creator trial grant reserves provider units before use, consumes one run atomically, preserves exact replays, and expires no later than seven days; managed OpenAI spend is denied | Customer billing, entitlements, refill UX, and production usage UX are not configured |
 
 Do not redesign the intended experience around these gaps. Close the gaps in
 small vertical slices while preserving authentication, ownership, versioning,

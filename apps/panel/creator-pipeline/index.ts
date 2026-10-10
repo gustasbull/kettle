@@ -7,15 +7,88 @@ import { riffBaseStyles } from '../riff-ui/styles.ts';
 import { creatorPipelineStyles } from './styles.ts';
 
 export type RiffCreatorDisplayMode = 'inline' | 'fullscreen';
+type RecommendationResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'recommendations' }>;
+type ScriptResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'scripts' }>;
 export type CreatorPipelineOptions = {
   displayMode?: RiffCreatorDisplayMode;
   sendPrompt?: RiffPanelAction;
   requestFullscreen?: () => Promise<RiffActionResult>;
+  startRecommendations?: (context: { job: CreatorJobView; dna: CreatorDnaView }) => Promise<RiffActionResult>;
+  makeMine?: (context: {
+    job: CreatorJobView;
+    batch: RecommendationResult['batch'];
+    idea: RecommendationResult['batch']['ideas'][number];
+  }) => Promise<RiffActionResult>;
+  setVariantState?: (context: {
+    job: CreatorJobView;
+    scripts: ScriptResult['scripts'];
+    variant: ScriptResult['scripts']['variants'][number];
+    state: 'saved' | 'filmed';
+  }) => Promise<RiffActionResult>;
 };
 
 const unavailable: RiffPanelAction = async () => ({
   status: 'unsupported', message: 'Continue with this request in the ChatGPT composer.',
 });
+
+const paperFidelityStyles = `
+.riff-pipeline[data-mode="fullscreen"] .riff-title h1 {
+  font-size: 34px; font-weight: 700; line-height: 42px; letter-spacing: -.025em;
+}
+.riff-pipeline[data-mode="fullscreen"] .riff-analysis-grid { gap: var(--riff-space-related); }
+.riff-pipeline[data-mode="fullscreen"] .riff-dimension {
+  border: 0; border-radius: var(--riff-radius-surface); box-shadow: 0 2px 4px #18243a0a, 0 12px 24px #18243a14;
+}
+.riff-pipeline[data-mode="fullscreen"] .riff-libraries {
+  display: flex; width: fit-content; max-width: 100%; gap: 4px; padding: 4px; overflow-x: auto;
+  border-radius: var(--riff-radius-control); background: #eff4ff; scrollbar-width: none;
+}
+.riff-pipeline[data-mode="fullscreen"] .riff-library {
+  flex: 0 0 auto; min-height: 36px; padding: 7px 13px; border-color: transparent;
+  border-radius: var(--riff-radius-control); background: transparent; white-space: nowrap;
+}
+.riff-pipeline[data-mode="fullscreen"] .riff-library--active {
+  color: var(--riff-ink); background: var(--riff-surface); box-shadow: 0 1px 2px #18243a12, 0 4px 10px #18243a0f;
+}
+.riff-pipeline[data-mode="fullscreen"] .riff-discovery {
+  padding: 0; border: 0; background: transparent;
+}
+.riff-discovery-stage {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 16px;
+  width: 100%; max-width: 999px; margin-inline: auto; padding: 24px; border-radius: 24px; background: #f4f5f7;
+}
+.riff-discovery-card {
+  min-width: 0; padding: clamp(18px, 4vw, 34px); border-radius: 22px; background: var(--riff-surface);
+  box-shadow: 0 2px 4px #18243a0a, 0 12px 24px #18243a14;
+}
+.riff-discovery-card .riff-discovery__top { grid-template-columns: minmax(0, 1fr); }
+.riff-carousel-arrow {
+  display: grid; width: 44px; height: 44px; min-height: 44px; padding: 0; place-items: center;
+  border: 1px solid var(--riff-line); border-radius: var(--riff-radius-control); color: var(--riff-ink);
+  background: var(--riff-surface); box-shadow: 0 2px 8px #18243a12; font-size: 24px; line-height: 1;
+}
+.riff-discovery__dots { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+.riff-discovery-dot {
+  position: relative; display: grid; width: 44px; height: 44px; min-height: 44px; padding: 0; place-items: center;
+  border: 0; border-radius: var(--riff-radius-control); background: transparent; cursor: pointer;
+}
+.riff-discovery-dot::before {
+  width: 8px; height: 8px; border-radius: var(--riff-radius-control); background: var(--riff-line); content: "";
+}
+.riff-discovery-dot[aria-current="true"]::before { width: 24px; background: var(--riff-primary); }
+.riff-discovery__hint { margin-top: 8px !important; text-align: center; }
+.riff-studio-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.riff-studio-actions { flex: 0 0 auto; justify-content: flex-end; }
+.riff-studio-actions .riff-button:first-child { border-color: var(--riff-primary); color: var(--riff-primary); }
+@media (max-width: 760px) {
+  .riff-studio-header { align-items: stretch; flex-direction: column; }
+  .riff-studio-actions { justify-content: flex-start; }
+}
+@media (max-width: 480px) {
+  .riff-discovery-stage { grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 4px; padding: 12px 4px; }
+  .riff-discovery-card { padding: 18px; }
+}
+`;
 
 /** Pure presentation plus explicit host handoffs. It never fetches, saves, retries, or starts provider work. */
 export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipelineOptions = {}): {
@@ -33,7 +106,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const style = el('style'); style.textContent = riffBaseStyles + creatorPipelineStyles;
+  const style = el('style'); style.textContent = riffBaseStyles + creatorPipelineStyles + paperFidelityStyles;
   const wrapper = el('div', undefined, 'riff-app riff-pipeline');
   const card = el('section', undefined, 'riff-pipeline__surface');
   card.setAttribute('aria-label', 'Riff creator job');
@@ -145,12 +218,17 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         el('p', `Captured DNA version ${dna.version}. ${dna.coverage_limited ? 'Coverage is a bounded sample.' : ''}`, 'riff-muted'),
         actions(
           button('Open analysis', 'riff-button riff-button--primary', () => void run(requestFullscreen), 'open-analysis'),
-          button('Explore viral formats', 'riff-button', () => void run(() => sendPrompt(`Use Riff to explore viral formats from creator job ${job.id} and captured DNA version ${dna.version}. Do not start provider work without my explicit confirmation.`)), 'explore-formats'),
+          button('Explore viral formats', 'riff-button', () => void run(() => options.startRecommendations
+            ? options.startRecommendations({ job, dna })
+            : sendPrompt(`Use Riff to explore viral formats from creator job ${job.id} and captured DNA version ${dna.version}. Do not start provider work without my explicit confirmation.`)), 'explore-formats'),
         ));
       setStatus(`${headingText} ready. Captured DNA version ${dna.version}.`); return heading;
     }
     addFullscreenBrand();
-    const { group, heading } = title(headingText, `${dna.profile.platform} · ${dna.profile.native_id}`);
+    const isVideoAnalysis = Boolean(dna.seed_review);
+    const { group, heading } = title(isVideoAnalysis
+      ? 'Unlock your video’s viral potential.'
+      : 'Turn what’s working into your next breakout.', `${dna.profile.platform} · ${dna.profile.native_id}`);
     content.append(group, provenance(dna.contains_fixture_data), rows([
       ['Source', `${dna.profile.platform} · ${dna.profile.native_id}`],
       ['Coverage', `${dna.coverage.unique_videos} unique ${dna.coverage.unique_videos === 1 ? 'video' : 'videos'} of up to ${dna.requested_videos} requested`],
@@ -186,11 +264,16 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         el('p', `${claim.method} · ${claim.uncertainty}`, 'riff-muted'));
       grid.append(panel);
     }
-    content.append(grid, list('Limitations', dna.limitations), lineage(dna.version, dna.dna_id, dna.created_at), actions(
-      button('Rework this video', 'riff-button riff-button--primary', () => void run(() => sendPrompt(`Use Riff to rework the analyzed creator video from job ${job.id}, grounded in DNA ${dna.dna_id} version ${dna.version}. Ask what I want to change before drafting.`)), 'rework-video'),
-      button('Explore viral formats', 'riff-button', () => void run(() => sendPrompt(`Use Riff to explore viral formats from creator job ${job.id} and captured DNA version ${dna.version}. Do not start provider work without my explicit confirmation.`)), 'explore-formats'),
-      button('Create a video', 'riff-button riff-button--quiet', () => void run(() => sendPrompt(`Use Riff to create a video from creator job ${job.id} and captured DNA version ${dna.version}. Continue in ChatGPT and ask me to choose a direction.`)), 'create-video'),
-    ));
+    const explore = () => void run(() => options.startRecommendations
+      ? options.startRecommendations({ job, dna })
+      : sendPrompt(`Use Riff to explore viral formats from creator job ${job.id} and captured DNA version ${dna.version}. Do not start provider work without my explicit confirmation.`));
+    const analysisActions = isVideoAnalysis
+      ? actions(
+        button('Rework this video', 'riff-button riff-button--primary', () => void run(() => sendPrompt(`Use Riff to rework the analyzed creator video from job ${job.id}, grounded in DNA ${dna.dna_id} version ${dna.version}. Ask what I want to change before drafting.`)), 'rework-video'),
+        button('Explore viral formats', 'riff-button', explore, 'explore-formats'),
+      )
+      : actions(button('Find my next breakout idea', 'riff-button riff-button--primary', explore, 'explore-formats'));
+    content.append(grid, list('Limitations', dna.limitations), lineage(dna.version, dna.dna_id, dna.created_at), analysisActions);
     setStatus(`${headingText} shown. ${dna.claims.length} saved signals. Captured DNA version ${dna.version}.`); return heading;
   }
 
@@ -211,16 +294,27 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const { group, heading } = title('Find your next breakout idea.', `${valid.length} ${valid.length === 1 ? 'idea' : 'ideas'} · captured DNA version ${batch.dna_version}`);
     content.append(group, provenance(fictional));
     const libraries = el('nav', undefined, 'riff-libraries'); libraries.setAttribute('aria-label', 'Discovery libraries');
+    libraries.setAttribute('role', 'tablist');
     const libraryData = [
       ['videos', 'Videos', false], ['hooks', 'Hooks · ChatGPT', true],
       ['showcases', 'Product showcases · ChatGPT', true], ['ctas', 'CTAs · ChatGPT', true],
     ] as const;
+    const libraryControls: HTMLButtonElement[] = [];
     for (const [kind, label, handoff] of libraryData) {
       const control = button(label, `riff-library${kind === 'videos' ? ' riff-library--active' : ''}`, () => {
         if (handoff) void run(() => sendPrompt(`Use Riff to explore ${kind === 'showcases' ? 'product showcases' : kind} for recommendation batch ${batch.id}. This category continues in ChatGPT because the saved batch has no category-specific results.`));
       }, `library-${kind}`);
-      control.dataset.library = kind; if (!handoff) control.setAttribute('aria-current', 'page'); libraries.append(control);
+      control.dataset.library = kind; control.setAttribute('role', 'tab');
+      control.setAttribute('aria-selected', String(!handoff)); control.tabIndex = handoff ? -1 : 0;
+      libraryControls.push(control); libraries.append(control);
     }
+    libraryControls.forEach((control, index) => control.addEventListener('keydown', event => {
+      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const target = event.key === 'Home' ? 0 : event.key === 'End' ? libraryControls.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + libraryControls.length) % libraryControls.length;
+      libraryControls[target]!.focus();
+    }));
     content.append(libraries);
     if (!valid.length) {
       content.append(el('p', 'No evidence-backed ideas returned. Review the saved limitations in ChatGPT or choose another direction.', 'riff-notice'));
@@ -235,20 +329,33 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       });
       const top = el('div', undefined, 'riff-discovery__top');
       top.append(el('p', `Idea ${ideaIndex + 1} / ${valid.length}`, 'riff-eyebrow'), el('h2', selected.title));
-      const controls = actions(
-        button('Previous idea', 'riff-icon-button', () => { ideaIndex = (ideaIndex - 1 + valid.length) % valid.length; render(job); }, 'previous-idea'),
-        button('Next idea', 'riff-icon-button', () => { ideaIndex = (ideaIndex + 1) % valid.length; render(job); }, 'next-idea'),
-      );
-      top.append(controls);
       const body = el('div', undefined, 'riff-discovery__body');
       body.append(rows([['Concept', selected.concept], ['Why it fits', selected.creator_fit], ['Evidence', selected.evidence_summary], ['How to film it', selected.execution]]));
       if (selected.limitations.length) body.append(list('Idea limitations', selected.limitations, 'riff-compact-list'));
       const sources = el('section', undefined, 'riff-reference-grid'); sources.append(el('h3', 'Sources'));
       selected.reference_ids.forEach(id => sources.append(safeReference(references.get(id)!, fictional)));
-      carousel.append(top, body, sources, actions(
-        button('Make it mine', 'riff-button riff-button--primary', () => void run(() => sendPrompt(`Use Riff to make batch ${batch.id} idea ${selected.id} mine. Draft two or three filmable variants from the captured DNA and cited references, then let me choose.`)), 'make-it-mine'),
+      const activeCard = el('article', undefined, 'riff-discovery-card'); activeCard.dataset.activeIdea = selected.id;
+      activeCard.append(top, body, sources, actions(
+        button('Make it mine', 'riff-button riff-button--primary', () => void run(() => options.makeMine
+          ? options.makeMine({ job, batch, idea: selected })
+          : sendPrompt(`Use Riff to make batch ${batch.id} idea ${selected.id} mine. Draft two or three filmable variants from the captured DNA and cited references, then let me choose.`)), 'make-it-mine'),
         button('Create a video', 'riff-button riff-button--quiet', () => void run(() => sendPrompt(`Use Riff to create a video from batch ${batch.id} idea ${selected.id}. Continue in ChatGPT without claiming anything has been saved.`)), 'create-video'),
       ));
+      const previous = button('‹', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex - 1 + valid.length) % valid.length; render(job); }, 'previous-idea');
+      previous.setAttribute('aria-label', 'Previous idea');
+      const next = button('›', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex + 1) % valid.length; render(job); }, 'next-idea');
+      next.setAttribute('aria-label', 'Next idea');
+      const stage = el('div', undefined, 'riff-discovery-stage'); stage.dataset.discoveryStage = '';
+      stage.append(previous, activeCard, next);
+      const dots = el('div', undefined, 'riff-discovery__dots'); dots.setAttribute('role', 'group'); dots.setAttribute('aria-label', 'Idea position');
+      valid.forEach((_, index) => {
+        const dot = button('', 'riff-discovery-dot', () => { ideaIndex = index; render(job); }, `idea-dot-${index}`);
+        dot.setAttribute('aria-label', `Go to idea ${index + 1}`);
+        dot.setAttribute('aria-current', String(index === ideaIndex));
+        dot.setAttribute('aria-pressed', String(index === ideaIndex));
+        dots.append(dot);
+      });
+      carousel.append(stage, dots, el('p', 'Use the left and right arrow keys', 'riff-muted riff-discovery__hint'));
       content.append(carousel);
     }
     if (batch.ideas.length !== valid.length) content.append(el('p', `${batch.ideas.length - valid.length} idea was withheld because its supporting reference was unavailable.`, 'riff-notice'));
@@ -265,15 +372,26 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       setStatus(`${scripts.variants.length} filming variants ready.`); return heading;
     }
     addFullscreenBrand();
-    const { group, heading } = title('Your script, ready to film.', `Studio · ${scripts.variants.length} variants`); content.append(group, provenance(scripts.contains_fixture_data));
     variantIndex = Math.min(variantIndex, scripts.variants.length - 1);
+    const variant = scripts.variants[variantIndex]!;
+    const { group, heading } = title('Your script, ready to film.', `Studio · ${scripts.variants.length} variants`);
+    const studioActions = actions(
+      button('Save for later', 'riff-button', () => void run(() => options.setVariantState
+        ? options.setVariantState({ job, scripts, variant, state: 'saved' })
+        : sendPrompt(`Help me save variant ${variant.id} for later in ChatGPT. Riff has not saved this action because no save-state tool is available.`)), 'save-later'),
+      button('I filmed it', 'riff-button riff-button--primary', () => void run(() => options.setVariantState
+        ? options.setVariantState({ job, scripts, variant, state: 'filmed' })
+        : sendPrompt(`I filmed variant ${variant.id}. Record that acknowledgement in ChatGPT only; it is not persisted in Riff because no filmed-state tool is available.`)), 'filmed-it'),
+    );
+    studioActions.classList.add('riff-studio-actions'); studioActions.setAttribute('role', 'group'); studioActions.setAttribute('aria-label', 'Studio actions');
+    const studioHeader = el('div', undefined, 'riff-studio-header'); studioHeader.append(group, studioActions);
+    content.append(studioHeader, provenance(scripts.contains_fixture_data));
     const variants = el('div', undefined, 'riff-variants'); variants.setAttribute('aria-label', 'Filming variants');
     scripts.variants.forEach((variant, index) => {
       const control = button(variant.label, `riff-variant${index === variantIndex ? ' riff-variant--active' : ''}`, () => { variantIndex = index; render(job); }, `variant-${variant.id}`);
       control.dataset.variant = variant.id; control.setAttribute('aria-pressed', String(index === variantIndex)); variants.append(control);
     });
     content.append(variants);
-    const variant = scripts.variants[variantIndex]!;
     const tabNames = ['Full video', 'Hook', 'Main content', 'CTA'] as const;
     const tabs = el('div', undefined, 'riff-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Script components');
     const panels: HTMLElement[] = [];
@@ -306,8 +424,6 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     panels[studioTab]!.append(el('p', 'Caption and platform publishing fields are not part of this saved script.', 'riff-notice'));
     content.append(tabs, ...panels, list('Variant limitations', variant.limitations), list('Script set limitations', scripts.limitations),
       lineage(scripts.dna_version, scripts.dna_id, scripts.created_at), actions(
-        button('Save for later', 'riff-button', () => void run(() => sendPrompt(`Help me save variant ${variant.id} for later in ChatGPT. Riff has not saved this action because no save-state tool is available.`)), 'save-later'),
-        button('I filmed it', 'riff-button', () => void run(() => sendPrompt(`I filmed variant ${variant.id}. Record that acknowledgement in ChatGPT only; it is not persisted in Riff because no filmed-state tool is available.`)), 'filmed-it'),
         button('Create a video', 'riff-button riff-button--primary', () => void run(() => sendPrompt(`Use Riff to refine filming variant ${variant.id} from script set ${scripts.id}. Continue in ChatGPT.`)), 'create-video'),
       ));
     setStatus(`${variant.label} shown in Studio. Captured DNA version ${scripts.dna_version}.`); return heading;

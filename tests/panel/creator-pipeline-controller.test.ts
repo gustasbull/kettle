@@ -4,11 +4,38 @@ import { createCreatorPipelineController, creatorJobStructuredOutput, creatorJob
 import { creatorJobFixture } from '../../evals/creator-loop/pipeline-fixtures.ts';
 import { creatorFailure } from '../../packages/application/creator-operations.ts';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
+import { StartRiffCreatorOutput } from '../../packages/contracts/riff-creator.ts';
 
 const output = (state: CreatorJobView['state'] = 'running', revision = 1, kind: CreatorJobView['kind'] = 'recommendations') => {
   const job = creatorJobFixture(kind); job.state = state; job.revision = revision;
   if (state !== 'succeeded') job.result = null;
   return { ok: true as const, data: { job } };
+};
+const startOutput = () => {
+  const value = output('running', 1, 'scan');
+  const projectId = value.data.job.project_id;
+  const createdAt = value.data.job.created_at;
+  return StartRiffCreatorOutput.parse({ ok: true, data: {
+    project: {
+      id: projectId, name: '@fixture creator work', project_type: 'brand', current_version: 1,
+      created_at: createdAt, updated_at: createdAt,
+      brief_version: {
+        id: '00000000-0000-4000-8000-000000000621', project_id: projectId, version: 1,
+        name: '@fixture creator work', created_at: createdAt,
+        brief: {
+          product: 'Creator profile @fixture', audience: 'Unknown until analysis',
+          goal: 'Find a tailored next video direction', tone: 'Creator-led', language: 'en',
+          duration_seconds: 30, filming_constraints: ['Treat missing data as unknown'], facts: [],
+        },
+      },
+    },
+    job: value.data.job,
+    source: {
+      platform: 'tiktok', kind: 'profile', handle: 'fixture',
+      canonical_url: 'https://www.tiktok.com/@fixture',
+      profile_url: 'https://www.tiktok.com/@fixture', video_url: null,
+    },
+  } });
 };
 const flush = async () => { for (let i=0;i<8;i++) await Promise.resolve(); };
 function setup(t: TestContext, limits: CreatorPipelineLimits = {}) {
@@ -21,7 +48,7 @@ function setup(t: TestContext, limits: CreatorPipelineLimits = {}) {
     job(job,status){visible=job; notice=status.notice;},
     cleared(value){visible=undefined;reason=value;},
   }, (input,signal)=>new Promise((resolve,reject)=>calls.push({input,signal,resolve,reject})),
-  {timeoutMs:100,pollIntervalMs:20,maxPolls:3,pollWindowMs:200,...limits});
+  {timeoutMs:100,pollIntervalMs:20,maxPollIntervalMs:20,maxPolls:3,pollWindowMs:200,...limits});
   t.after(()=>controller.dispose());
   const launch=(value=output(), tools=true)=>{
     controller.receiveInput({job_id:value.data.job.id}); controller.receiveResult(value); controller.connected(tools);
@@ -56,6 +83,14 @@ test('elapsed window stops new reads independently of count',async t=>{
   const f=setup(t,{pollWindowMs:25,maxPolls:100}); f.launch(); await f.tick(20);
   f.calls[0]!.resolve(output('running',2)); await flush(); await f.tick(5);
   assert.equal(f.calls.length,1); assert.match(f.notice()!,/Automatic updates paused/);
+});
+test('polling backs off to a cap while staying inside the bounded window',async t=>{
+  const f=setup(t,{pollIntervalMs:10,maxPollIntervalMs:25,maxPolls:4,pollWindowMs:200});f.launch();
+  await f.tick(9);assert.equal(f.calls.length,0);await f.tick(1);assert.equal(f.calls.length,1);
+  f.calls[0]!.resolve(output('running',2));await flush();
+  await f.tick(15);assert.equal(f.calls.length,1);await f.tick(1);assert.equal(f.calls.length,2);
+  f.calls[1]!.resolve(output('running',3));await flush();
+  await f.tick(24);assert.equal(f.calls.length,2);await f.tick(1);assert.equal(f.calls.length,3);
 });
 
 for(const state of ['succeeded','failed','needs_reconciliation'] as const) test(`${state} stops polling and aborts older request`,async t=>{
@@ -139,4 +174,10 @@ test('public text preserves all three result types; structured envelopes reject 
     for(const raw of [{structuredContent:value,isError:true},{content:[{text:JSON.stringify(value)}]},{_meta:value},value])assert.equal(creatorJobStructuredOutput(raw),undefined);
     assert.throws(()=>creatorJobText({...value,internal:'secret'}));
   }
+  const started = startOutput();
+  assert.equal(started.ok, true);
+  if (started.ok) assert.deepEqual(
+    creatorJobStructuredOutput({ structuredContent: started }),
+    { ok: true, data: { job: started.data.job } },
+  );
 });

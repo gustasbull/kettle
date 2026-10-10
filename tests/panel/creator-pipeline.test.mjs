@@ -7,7 +7,7 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
-    window.actions=[]; window.fullscreen=[];
+    window.actions=[]; window.fullscreen=[]; window.connectedActions=[];
     window.boot=(scenario='scan',mode='fullscreen')=>{
       window.view?.dispose();
       window.view=mountCreatorPipeline(document.getElementById('root'),{
@@ -18,6 +18,17 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
       window.job=pipelineFixture(scenario); window.view.render(window.job);
     };
     window.show=scenario=>{window.job=pipelineFixture(scenario);window.view.render(window.job)};
+    window.bootConnected=(scenario='scan')=>{
+      window.view?.dispose();
+      window.view=mountCreatorPipeline(document.getElementById('root'),{
+        displayMode:'fullscreen',
+        sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
+        startRecommendations:async ({job,dna})=>{window.connectedActions.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id,version:dna.version});return {status:'sent',message:'Discovery started.'}},
+        makeMine:async ({job,batch,idea})=>{window.connectedActions.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id});return {status:'sent',message:'Drafting in ChatGPT.'}},
+        setVariantState:async ({job,scripts,variant,state})=>{window.connectedActions.push({kind:'variant-state',jobId:job.id,scriptsId:scripts.id,variantId:variant.id,state});return {status:'sent',message:state==='saved'?'Saved for later.':'Marked as filmed.'}},
+      });
+      window.job=pipelineFixture(scenario); window.view.render(window.job);
+    };
   ` }, bundle: true, format: 'iife', platform: 'browser', write: false });
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
@@ -44,9 +55,14 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
     assert.equal(await root.getByRole('button', { name: /retry/i }).count(), 0);
   });
 
-  await t.test('fullscreen Analysis follows the six truthful dimensions and explicit handoffs', async () => {
-    await page.evaluate(() => boot('scan', 'fullscreen'));
-    assert.match(await root.getByRole('heading', { level: 1 }).textContent(), /Video analysis|Creator analysis/);
+  await t.test('fullscreen video Analysis follows the six truthful dimensions and explicit handoffs', async () => {
+    await page.evaluate(() => boot('video-analysis', 'fullscreen'));
+    const analysisHeading = root.getByRole('heading', { level: 1 });
+    assert.equal(await analysisHeading.textContent(), 'Unlock your video’s viral potential.');
+    assert.deepEqual(await analysisHeading.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    }), { fontSize: '34px', lineHeight: '42px' });
     for (const name of ['Hook', 'Content', 'Style & pacing', 'Voice & language', 'Script', 'CTA']) {
       assert.equal(await root.getByRole('heading', { name, exact: true }).count(), 1, name);
     }
@@ -54,10 +70,20 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
     assert.doesNotMatch(await root.textContent(), /Working well|Needs attention/);
     assert.match(await root.textContent(), /unique video|coverage/i);
     assert.match(await root.textContent(), /Limitations/);
-    for (const label of ['Rework this video', 'Explore viral formats', 'Create a video']) {
+    for (const label of ['Rework this video', 'Explore viral formats']) {
       assert.equal(await root.getByRole('button', { name: label }).count(), 1);
     }
+    assert.equal(await root.getByRole('button', { name: 'Create a video' }).count(), 0);
     await root.getByRole('button', { name: 'Explore viral formats' }).click();
+    assert.match((await page.evaluate(() => window.actions.at(-1))), /DNA version 1|creator job/i);
+  });
+
+  await t.test('fullscreen profile Analysis uses the canonical profile route', async () => {
+    await page.evaluate(() => boot('scan', 'fullscreen'));
+    assert.equal(await root.getByRole('heading', { name: 'Turn what’s working into your next breakout.' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Find my next breakout idea' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 0);
+    await root.getByRole('button', { name: 'Find my next breakout idea' }).click();
     assert.match((await page.evaluate(() => window.actions.at(-1))), /DNA version 1|creator job/i);
   });
 
@@ -77,12 +103,38 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
     await page.evaluate(() => boot('three-ideas', 'fullscreen'));
     assert.equal(await root.getByRole('heading', { name: 'Find your next breakout idea.' }).count(), 1);
     assert.match(await root.textContent(), /3 ideas/);
-    assert.equal(await root.locator('[data-library]').count(), 4);
+    const libraries = root.getByRole('tablist', { name: 'Discovery libraries' });
+    assert.equal(await libraries.count(), 1);
+    assert.equal(await libraries.getByRole('tab').count(), 4);
+    assert.equal(await libraries.getByRole('tab', { name: 'Videos', exact: true }).getAttribute('aria-selected'), 'true');
     assert.match(await root.locator('[data-library="hooks"]').textContent(), /ChatGPT/);
     assert.doesNotMatch(await root.textContent(), /7 ideas|lift|likes/i);
     const region = root.locator('[data-discovery-carousel]');
+    const stage = root.locator('[data-discovery-stage]');
+    assert.equal(await stage.count(), 1);
+    assert.deepEqual(await stage.evaluate((node) => {
+      const stageStyle = getComputedStyle(node);
+      const cardStyle = getComputedStyle(node.querySelector('[data-active-idea]'));
+      return {
+        maxWidth: stageStyle.maxWidth,
+        background: stageStyle.backgroundColor,
+        cardRadius: cardStyle.borderRadius,
+      };
+    }), { maxWidth: '999px', background: 'rgb(244, 245, 247)', cardRadius: '22px' });
+    const dots = root.getByRole('button', { name: /Go to idea/ });
+    assert.equal(await dots.count(), 3);
+    assert.equal(await root.getByRole('button', { name: 'Go to idea 1' }).getAttribute('aria-current'), 'true');
+    assert.deepEqual(await root.getByRole('button', { name: 'Go to idea 1' }).evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { width: style.width, minHeight: style.minHeight };
+    }), { width: '44px', minHeight: '44px' });
     assert.match(await region.textContent(), /Fictional desk idea 1/);
     await region.focus(); await page.keyboard.press('ArrowRight');
+    assert.match(await region.textContent(), /Fictional desk idea 2/);
+    await root.getByRole('button', { name: 'Go to idea 3' }).click();
+    assert.match(await region.textContent(), /Fictional desk idea 3/);
+    assert.equal(await root.getByRole('button', { name: 'Go to idea 3' }).getAttribute('aria-current'), 'true');
+    await root.getByRole('button', { name: 'Previous idea' }).click();
     assert.match(await region.textContent(), /Fictional desk idea 2/);
     await root.getByRole('button', { name: 'Next idea' }).click();
     assert.match(await region.textContent(), /Fictional desk idea 3/);
@@ -104,6 +156,12 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
   await t.test('fullscreen Studio maps actual variants into component tabs and honest state handoffs', async () => {
     await page.evaluate(() => boot('scripts', 'fullscreen'));
     assert.equal(await root.getByRole('heading', { name: 'Your script, ready to film.' }).count(), 1);
+    const studioActions = root.getByRole('group', { name: 'Studio actions' });
+    assert.equal(await studioActions.count(), 1);
+    assert.equal(await studioActions.getByRole('button').count(), 2);
+    assert.equal(await studioActions.getByRole('button', { name: 'Save for later' }).count(), 1);
+    assert.equal(await studioActions.getByRole('button', { name: 'I filmed it' }).count(), 1);
+    assert.equal(await studioActions.getByRole('button', { name: 'Create a video' }).count(), 0);
     assert.equal(await root.getByRole('tab').count(), 4);
     for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab }).count(), 1);
     assert.equal(await root.locator('[data-variant]').count(), 2);
@@ -133,6 +191,23 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
       await page.setViewportSize({ width, height: 900 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
     }
+  });
+
+  await t.test('connected workflow actions stay inside Riff while creative drafting returns to ChatGPT', async () => {
+    const promptCount = await page.evaluate(() => window.actions.length);
+    await page.evaluate(() => bootConnected('scan'));
+    await root.getByRole('button', { name: 'Find my next breakout idea' }).click();
+    assert.deepEqual((await page.evaluate(() => window.connectedActions.at(-1))).kind, 'recommendations');
+    assert.equal((await page.evaluate(() => window.actions.length)), promptCount, 'prior handoff trace remains unchanged');
+
+    await page.evaluate(() => bootConnected('ideas'));
+    await root.getByRole('button', { name: 'Make it mine' }).click();
+    assert.equal((await page.evaluate(() => window.connectedActions.at(-1))).kind, 'make-mine');
+
+    await page.evaluate(() => bootConnected('scripts'));
+    await root.getByRole('button', { name: 'Save for later' }).click();
+    await root.getByRole('button', { name: 'I filmed it' }).click();
+    assert.deepEqual((await page.evaluate(() => window.connectedActions.slice(-2).map(action => action.state))), ['saved', 'filmed']);
   });
 
   await t.test('same-job selection/focus persists, a different job resets it, and disposal is final', async () => {

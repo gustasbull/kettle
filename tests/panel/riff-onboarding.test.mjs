@@ -17,6 +17,9 @@ test('Riff onboarding renders the exact three-step keyboard carousel without hos
 
   assert.equal(await page.getByRole('heading', { name: 'Welcome to Riff' }).count(), 1);
   assert.equal(await page.getByRole('tab').count(), 3);
+  assert.equal(await page.getByRole('tab', { name: 'Start', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('tab', { name: 'Find', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('tab', { name: 'Make', exact: true }).count(), 1);
   assert.equal(await page.locator('[role="tabpanel"]').count(), 3);
   assert.equal(await page.getByText('Unlock your viral potential.').count(), 1);
   assert.equal(await page.getByText('Start with what you have.').count(), 1);

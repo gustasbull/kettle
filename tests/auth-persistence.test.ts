@@ -111,7 +111,8 @@ test('website and MCP Supabase credentials share SQL ownership while other subje
   const denied = await result(await mcp(otherToken, 'get_project', { project_id: projectId }));
   const missing = await result(await mcp(otherToken, 'get_project', { project_id: crypto.randomUUID() }));
   assert.equal(denied.isError, true);
-  assert.equal('structuredContent' in denied, false);
+  const deniedRead = GetProjectOutput.parse(denied.structuredContent);
+  assert.ok(!deniedRead.ok && deniedRead.error.code === 'NOT_FOUND');
   assert.deepEqual(denied, missing);
 
   const callsBeforeDenial = storageCalls;

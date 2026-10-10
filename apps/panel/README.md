@@ -8,7 +8,9 @@ all account data arrives through authenticated MCP tool results.
 ## Implemented surfaces
 
 - `riff-onboarding`: compact conversational **Welcome to Riff** guide.
-- `riff-home`: fullscreen Home shell with creator-input handoffs.
+- `riff-home`: fullscreen Home with direct public TikTok profile/video starts,
+  live saved-job state, owned recents, and honest ChatGPT handoffs for unsupported
+  inputs and uploads.
 - `creator-pipeline`: inline summaries plus fullscreen Analysis, Discovery, and
   Studio views backed by saved creator-job results.
 - `creator-loop`, `creator-review`, and `project-review`: compatible read-only

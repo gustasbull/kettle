@@ -85,7 +85,8 @@ test('project-review render tool uses signed identity, exact read contract and r
   const absent = (await call('show_project_brief', { project_id: crypto.randomUUID() }, otherToken)).result;
   assert.deepEqual(other, absent, 'another account cannot distinguish owned from missing IDs');
   assert.equal(other.isError, true);
-  assert.equal('structuredContent' in other, false, 'errors must not violate success-only output schemas');
+  const denied = GetProjectOutput.parse(other.structuredContent);
+  assert.ok(!denied.ok && denied.error.code === 'NOT_FOUND');
   assert.equal(other.content[0]!.text, 'This project is unavailable.');
   assert.ok(!JSON.stringify(other).includes(input.brief.product));
 

@@ -11,6 +11,7 @@ test('Riff is a portable, mixed-auth Agent Plugins package with complete assets'
   assert.equal(manifest.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.equal(manifest.name, 'riff');
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+  assert.notEqual(manifest.version, '0.1.0', 'onboarding behavior changes must invalidate the installed package cache');
   assert.equal(manifest.extensions['com.openai'].onboardingSkill, './skills/setup/SKILL.md');
   const ui = manifest.extensions['com.openai'].interface;
   assert.equal(ui.displayName, 'Riff');
@@ -53,16 +54,21 @@ test('Riff setup skill is narrowly triggered and keeps onboarding/account/provid
   const skill = await readFile(resolve(root, 'skills/setup/SKILL.md'), 'utf8');
   assert.match(skill, /^---\nname: setup\ndescription: .+\n---/);
   assert.match(skill, /installation|setup|connection|first use/i);
-  const welcome = skill.indexOf('show_riff_welcome');
-  const home = skill.indexOf('open_riff');
-  assert.ok(welcome > 0 && home > welcome, 'welcome must precede Home');
+  const home = skill.indexOf('Call `open_riff`');
+  const welcome = skill.indexOf('call `show_riff_welcome`');
+  const mark = skill.indexOf('call `mark_riff_onboarding_seen`');
+  assert.ok(home > 0 && welcome > home && mark > welcome,
+    'Home must trigger OAuth before the first-use chat welcome is rendered and recorded');
+  assert.match(skill, /onboarding_seen_at.*null/i);
+  assert.match(skill, /same|originating/i);
   assert.match(skill, /Start → Find → Make/);
   assert.match(skill, /explicit user request|explicit user action/i);
   assert.match(skill, /conversation|conversational/i);
-  assert.match(skill, /not.*durable|never.*completion/i);
+  assert.match(skill, /complete only when.*mark_riff_onboarding_seen.*success/i);
   assert.match(skill, /attach.*ChatGPT/i);
   assert.match(skill, /never.*(?:uploaded|upload receipt)/i);
-  assert.match(skill, /never.*(?:saved|recents)/i);
+  assert.match(skill, /recent work only from `list_riff_work`/i);
+  assert.match(skill, /never claim save, undo, or filmed-state persistence/i);
   assert.match(skill, /fetch|spend/i);
   assert.match(skill, /unavailable/i);
 

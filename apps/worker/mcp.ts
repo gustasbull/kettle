@@ -1,5 +1,7 @@
 import { pipelineContracts } from '../../packages/contracts/creator-pipeline.ts';
 import type { createPipelineOperations } from '../../packages/application/creator-pipeline.ts';
+import { riffCreatorContracts } from '../../packages/contracts/riff-creator.ts';
+import type { createRiffCreatorOperations } from '../../packages/application/riff-creator.ts';
 import { registerCreatorPipelineResource, CREATOR_PIPELINE_URI } from './creator-pipeline-resource.ts';
 import { creatorContracts } from '../../packages/contracts/creator-operations.ts';
 import type { createCreatorOperations } from '../../packages/application/creator-operations.ts';
@@ -25,6 +27,7 @@ export interface McpAuth {
   operations: ReturnType<typeof createOperations>;
   pipelineOperations?: ReturnType<typeof createPipelineOperations>;
   creatorOperations?: ReturnType<typeof createCreatorOperations>;
+  riffCreatorOperations?: ReturnType<typeof createRiffCreatorOperations>;
 }
 export async function handleMcp(request: Request, auth?: McpAuth): Promise<Response> {
   const token = bearer(request);
@@ -131,6 +134,26 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
       annotations:{readOnlyHint:contract.readOnly,destructiveHint:false,idempotentHint:true,openWorldHint:!contract.readOnly&&tool.operation!=='save_creator_scripts'},
       _meta:{securitySchemes,...(tool.ui?{ui:tool.ui}:{})}};
   });
+  const riffCreatorTools = [
+    {
+      name: 'start_riff_creator', operation: 'start_riff_creator' as const, title: 'Start creator analysis',
+      description: 'Start the complete Riff analysis path from one public TikTok creator-profile or video URL, including bounded TikTok short-link resolution. Riff derives account ownership from OAuth, requires a separately provisioned account run grant, atomically creates or reuses the creator project and reserved allowance, queues one idempotent saved scan, and returns its job. This explicit action can access public providers and consume the pre-authorized trial grant.',
+      ui: { resourceUri: CREATOR_PIPELINE_URI } as { resourceUri: string } | undefined,
+    },
+    {
+      name: 'list_riff_work', operation: 'list_riff_work' as const, title: 'List recent Riff work',
+      description: 'List the signed-in account’s recent saved Riff creator jobs for Home. Reads owned summaries only; it does not call providers, start work, or spend credits.',
+      ui: undefined as { resourceUri: string } | undefined,
+    },
+  ].map(tool => {
+    const contract = riffCreatorContracts[tool.operation];
+    const securitySchemes = [{ type: 'oauth2' as const, scopes: [...oauthScopes] }];
+    return { ...tool, contract, securitySchemes,
+      annotations: { readOnlyHint: contract.readOnly, destructiveHint: false, idempotentHint: true,
+        openWorldHint: tool.operation === 'start_riff_creator' },
+      _meta: { securitySchemes, ...(tool.ui ? { ui: tool.ui } : {}) },
+    };
+  });
   const accountContract = toolContracts.get_account_state;
   const riffSecurity = [{ type: 'oauth2' as const, scopes: [...oauthScopes] }];
   const openaiHomeUi = {
@@ -141,16 +164,38 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
   const homeMeta = {
     securitySchemes: riffSecurity, ui: { resourceUri: RIFF_HOME_URI }, 'openai/ui': openaiHomeUi,
   };
+  if (auth?.pipelineOperations || auth?.riffCreatorOperations) registerCreatorPipelineResource(server);
   if(auth?.pipelineOperations){
-    registerCreatorPipelineResource(server);
     for(const tool of pipelineTools){
       const contract=tool.contract;
-      server.registerTool(tool.name,{title:tool.title,description:tool.description,inputSchema:contract.input,outputSchema:contract.output.options[0],annotations:tool.annotations,_meta:tool._meta},async(input:unknown)=>{
+      // The published descriptor below advertises the complete success/failure
+      // union. Omit the SDK's success-only validator so retry semantics can also
+      // reach the bound MCP App as structured content.
+      server.registerTool(tool.name,{title:tool.title,description:tool.description,inputSchema:contract.input,annotations:tool.annotations,_meta:tool._meta},async(input:unknown)=>{
         const result=await auth.pipelineOperations!.execute(tool.operation,token,input);
         const needsAuth=!result.ok&&(result.error.code==='UNAUTHENTICATED'||(result.error.code==='FORBIDDEN'&&token&&!(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
-        if (!result.ok) return {content:[{type:'text' as const,text:JSON.stringify(result)}],isError:true,
+        if (!result.ok) return {content:[{type:'text' as const,text:JSON.stringify(result)}],structuredContent:result,isError:true,
           ...(needsAuth?{_meta:{'mcp/www_authenticate':[challenge(auth.config,result.error.code==='FORBIDDEN'?'insufficient_scope':'invalid_token')]}}:{})};
         return {content:[{type:'text' as const,text:JSON.stringify(result)}],structuredContent:result};
+      });
+    }
+  }
+  if (auth?.riffCreatorOperations) {
+    for (const tool of riffCreatorTools) {
+      const { contract } = tool;
+      server.registerTool(tool.name, {
+        title: tool.title, description: tool.description, inputSchema: contract.input,
+        annotations: tool.annotations, _meta: tool._meta,
+      }, async (input: unknown) => {
+        const result = await auth.riffCreatorOperations!.execute(tool.operation, token, input);
+        const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
+          || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
+        if (!result.ok) return {
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result, isError: true,
+          ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
+            result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
+        };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result };
       });
     }
   }
@@ -167,7 +212,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
         const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
           || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
         if (!result.ok) return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }], isError: true,
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result, isError: true,
           ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
@@ -195,7 +240,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
         const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
           || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
         if (!result.ok) return {
-          content: [{ type: 'text' as const, text: result.error.message }], isError: true,
+          content: [{ type: 'text' as const, text: result.error.message }], structuredContent: result, isError: true,
           ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
@@ -231,11 +276,15 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
       const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
         || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(accountContract.scope)));
       if (!result.ok) return {
-        content: [{ type: 'text' as const, text: result.error.message }], isError: true,
+        content: [{ type: 'text' as const, text: result.error.message }], structuredContent: result, isError: true,
         ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
           result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
       };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data) }], structuredContent: result };
+      const firstOpen = result.data.account.onboarding_seen_at === null;
+      const text = firstOpen
+        ? 'Welcome to Riff — unlock your viral potential. Start with what you have: a public creator video, profile, or idea. Find your evidence-backed breakout direction. Make it yours as a filmable script in Studio. Your first-use guide belongs here in ChatGPT, and Riff Home is open on the right.'
+        : 'Riff Home is open on the right. Start with a public creator video or profile, or pick up saved creator work.';
+      return { content: [{ type: 'text' as const, text }], structuredContent: result };
     });
   }
   // SDK 1.32's high-level registration only serializes _meta. Publish the
@@ -277,6 +326,13 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
       inputSchema:ToolSchema.shape.inputSchema.parse({...z.toJSONSchema(tool.contract.input),type:'object'}),
       outputSchema:ToolSchema.shape.outputSchema.parse({...z.toJSONSchema(tool.contract.output),type:'object'}),
       annotations:tool.annotations,securitySchemes:tool.securitySchemes,_meta:tool._meta});
+  }
+  if (auth?.riffCreatorOperations) for (const tool of riffCreatorTools) {
+    descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
+      inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
+      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
+    });
   }
   if (auth) {
     descriptors.push({

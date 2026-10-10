@@ -3,6 +3,7 @@ import {
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
+import { StartRiffCreatorInput } from '../../packages/contracts/riff-creator.ts';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 
@@ -143,8 +144,16 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     app.onhostcontextchanged = undefined;
     void app.close();
   }
-  app.ontoolinput = (params) => controller.receiveInput(params.arguments);
-  app.ontoolresult = (params) => controller.receiveResult(creatorJobStructuredOutput(params));
+  app.ontoolinput = (params) => {
+    // start_riff_creator has no job ID until its result arrives. Keep the
+    // loading state alive rather than rejecting a valid direct-start launch.
+    if (!StartRiffCreatorInput.safeParse(params.arguments).success) controller.receiveInput(params.arguments);
+  };
+  app.ontoolresult = (params) => {
+    const output = creatorJobStructuredOutput(params);
+    if (output?.ok) controller.receiveInput({ job_id: output.data.job.id });
+    controller.receiveResult(output);
+  };
   app.ontoolcancelled = () => controller.connectionFailed();
   app.onhostcontextchanged = applyContext;
   app.onclose = () => { bridgeReady = false; stopResize(); if (!disposed) controller.connectionFailed(); };

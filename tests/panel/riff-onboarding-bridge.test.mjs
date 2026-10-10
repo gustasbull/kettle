@@ -18,7 +18,7 @@ test('Riff onboarding bridge mounts safely without a parent host and disposes', 
   assert.equal(await page.locator('#mount').textContent(), '');
 });
 
-test('Riff onboarding marks a real mounted handshake once and does not retry a failed mark', async (t) => {
+test('Riff onboarding stays static after a real mounted handshake and never calls a server tool', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffOnboardingBridge } from './apps/panel/riff-onboarding-bridge.ts';
     window.bridge=mountRiffOnboardingBridge(document.getElementById('mount'), {timeoutMs:250});
@@ -36,13 +36,7 @@ test('Riff onboarding marks a real mounted handshake once and does not retry a f
           hostCapabilities:{serverTools:{}},hostContext:{theme:'light',locale:'en'}
         }},'*');
         if(message.method==='ui/notifications/initialized') window.ready=true;
-        if(message.method==='tools/call'){
-          window.calls.push(message.params);
-          const failed=location.search==='?fail';
-          frame().postMessage({jsonrpc:'2.0',id:message.id,result:failed
-            ?{content:[],isError:true,structuredContent:{ok:false,error:{code:'UNAVAILABLE',message:'Unavailable',retryable:true,recovery:'retry_same_request'}}}
-            :{content:[],structuredContent:{ok:true,data:{onboarding_seen_at:'2026-10-11T12:00:00Z'}}}},'*');
-        }
+        if(message.method==='tools/call') window.calls.push(message.params);
       });
     </script><iframe src="/frame"></iframe>`);
   });
@@ -53,17 +47,12 @@ test('Riff onboarding marks a real mounted handshake once and does not retry a f
   const page = await browser.newPage();
   const base = `http://127.0.0.1:${server.address().port}`;
 
-  for (const query of ['', '?fail']) {
-    await page.goto(`${base}/${query}`);
-    await page.waitForFunction(() => window.ready, undefined, { timeout: 2_000 });
-    await page.waitForTimeout(80);
-    const frame = page.frames().find((item) => item.url().endsWith('/frame'));
-    assert.equal(await frame.getByRole('heading', { name: 'Welcome to Riff' }).count(), 1);
-    const trace = await page.evaluate(() => ({
-      calls: window.calls.map(({ name, arguments: args }) => ({ name, arguments: args })), methods: window.methods,
-    }));
-    assert.deepEqual(trace.calls, [{ name: 'mark_riff_onboarding_seen', arguments: {} }], JSON.stringify(trace.methods));
-    await page.waitForTimeout(80);
-    assert.equal(await page.evaluate(() => window.calls.length), 1);
-  }
+  await page.goto(base);
+  await page.waitForFunction(() => window.ready, undefined, { timeout: 2_000 });
+  await page.waitForTimeout(80);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  assert.equal(await frame.getByRole('heading', { name: 'Welcome to Riff' }).count(), 1);
+  const trace = await page.evaluate(() => ({ calls: window.calls, methods: window.methods }));
+  assert.deepEqual(trace.calls, [], JSON.stringify(trace.methods));
+  assert.equal(trace.methods.includes('tools/call'), false, JSON.stringify(trace.methods));
 });

@@ -144,8 +144,9 @@ Before calling the cutover accepted, record that:
 - `/account` and MCP resolve the same Supabase subject to the same Riff account;
 - website sign-out leaves the ChatGPT grant intact, while explicit grant
   revocation prevents future refresh;
-- first Home open shows the welcome state, marks it once, and later opens go
-  directly to normal Home;
+- after the first authorized Home open, the welcome renders in the originating
+  ChatGPT conversation while Home stays on the right; only then is it marked
+  once, and later opens go directly to normal Home;
 - a second account cannot access the first account's records; and
 - existing product rows were not reset or reassigned.
 
