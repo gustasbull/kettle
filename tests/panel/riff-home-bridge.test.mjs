@@ -99,7 +99,13 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
     'plain ideas continue in chat without spending provider credits');
 
   await frame.getByRole('button', { name: 'Open Riff menu' }).click();
+  assert.deepEqual(await frame.getByRole('dialog', { name: 'Riff menu' }).evaluate(node => {
+    const style=getComputedStyle(node);return {background:style.backgroundColor,color:style.color};
+  }), {background:'rgb(16, 16, 16)',color:'rgb(246, 247, 249)'},
+  'the real dark host context themes the menu surface and text');
   await frame.getByRole('button', { name: 'Fixture account menu' }).click();
+  assert.equal(await frame.getByRole('menu', { name: 'Account' }).evaluate(node => getComputedStyle(node).backgroundColor),
+    'rgb(16, 16, 16)');
   for (const [label, expectedCount] of [['Account settings', 4], ['Dark mode', 5], ['Support', 6], ['Give feedback', 7]]) {
     await frame.getByRole('menuitem', { name: label, exact: true }).click();
     await page.waitForFunction(count => window.messages.length === count, expectedCount);

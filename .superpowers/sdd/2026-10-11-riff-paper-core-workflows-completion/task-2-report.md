@@ -72,3 +72,40 @@ actions, focus, and dismissal behavior.
   reports the handoff status and never claims the external action completed.
 - The generated panel directory is ignored by Git; deterministic builds during the
   verification commands reproduced the committed sources within existing budgets.
+
+## Fix round 1/5 — theme, identity, handoff, focus, and menu accessibility
+
+All five Important review findings were corrected:
+
+- The shared menu now derives drawer, backdrop, control, text, border, recent-card,
+  and account-dropdown colors from host tokens, with explicit dark-theme fallbacks.
+  The real Home bridge test proves the host's dark context produces dark computed
+  drawer and dropdown surfaces.
+- The top account trigger retains Paper's visible `Riff` copy. Its accessible label
+  still identifies the validated account, including after an account replacement.
+- Standalone pipeline Home, Create, and recent actions now route unsupported/failed
+  host results into a visible persistent pipeline notice after the drawer closes;
+  recent selection has an explicit host fallback instead of silently doing nothing.
+- Account replacement closes the drawer with normal focus restoration, so focus
+  returns to the persistent trigger rather than remaining in hidden content.
+- The account menu implements ArrowUp, ArrowDown, Home, and End navigation. Text
+  sizes follow the host font token, fixed text-row heights became minimum heights,
+  and forced-colors rules preserve visible boundaries and selected navigation.
+  At a 200% host text token, controls grow without label clipping or horizontal
+  overflow. Reduced motion is not applicable to this component because it defines
+  no animation, transition, or smooth-scroll behavior; the shared Riff base rule
+  still suppresses motion inherited from its host surface.
+
+### RED/GREEN evidence
+
+- RED — `node --test tests/panel/riff-menu.test.mjs`: 0/4 passed. Failures showed
+  visible `Verified Creator` instead of `Riff`, focus not restored on replacement,
+  a light `rgb(252, 252, 254)` drawer in dark context, and no visible Home handoff
+  result (30-second timeout).
+- GREEN — `node --test tests/panel/riff-menu.test.mjs`: 4/4 passed, covering dark
+  computed styles, visible/accessibility copy separation, all menu navigation keys,
+  account-switch focus, 200% text, forced colors, and all three standalone handoffs.
+- `npm run typecheck` — PASS, including deterministic panel builds.
+- Focused menu/Home/pipeline/Home-bridge/pipeline-bridge command — PASS, 45/45.
+- `npm run test:browser` — PASS, 83/83, including the bundled workerd/MCP bridge.
+- `git diff --check` — PASS.

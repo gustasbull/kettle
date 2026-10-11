@@ -18,6 +18,7 @@ html, body { margin: 0; background: transparent; }
 .riff-pipeline[data-mode="inline"] .riff-pipeline__chrome { display:none; }
 .riff-pipeline__content { position: relative; z-index: 1; }
 .riff-pipeline__status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.riff-pipeline__status[data-menu-feedback="true"] { position:relative;width:min(100% - 32px,640px);height:auto;margin:16px auto;padding:12px 14px;overflow:visible;clip:auto;white-space:normal;border:1px solid var(--color-border-secondary,#E3E7EE);border-radius:12px;color:var(--color-text-primary,#242426);background:var(--color-background-primary,#FFF);font-size:14px;line-height:20px; }
 .riff-paper-screen { display: flex; flex-direction: column; width: 100%; min-height: 100%; overflow: hidden; background: #fff; }
 .riff-paper--analysis, .riff-paper--profile { gap: 24px; padding: 28px 44px 32px; border-radius: 0 0 24px 24px; }
 .riff-paper--analysis::before, .riff-paper--profile::before, .riff-paper--studio::before {

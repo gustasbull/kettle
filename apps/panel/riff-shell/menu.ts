@@ -115,7 +115,8 @@ export function mountRiffMenu(host: HTMLElement, options: RiffMenuOptions): {
     return button;
   };
   const accountHome = html('button', undefined, 'riff-menu__account-home'); accountHome.type = 'button'; accountHome.setAttribute('role', 'menuitem');
-  accountHome.append(lineIcon('M3 10l9-7 9 7v11h-6v-7H9v7H3z'), html('span', 'Home'), html('span', '→'));
+  const accountHomeArrow = html('span', '→'); accountHomeArrow.setAttribute('aria-hidden', 'true');
+  accountHome.append(lineIcon('M3 10l9-7 9 7v11h-6v-7H9v7H3z'), html('span', 'Home'), accountHomeArrow);
   const usage = html('div', undefined, 'riff-menu__usage'); usage.append(html('span', 'Usage'), html('span', 'Usage unavailable', 'riff-menu__usage-state'));
   const themeSwitch = html('span', undefined, 'riff-menu__theme-switch'); themeSwitch.setAttribute('aria-hidden', 'true');
   const accountSettings = menuItem('Account settings', lineIcon('M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1zm3 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6'), options.onAccountSettings);
@@ -179,6 +180,17 @@ export function mountRiffMenu(host: HTMLElement, options: RiffMenuOptions): {
       if (!accountMenu.hidden) closeAccountMenu(true); else closeDrawer();
       return;
     }
+    if (!accountMenu.hidden && accountMenu.contains(doc.activeElement)
+      && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      const items = [...accountMenu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+      if (!items.length) return;
+      event.preventDefault();
+      const current = Math.max(0, items.indexOf(doc.activeElement as HTMLElement));
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : event.key === 'ArrowDown' ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+      items[next]!.focus({ preventScroll: true });
+      return;
+    }
     if (event.key !== 'Tab') return;
     const focusable = visibleFocus(); if (!focusable.length) return;
     const first = focusable[0]!; const last = focusable.at(-1)!;
@@ -219,7 +231,7 @@ export function mountRiffMenu(host: HTMLElement, options: RiffMenuOptions): {
     }
   }
   function renderState() {
-    accountName.textContent = state.account?.name || 'Riff';
+    accountName.textContent = 'Riff';
     accountTrigger.setAttribute('aria-label', state.account ? `${state.account.name} account menu` : 'Riff account menu');
     for (const control of [home, discover]) control.removeAttribute('aria-current');
     if (state.activeRoute === 'home') home.setAttribute('aria-current', 'page');
@@ -239,7 +251,7 @@ export function mountRiffMenu(host: HTMLElement, options: RiffMenuOptions): {
       const hasAccount = Object.prototype.hasOwnProperty.call(next, 'account');
       const accountChanged = hasAccount && state.account?.id !== next.account?.id;
       if (accountChanged) {
-        closeDrawer(false);
+        closeDrawer();
         state = { account: next.account, recents: [], activeRoute: next.activeRoute ?? state.activeRoute };
       } else {
         state = {

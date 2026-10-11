@@ -197,12 +197,15 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         enterDiscovery(true,current?.project_id,true);renderCatalogDiscovery();return;
       }
       if(options.menu?.onHome)options.menu.onHome();
-      else void sendPrompt('Open Riff Home in this app so I can start or resume work.');
+      else void runMenu(()=>sendPrompt('Open Riff Home in this app so I can start or resume work.'));
     },
-    onOpenRecent(recent){options.menu?.onOpenRecent?.(recent);},
+    onOpenRecent(recent){
+      if(options.menu?.onOpenRecent)options.menu.onOpenRecent(recent);
+      else void runMenu(()=>sendPrompt(`Open my saved Riff work, “${recent.title}”.`));
+    },
     onCreate(){
       if(options.menu?.onCreate)options.menu.onCreate();
-      else void sendPrompt('Start a fresh Riff video from Home without changing the saved work currently open.');
+      else void runMenu(()=>sendPrompt('Start a fresh Riff video from Home without changing the saved work currently open.'));
     },
     onClose(){ /* Closing the local drawer preserves the open workflow. */ },
     onAccountSettings:options.menu?.onAccountSettings??(()=>sendPrompt('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.')),
@@ -220,11 +223,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const control = el('button', label, className); control.type = 'button'; control.dataset.focus = focus;
     control.addEventListener('click', handler); return control;
   };
-  const run = async (action: () => Promise<RiffActionResult>) => {
+  const run = async (action: () => Promise<RiffActionResult>, menuFeedback = false) => {
+    if (menuFeedback) status.dataset.menuFeedback = 'true'; else delete status.dataset.menuFeedback;
     setStatus('Working…');
     try { setStatus((await action()).message); }
     catch { setStatus('Continue in the ChatGPT composer.'); }
   };
+  const runMenu = (action: () => Promise<RiffActionResult>) => run(action, true);
   const actions = (...controls: HTMLButtonElement[]) => {
     const group = el('div', undefined, 'riff-actions'); group.append(...controls); return group;
   };
