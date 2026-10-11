@@ -1,4 +1,5 @@
 import type { CreatorJobView, PipelineReference } from '../../packages/contracts/creator-pipeline.ts';
+import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,12 +43,7 @@ const creatorUrl = (value: unknown): value is string => {
 };
 
 const imageUrl = (value: unknown): value is string => {
-  if (!text(value, 4_096)) return false;
-  try {
-    const url = new URL(value); const host = url.hostname.toLowerCase();
-    return url.protocol === 'https:' && !url.username && !url.password && !url.port && !url.hash
-      && (host === 'tiktokcdn.com' || host.endsWith('.tiktokcdn.com'));
-  } catch { return false; }
+  return text(value, 4_096) && isAllowedTikTokImageUrl(value);
 };
 
 const optional = (record: JsonObject, key: string, check: (candidate: unknown) => boolean) =>
@@ -138,12 +134,13 @@ function creatorDna(value: unknown) {
 }
 
 function reference(value: unknown): value is PipelineReference {
-  const item = shape(value, ['id','platform','native_id','url','retrieved_at','published_at','caption','views','origin','permission_basis','limitations'], ['thumbnail_url','duration_seconds','likes','saves','view_multiplier','view_multiplier_basis']); if (!item) return false;
+  const item = shape(value, ['id','platform','native_id','url','retrieved_at','published_at','caption','views','origin','permission_basis','limitations'], ['source_observed_at','thumbnail_url','duration_seconds','likes','saves','view_multiplier','view_multiplier_basis']); if (!item) return false;
   const multiplierBasis = item.view_multiplier_basis === undefined ? undefined : shape(item.view_multiplier_basis, ['method','baseline_views','sample_size']);
   const hasMultiplier=item.view_multiplier!==undefined,hasBasis=item.view_multiplier_basis!==undefined;
   return hasMultiplier===hasBasis && (!hasMultiplier || item.views!==null)
     && id(item.id) && item.platform === 'tiktok' && text(item.native_id, 200) && creatorUrl(item.url)
-    && timestamp(item.retrieved_at) && nullable(item.published_at, timestamp)
+    && timestamp(item.retrieved_at) && optional(item, 'source_observed_at', candidate => nullable(candidate, timestamp))
+    && nullable(item.published_at, timestamp)
     && nullable(item.caption, candidate => text(candidate, 10_000, true)) && nullable(item.views, integer)
     && optional(item, 'thumbnail_url', imageUrl)
     && optional(item, 'duration_seconds', candidate => candidate === null || positiveNumber(candidate))

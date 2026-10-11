@@ -7,6 +7,11 @@ import { creatorPipelineHtml, registerCreatorPipelineResource, CREATOR_PIPELINE_
   CREATOR_PIPELINE_MIME, CREATOR_PIPELINE_META, CREATOR_PIPELINE_DOCUMENT } from '../apps/worker/creator-pipeline-resource.ts';
 
 test('Creator pipeline resource is a static bundled MCP App with narrowly scoped media metadata', async t => {
+  const policy = await import('../packages/contracts/tiktok-image-policy.ts').catch(() => undefined);
+  assert.ok(policy, 'shared lightweight TikTok image policy must exist');
+  const resourceDomains = ['https://tiktokcdn.com', 'https://*.tiktokcdn.com',
+    'https://tiktokcdn-us.com', 'https://*.tiktokcdn-us.com'];
+  assert.deepEqual(policy.TIKTOK_IMAGE_RESOURCE_DOMAINS, resourceDomains);
   const server = new McpServer({name:'resource-fixture',version:'1'});
   registerCreatorPipelineResource(server);
   const client = new Client({name:'fixture-client',version:'1'});
@@ -27,9 +32,10 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
   assert.deepEqual(content._meta,CREATOR_PIPELINE_META);
   assert.deepEqual(CREATOR_PIPELINE_META.ui.csp,{
     connectDomains:[],
-    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com'],
+    resourceDomains,
     frameDomains:[],baseUriDomains:[],
   });
+  assert.deepEqual(CREATOR_PIPELINE_META.ui.csp.resourceDomains, policy.TIKTOK_IMAGE_RESOURCE_DOMAINS);
   assert.deepEqual(CREATOR_PIPELINE_META['openai/ui'],{
     availableDisplayModes:['inline','fullscreen'],preferredDisplayMode:'fullscreen',
   });

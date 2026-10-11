@@ -18,6 +18,7 @@ Recorded 6 October 2026. This register distinguishes explicit user direction, pr
 | C10 | Start with Cloudflare Workers + Workflows for hosting and background jobs | Explicit user selection on 6 October 2026 |
 | C11 | Use Render as the fallback if more runtime flexibility is needed | Explicit user direction on 6 October 2026; migration depends on a demonstrated requirement |
 | C12 | When a person links their TikTok or Instagram profile, analyze the profile and initial audience context, identify its best-performing videos as references, and suggest improvements tailored to that context | Explicit user direction on 9 October 2026; see the requirement below |
+| C13 | Use the trusted runtime ScrapeCreators cache policy `1d` for profile reads and `7d` for video-detail reads; do not send a cache policy to the profile-feed endpoint | User explicitly approved the fast-video implementation plan on 11 October 2026. Cache policy is not tool, environment, header, URL, or caller input; cache hits retain provider observation time separately from local retrieval time and are never described as live fetches. |
 
 ## Profile-based reference generation — 9 October 2026
 

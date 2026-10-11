@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { creatorPipelineScript, creatorPipelineFingerprint } from '../panel/generated/creator-pipeline-bundle.ts';
+import { TIKTOK_IMAGE_RESOURCE_DOMAINS } from '../../packages/contracts/tiktok-image-policy.ts';
 
 export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v3.html';
 export const CREATOR_PIPELINE_V2_URI = 'ui://kettle/creator-pipeline-v2.html';
@@ -13,7 +14,7 @@ export const CREATOR_PIPELINE_META = {
       // The Paper discovery and analysis frames can render provider-observed
       // TikTok cover images. No scripts, API calls, frames, or arbitrary image
       // origins are permitted by this resource.
-      resourceDomains: ['https://tiktokcdn.com', 'https://*.tiktokcdn.com'],
+      resourceDomains: [...TIKTOK_IMAGE_RESOURCE_DOMAINS],
       frameDomains: [], baseUriDomains: [],
     },
     permissions: {},

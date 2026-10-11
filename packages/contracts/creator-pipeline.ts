@@ -11,7 +11,7 @@ const ReferenceMultiplierBasis = z.strictObject({
 });
 export const PipelineReference = z.strictObject({
   id: Id, platform: z.literal('tiktok'), native_id: text(200), url: CreatorUrl,
-  retrieved_at: Timestamp, published_at: Timestamp.nullable(),
+  retrieved_at: Timestamp, source_observed_at: Timestamp.nullable().optional(), published_at: Timestamp.nullable(),
   caption: z.string().max(10000).nullable(), views: z.number().int().nonnegative().nullable(),
   thumbnail_url: TikTokImageUrl.optional(), duration_seconds: z.number().positive().finite().nullable().optional(),
   likes: z.number().int().nonnegative().nullable().optional(),

@@ -36,6 +36,26 @@ test('Home rejects malformed nested media and source data before it reaches the 
   assert.equal(isCreatorJobView(scripts), false);
 });
 
+test('Home validates the shared US CDN and reference freshness policy', () => {
+  const make = () => {
+    const job = structuredClone(pipelineFixture('ideas'));
+    if (job.result?.kind !== 'recommendations') throw new Error('Expected recommendations fixture');
+    return { job, reference: job.result.batch.references[0]! };
+  };
+  const dated = make();
+  dated.reference.thumbnail_url = 'https://p16-sign.tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture';
+  Object.assign(dated.reference, { source_observed_at: '2026-10-08T14:30:00.000Z' });
+  assert.equal(isCreatorJobView(dated.job), true);
+  const unknown = make(); Object.assign(unknown.reference, { source_observed_at: null });
+  assert.equal(isCreatorJobView(unknown.job), true);
+  assert.equal(isCreatorJobView(make().job), true, 'legacy omission remains accepted');
+  const malformed = make(); Object.assign(malformed.reference, { source_observed_at: 'yesterday' });
+  assert.equal(isCreatorJobView(malformed.job), false);
+  const lookalike = make();
+  lookalike.reference.thumbnail_url = 'https://tiktokcdn-us.com.evil.test/cover.jpeg';
+  assert.equal(isCreatorJobView(lookalike.job), false);
+});
+
 test('Home accepts the public showcase DNA dimension', () => {
   const { job, dna } = scanJob();
   dna.claims[0]!.dimension = 'showcase';

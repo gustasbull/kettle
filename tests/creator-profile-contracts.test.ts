@@ -1,7 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CreatorAnalysis, ProfileScanRequest, ProfileScanResult, CorrectCreatorDnaInput } from '../packages/contracts/creator-profile.ts';
+import { CreatorAnalysis, ProfileScanRequest, ProfileScanResult, CorrectCreatorDnaInput, TikTokImageUrl } from '../packages/contracts/creator-profile.ts';
 import { creatorAnalysisFixture, partialScanFixture, unavailableScanFixture } from '../packages/contracts/fixtures/creator-profile.ts';
+
+test('TikTok image policy admits only exact com and us CDN families with signed queries', () => {
+  for (const value of [
+    'https://tiktokcdn.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://p16-sign-va.tiktokcdn.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://p19-sign.tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture',
+  ]) assert.equal(TikTokImageUrl.safeParse(value).success, true, value);
+  for (const value of [
+    'http://p16-sign.tiktokcdn-us.com/cover.jpeg',
+    'https://user:secret@p16-sign.tiktokcdn-us.com/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com:443/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com:444/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com/cover.jpeg#fragment',
+    'https://eviltiktokcdn.com/cover.jpeg',
+    'https://tiktokcdn.com.evil.test/cover.jpeg',
+    'https://eviltiktokcdn-us.com/cover.jpeg',
+    'https://tiktokcdn-us.com.evil.test/cover.jpeg',
+  ]) assert.equal(TikTokImageUrl.safeParse(value).success, false, value);
+});
 
 const reject = (edit: (v: ReturnType<typeof creatorAnalysisFixture>) => void) => {
   const v = creatorAnalysisFixture(); edit(v); assert.equal(CreatorAnalysis.safeParse(v).success, false);

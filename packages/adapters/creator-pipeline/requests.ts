@@ -1,27 +1,41 @@
 /** @internal Pure provider request construction. Never dispatch outside the lead durable guard. */
+import { z } from 'zod';
 import { parseTikTokUrl } from './tiktok-url.ts';
 const scrape = 'https://api.scrapecreators.com';
+export const ScrapeCreatorsCacheMaxAge = z.enum(['1d', '3d', '7d', '14d', '30d']);
+export type ScrapeCreatorsCacheMaxAge = z.infer<typeof ScrapeCreatorsCacheMaxAge>;
+export const ScrapeCreatorsCachePolicy = z.strictObject({
+  profile: ScrapeCreatorsCacheMaxAge,
+  detail: ScrapeCreatorsCacheMaxAge,
+});
+export type ScrapeCreatorsCachePolicy = Readonly<z.infer<typeof ScrapeCreatorsCachePolicy>>;
 function get(path: string, params: Record<string, string>) {
   const url = new URL(path, scrape);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return url;
 }
-export function profileRequest(profileUrl: string) {
-  const { handle } = parseTikTokUrl(profileUrl);
-  return get('/v1/tiktok/profile', { handle });
+export function profileRequest(profileUrl: string, cacheMaxAge: ScrapeCreatorsCacheMaxAge) {
+  const parsed = parseTikTokUrl(profileUrl);
+  if (parsed.videoId) throw new Error('Expected a TikTok profile URL');
+  return get('/v1/tiktok/profile', {
+    handle: parsed.handle, cache_max_age: ScrapeCreatorsCacheMaxAge.parse(cacheMaxAge),
+  });
 }
-export function feedRequest(profileUrl: string, region: string, cursor: string | null) {
-  if (!/^[A-Z]{2}$/.test(region) || (cursor !== null && !/^\d{1,30}$/.test(cursor))) throw new Error('Invalid feed parameters');
-  const url = get('/v3/tiktok/profile/videos', { handle: parseTikTokUrl(profileUrl).handle,
+export function feedRequest(profileUrl: string, userId: string, region: string, cursor: string | null) {
+  const parsed = parseTikTokUrl(profileUrl);
+  if (parsed.videoId || !/^\d{1,30}$/.test(userId) || !/^[A-Z]{2}$/.test(region) ||
+    (cursor !== null && !/^\d{1,30}$/.test(cursor))) throw new Error('Invalid feed parameters');
+  const url = get('/v3/tiktok/profile/videos', { handle: parsed.handle, user_id: userId,
     region, sort_by: 'latest', include_pinned: 'false', trim: 'true' });
   if (cursor !== null) url.searchParams.set('max_cursor', cursor);
   return url;
 }
-export function detailRequest(videoUrl: string, region: string) {
+export function detailRequest(videoUrl: string, region: string, cacheMaxAge: ScrapeCreatorsCacheMaxAge) {
   const parsed = parseTikTokUrl(videoUrl);
   if (!parsed.videoId || !/^[A-Z]{2}$/.test(region)) throw new Error('Invalid detail parameters');
   return get('/v2/tiktok/video', { url: parsed.canonicalUrl, region, trim: 'true',
-    get_transcript: 'false', download_media: 'false' });
+    get_transcript: 'false', download_media: 'false',
+    cache_max_age: ScrapeCreatorsCacheMaxAge.parse(cacheMaxAge) });
 }
 export function researchBody(context: unknown) {
   const source = JSON.stringify(context);

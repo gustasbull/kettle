@@ -112,6 +112,25 @@ test('recommendation reference pairing, identity, lineage and fixture disclosure
   }
 });
 
+test('standalone display validator matches shared image and freshness policy',()=>{
+  const make=()=>{
+    const value=structuredClone(envelope('recommendations'));
+    if(value.data.job.result?.kind!=='recommendations')throw new Error('Expected recommendations fixture');
+    return {value,reference:value.data.job.result.batch.references[0]!};
+  };
+  const accepted=make();
+  accepted.reference.thumbnail_url='https://p19-sign.tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture';
+  accepted.reference.source_observed_at='2026-10-08T14:30:00.000Z';
+  assert.ok(parseCreatorJobOutput(accepted.value));
+  const unknown=make();unknown.reference.source_observed_at=null;
+  assert.ok(parseCreatorJobOutput(unknown.value));
+  assert.ok(parseCreatorJobOutput(make().value),'legacy omission remains accepted');
+  const malformed=make();malformed.reference.source_observed_at='not-a-time';
+  assert.equal(parseCreatorJobOutput(malformed.value),undefined);
+  const lookalike=make();lookalike.reference.thumbnail_url='https://eviltiktokcdn-us.com/cover.jpeg';
+  assert.equal(parseCreatorJobOutput(lookalike.value),undefined);
+});
+
 test('contract-valid UUID, limitation and canonical-source edges stay accepted locally',()=>{
   const nilId=invalid('scan',job=>{job.id='00000000-0000-0000-0000-000000000000';});
   assert.equal(CreatorJobOutput.safeParse(nilId).success,true);

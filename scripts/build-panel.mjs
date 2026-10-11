@@ -65,7 +65,9 @@ export async function buildPanel(root = repository, kind = 'project') {
   const componentInput = Object.keys(result.metafile.inputs).some(path => resolve(root, path) === component);
   if (!componentInput) throw new Error(`Bridge must import the real ${name} component.`);
   if (kind === 'pipeline') {
-    const forbidden = Object.keys(result.metafile.inputs).find(path => /(?:^|\/)(?:packages\/(?:contracts|application)|node_modules\/zod)\//.test(path));
+    const browserSafePolicy = 'packages/contracts/tiktok-image-policy.ts';
+    const forbidden = Object.keys(result.metafile.inputs).find(path => path !== browserSafePolicy
+      && /(?:^|\/)(?:packages\/(?:contracts|application)|node_modules\/zod)\//.test(path));
     if (forbidden) throw new Error(`Creator pipeline browser bundle crosses server runtime boundary: ${forbidden}`);
   }
   const bytes = result.outputFiles[0].contents;

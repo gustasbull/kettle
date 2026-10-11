@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OpenAIUiResourceMetadata } from '@openai/mcp-extensions/server';
 import { riffHomeScript, riffHomeFingerprint } from '../panel/generated/riff-home-bundle.ts';
+import { TIKTOK_IMAGE_RESOURCE_DOMAINS } from '../../packages/contracts/tiktok-image-policy.ts';
 
 export const RIFF_HOME_URI = 'ui://riff/home-v3.html';
 export const RIFF_HOME_V2_URI = 'ui://riff/home-v2.html';
@@ -18,7 +19,7 @@ export const RIFF_HOME_META = {
     // as the standalone creator result resource.
     csp: {
       connectDomains: [],
-      resourceDomains: ['https://tiktokcdn.com', 'https://*.tiktokcdn.com'],
+      resourceDomains: [...TIKTOK_IMAGE_RESOURCE_DOMAINS],
       frameDomains: [], baseUriDomains: [],
     },
     permissions: {},

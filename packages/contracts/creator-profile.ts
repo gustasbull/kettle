@@ -1,6 +1,7 @@
 /** D0 internal contracts. No public tools, authorization, persistence or spending authority. */
 import { z } from 'zod';
 import { Id, Timestamp, HttpUrl } from './index.ts';
+import { isAllowedTikTokImageUrl } from './tiktok-image-policy.ts';
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -9,14 +10,8 @@ const identity = z.strictObject({ platform: CreatorPlatform, native_id: text(200
 export const CreatorIdentity = identity;
 /** Display-only TikTok image URL. Provider media is untrusted, so only TikTok's
  * HTTPS image CDN is admitted; playback/download URLs are never represented. */
-export const TikTokImageUrl = z.url().max(4096).refine(value => {
-  try {
-    const u = new URL(value);
-    const host = u.hostname.toLowerCase();
-    return u.protocol === 'https:' && !u.username && !u.password && !u.port && !u.hash &&
-      (host === 'tiktokcdn.com' || host.endsWith('.tiktokcdn.com'));
-  } catch { return false; }
-}, 'Use a credential-free HTTPS tiktokcdn.com image URL without port or fragment');
+export const TikTokImageUrl = z.url().max(4096).refine(isAllowedTikTokImageUrl,
+  'Use a credential-free HTTPS TikTok image CDN URL without port or fragment');
 export const CreatorUrl = HttpUrl.refine(value => {
   const u = new URL(value);
   return u.protocol === 'https:' && !u.port && !u.search && !u.hash &&

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RecommendationBatch, CreatorScriptSet, CreatorJobView } from '../packages/contracts/creator-pipeline.ts';
+import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReference } from '../packages/contracts/creator-pipeline.ts';
 import { recommendationBatchFixture, creatorScriptsFixture, creatorJobFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 test('pipeline contracts retain reference lineage and fictional origin without padding',()=>{
  const batch=recommendationBatchFixture(); assert.equal(batch.ideas.length,1);
@@ -41,6 +41,16 @@ test('Paper discovery and Studio facts are optional for saved legacy results but
  assert.equal(CreatorScriptSet.parse({...legacyScripts,variants:[variant,legacyScripts.variants[1]!]}).variants[0]!.timed_segments?.length,3);
  assert.ok(!CreatorScriptSet.safeParse({...legacyScripts,variants:[{...variant,hashtags:['studytips']},legacyScripts.variants[1]!]}).success);
  assert.ok(!CreatorScriptSet.safeParse({...legacyScripts,variants:[{...variant,timed_segments:[{...variant.timed_segments[0]!,end_seconds:0}]},legacyScripts.variants[1]!]}).success);
+});
+test('PipelineReference accepts legacy absence and validates new nullable source observation time', () => {
+ const reference=recommendationBatchFixture().references[0]!;
+ assert.ok(PipelineReference.safeParse(reference).success,'legacy saved reference remains readable');
+ for(const source_observed_at of ['2026-10-08T14:30:00.000Z',null]){
+  const parsed=PipelineReference.parse({...reference,source_observed_at});
+  assert.equal(parsed.source_observed_at,source_observed_at);
+ }
+ assert.ok(!PipelineReference.safeParse({...reference,source_observed_at:'not-a-time'}).success);
+ assert.ok(!PipelineReference.safeParse(({source_observed_at:'2026-10-08T14:30:00.000Z',...reference,retrieved_at:undefined})).success);
 });
 test('Studio context is optional only as a complete legacy-compatible pair with exact selected lineage', () => {
  const legacy=creatorScriptsFixture(),batch=recommendationBatchFixture();

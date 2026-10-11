@@ -59,6 +59,74 @@ test('offline full adapter chain uses guarded calls and validates shared envelop
   const records = JSON.stringify([...guard.successes.values(), ...recommendations.successes.values(), ...generation.successes.values()]);
   for (const key of Object.values(f.options.credentials)) assert.ok(!records.includes(key));
 });
+test('scan derives feed user_id from the matched sanitized profile and applies trusted cache policy', async () => {
+  const f = providerHttpFixture();
+  const guard = fakeGuard();
+  await createCreatorPipelineProvider(f.options).scan(f.input.request, guard.context);
+  const profile = new URL(f.http.find(({ url }) => new URL(url).pathname === '/v1/tiktok/profile')!.url);
+  const feed = new URL(f.http.find(({ url }) => new URL(url).pathname === '/v3/tiktok/profile/videos')!.url);
+  assert.equal(profile.searchParams.get('cache_max_age'), '1d');
+  assert.deepEqual([...profile.searchParams.keys()].sort(), ['cache_max_age', 'handle']);
+  assert.equal(feed.searchParams.get('handle'), 'fictional_kettle_creator');
+  assert.equal(feed.searchParams.get('user_id'), '9000000000000000001');
+  assert.equal(feed.searchParams.has('cache_max_age'), false);
+  assert.deepEqual(guard.calls.map(({ key }) => key), ['profile', 'feed:0']);
+  assert.equal('cache_max_age' in f.input.request, false, 'cache policy is not public scan input');
+  assert.equal('user_id' in f.input.request, false, 'native provider identity is not public scan input');
+});
+test('malformed native profile ID prevents feed reservation and HTTP', async () => {
+  const f = providerHttpFixture(); const fallback = f.options.fetch;
+  f.options.fetch = async (url, init) => {
+    const response = await fallback(url, init);
+    if (new URL(url).pathname !== '/v1/tiktok/profile') return response;
+    const body = await response.json() as any; body.user.id = '1'.repeat(31); return Response.json(body);
+  };
+  const guard = fakeGuard();
+  await assert.rejects(createCreatorPipelineProvider(f.options).scan(f.input.request, guard.context), /malformed/);
+  assert.deepEqual(guard.calls.map(({ key }) => key), ['profile']);
+  assert.equal(f.http.filter(({ url }) => new URL(url).pathname === '/v3/tiktok/profile/videos').length, 0);
+});
+test('recommendation detail uses seven-day cache and keeps transcript and media disabled', async () => {
+  const { f, provider, dna } = await setup(); const guard = fakeGuard();
+  await provider.recommend(dna, guard.context);
+  const detail = new URL(f.http.find(({ url }) => new URL(url).pathname === '/v2/tiktok/video')!.url);
+  assert.equal(detail.searchParams.get('cache_max_age'), '7d');
+  assert.equal(detail.searchParams.get('get_transcript'), 'false');
+  assert.equal(detail.searchParams.get('download_media'), 'false');
+  assert.deepEqual(guard.calls.map(({ key }) => key), ['research', 'video:9000000000000000011']);
+  assert.equal(f.http.filter(({ url }) => new URL(url).pathname === '/v2/tiktok/video').length, 1);
+});
+test('provider rejects invalid cache configuration before guard reservation or HTTP', () => {
+  for (const cacheMaxAge of [undefined, null, { profile: '2d', detail: '7d' },
+    { profile: '1d', detail: '604800' }, { profile: '1d', detail: '7d', caller: 'override' }]) {
+    const f = providerHttpFixture(); const guard = fakeGuard();
+    const options = { ...f.options, cacheMaxAge } as any;
+    assert.throws(() => createCreatorPipelineProvider(options), /cache/i);
+    assert.deepEqual(guard.calls, []);
+    assert.deepEqual(f.http, []);
+  }
+});
+test('live recommendation exposes typed cache observation separately from retrieval', async () => {
+  const { provider, dna } = await setup();
+  const batch = await provider.recommend(dna, fakeGuard().context);
+  const reference = batch.references[0]!;
+  assert.equal(reference.source_observed_at, '2026-10-08T14:30:00.000Z');
+  assert.notEqual(reference.retrieved_at, reference.source_observed_at);
+
+  const f = providerHttpFixture(); const fallback = f.options.fetch;
+  f.options.fetch = async (url, init) => {
+    const response = await fallback(url, init);
+    if (new URL(url).pathname !== '/v2/tiktok/video') return response;
+    const body = await response.json() as any; body.cached = false; delete body.cached_at; return Response.json(body);
+  };
+  const scanProvider = createCreatorPipelineProvider(f.options); const scanGuard = fakeGuard();
+  const analysis = await scanProvider.scan(f.input.request, scanGuard.context);
+  const uncachedDna = projectCreatorDna({ dna_id: analysis.dna.id,
+    project_id: '00000000-0000-4000-8000-000000000100', analysis });
+  const uncached = (await scanProvider.recommend(uncachedDna, fakeGuard().context)).references[0]!;
+  assert.equal(Object.hasOwn(uncached, 'source_observed_at'), true);
+  assert.equal(uncached.source_observed_at, null);
+});
 test('provider observation records endpoint enums, sizes, HTTP and sanitization timing without raw content', async () => {
   const f = providerHttpFixture();
   const events: Array<Record<string, unknown>> = [];
@@ -87,7 +155,9 @@ test('Lightreel-selected references remain grounded candidates when English lexi
     const body=await response.json() as any;
     body.aweme_detail.desc='Caf\u00e9 ma\u00f1ana \u65b0\u3057\u3044';
     body.aweme_detail.statistics={...body.aweme_detail.statistics,play_count:480,digg_count:21,collect_count:13};
-    body.aweme_detail.video={...body.aweme_detail.video,cover:{url_list:['https://p16-sign-va.tiktokcdn.com/cover.jpeg']}};
+    body.aweme_detail.video={...body.aweme_detail.video,
+      dynamic_cover:{url_list:['https://p16-sign-va.tiktokcdn.com/cover.jpeg']},
+      cover:{url_list:['https://p16-sign-va.tiktokcdn.com/static-cover.jpeg']}};
     return Response.json(body);
   }});
   const batch=await provider.recommend(dna,fakeGuard().context);

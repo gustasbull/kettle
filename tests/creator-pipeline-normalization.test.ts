@@ -7,6 +7,9 @@ import { readLightreelSubmission, readLightreelHistory } from '../packages/adapt
 import { CreatorAnalysis, ProfileScanResult, type ObservationProvenance } from '../packages/contracts/creator-profile.ts';
 import { buildGroundedCreatorDna } from '../packages/adapters/creator-scan/dna.ts';
 import { fictionalVideo } from '../evals/creator-loop/fixtures.ts';
+import { documentedDynamicCover, documentedStaticCover, downloadSentinel, playbackSentinel,
+  scrapeCreatorsOfficialShapeFixture } from '../evals/creator-loop/scrapecreators-official-shape-fixture.ts';
+import { sanitizedScrape, sourceObservedAt } from '../packages/adapters/creator-pipeline/sanitize.ts';
 const permission: ObservationProvenance['permission'] = { status: 'approved',
   basis: 'Synthetic test of trusted server permission; not real authorization.',
   permitted_uses: ['store', 'display', 'model_processing'], retention: 'Test process only' };
@@ -101,6 +104,67 @@ test('v2 enrichment binds native video and handle, never treats a caption as med
   assert.throws(() => readTikTokDetail(body, url.replace(video.aweme_id, '1'), crypto.randomUUID(), provenance));
 });
 
+test('sanitizer prefers documented dynamic cover and never retains playback or download fields', () => {
+  const official = scrapeCreatorsOfficialShapeFixture();
+  const body = sanitizedScrape(JSON.stringify(official.detail), 'video');
+  const reduced = JSON.parse(body);
+  assert.deepEqual(reduced.aweme_detail.video.dynamic_cover.url_list, [documentedDynamicCover]);
+  assert.deepEqual(reduced.aweme_detail.video.cover.url_list, [documentedStaticCover]);
+  assert.ok(!body.includes(playbackSentinel));
+  assert.ok(!body.includes(downloadSentinel));
+  assert.ok(!body.includes('play_addr'));
+  assert.ok(!body.includes('download_addr'));
+  const provenance = normalizeLiveTikTokScan(input()).profile_observations[0]!.provenance;
+  const url = `https://www.tiktok.com/@${official.handle}/video/${official.video.aweme_id}`;
+  assert.equal(readTikTokDetail(body, url, crypto.randomUUID(), provenance).observation.thumbnail_url,
+    documentedDynamicCover);
+});
+
+test('invalid dynamic cover falls back to the first valid static cover', () => {
+  const official = scrapeCreatorsOfficialShapeFixture();
+  official.detail.aweme_detail.video.dynamic_cover.url_list = [
+    'http://p16-sign.tiktokcdn-us.com/unsafe.jpeg',
+    'https://tiktokcdn-us.com.evil.test/unsafe.jpeg',
+  ];
+  official.detail.aweme_detail.video.cover.url_list = [
+    'https://evil.test/unsafe.jpeg', documentedStaticCover,
+  ];
+  const body = sanitizedScrape(JSON.stringify(official.detail), 'video');
+  const provenance = normalizeLiveTikTokScan(input()).profile_observations[0]!.provenance;
+  const url = `https://www.tiktok.com/@${official.handle}/video/${official.video.aweme_id}`;
+  assert.equal(readTikTokDetail(body, url, crypto.randomUUID(), provenance).observation.thumbnail_url,
+    documentedStaticCover);
+  official.detail.aweme_detail.video.cover.url_list = ['https://evil.test/unsafe.jpeg'];
+  const withoutCover = readTikTokDetail(sanitizedScrape(JSON.stringify(official.detail), 'video'),
+    url, crypto.randomUUID(), provenance).observation;
+  assert.equal(withoutCover.thumbnail_url, undefined);
+});
+
+test('feed normalization and detail enrichment share dynamic-cover selection', () => {
+  const official = scrapeCreatorsOfficialShapeFixture();
+  const scanInput = input();
+  scanInput.feedAttempts[0]!.body = sanitizedScrape(JSON.stringify(official.feed), 'feed');
+  const scan = normalizeLiveTikTokScan(scanInput);
+  const detailBody = sanitizedScrape(JSON.stringify(official.detail), 'video');
+  const url = `https://www.tiktok.com/@${official.handle}/video/${official.video.aweme_id}`;
+  const detail = readTikTokDetail(detailBody, url, crypto.randomUUID(),
+    scan.profile_observations[0]!.provenance);
+  assert.equal(scan.video_observations[0]!.thumbnail_url, documentedDynamicCover);
+  assert.equal(detail.observation.thumbnail_url, documentedDynamicCover);
+  assert.match(detail.observation.thumbnail_url!, /x-signature=redacted%2Bfixture$/);
+});
+
+test('cached_at survives sanitization but becomes observation time only for a declared cache hit', () => {
+  const official = scrapeCreatorsOfficialShapeFixture();
+  const sanitized = sanitizedScrape(JSON.stringify(official.detail), 'video');
+  assert.equal(JSON.parse(sanitized).cached, true);
+  assert.equal(JSON.parse(sanitized).cached_at, '2026-10-08T10:30:00-04:00');
+  assert.equal(sourceObservedAt(sanitized), '2026-10-08T14:30:00.000Z');
+  assert.equal(sourceObservedAt(JSON.stringify({ ...official.detail, cached: false })), null);
+  assert.equal(sourceObservedAt(JSON.stringify({ ...official.detail, cached_at: 'not-a-time' })), null);
+  assert.equal(sourceObservedAt(JSON.stringify({ ...official.detail, cached_at: undefined })), null);
+});
+
 test('OpenAI parsing rejects refusals, incomplete output and multiple answers without retrying', async () => {
   const { readOpenAiResponse } = await import('../packages/adapters/creator-pipeline/openai-json.ts');
   const complete = { id: 'resp-fixture', status: 'completed', output: [{ type: 'message', role: 'assistant',
@@ -114,7 +178,6 @@ test('OpenAI parsing rejects refusals, incomplete output and multiple answers wi
 });
 
 test('durable receipt sanitizer discards media/account fields and nested smuggling in scalar fields', async () => {
-  const { sanitizedScrape } = await import('../packages/adapters/creator-pipeline/sanitize.ts');
   const body = sanitizedScrape(JSON.stringify({ success: true, credits_remaining: 100,
     user: { id: '1', uniqueId: 'fictional', signature: { hidden: 'secret-media-url' }, avatarLarger: 'secret-media-url' },
     stats: { followerCount: null }, arbitrary: 'secret-media-url' }), 'profile');

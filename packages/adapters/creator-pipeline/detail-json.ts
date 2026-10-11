@@ -9,6 +9,7 @@ const videoFacts = z.object({
   statistics: z.object({ play_count: count, digg_count: count, comment_count: count,
     share_count: count, collect_count: optionalCount }).nullish(),
   video: z.object({ duration: count,
+    dynamic_cover: z.object({ url_list: z.array(z.unknown()).max(20) }).optional(),
     cover: z.object({ url_list: z.array(z.unknown()).max(20) }).optional(),
   }).nullish(),
 });
@@ -23,9 +24,11 @@ export function readTikTokVideoFacts(raw: unknown) {
   const parsed = videoFacts.safeParse(raw);
   if (!parsed.success) return null;
   const item = parsed.data;
-  const thumbnail_url = item.video?.cover?.url_list
-    .flatMap(value => typeof value === 'string' ? [value] : [])
+  const firstImage = (values: unknown[] | undefined) => values
+    ?.flatMap(value => typeof value === 'string' ? [value] : [])
     .find(value => TikTokImageUrl.safeParse(value).success);
+  const thumbnail_url = firstImage(item.video?.dynamic_cover?.url_list)
+    ?? firstImage(item.video?.cover?.url_list);
   return {
     native_id: item.aweme_id,
     duration_seconds: item.video?.duration ? item.video.duration / 1000 : null,

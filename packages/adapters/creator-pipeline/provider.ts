@@ -12,7 +12,8 @@ import { parseTikTokUrl } from './tiktok-url.ts';
 import { readTikTokDetail } from './detail-json.ts';
 import { readLightreelSubmission, readLightreelHistory } from './lightreel-json.ts';
 import { readOpenAiResponse } from './openai-json.ts';
-import { profileRequest, feedRequest, detailRequest, researchBody, historyRequest, scriptBody } from './requests.ts';
+import { profileRequest, feedRequest, detailRequest, researchBody, historyRequest, scriptBody,
+  ScrapeCreatorsCachePolicy, type ScrapeCreatorsCachePolicy as ScrapeCreatorsCachePolicyType } from './requests.ts';
 import { readLightreelSeedReview, seedReviewBody } from './seed-review.ts';
 import { receiptIds } from './ids.ts';
 import { sanitizedScrape, sourceObservedAt } from './sanitize.ts';
@@ -38,6 +39,7 @@ export type CreatorPipelineAdapterOptions = {
   /** Trusted canonical supplied video URL; never inferred from a profile or provider response. */
   seedUrl?: string;
   model: string; maxOutputTokens: number; region: string;
+  cacheMaxAge: ScrapeCreatorsCachePolicyType;
   permission: z.infer<typeof ObservationProvenance>['permission'];
   /** Trusted server checks underlying source/model rights; the display view alone cannot establish them. */
   canProcessDna(dna: CreatorDnaView): boolean;
@@ -68,6 +70,9 @@ const modelOutput = z.strictObject({ variants: z.array(generatedVariant).min(2).
 const modelSchema = z.toJSONSchema(modelOutput) as Record<string, unknown>;
 
 export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOptions): CreatorPipelineProvider {
+  const parsedCachePolicy = ScrapeCreatorsCachePolicy.safeParse(options.cacheMaxAge);
+  if (!parsedCachePolicy.success) throw new Error('Invalid ScrapeCreators cache policy');
+  const cacheMaxAge = parsedCachePolicy.data;
   const permission = ObservationProvenance.shape.permission.parse(options.permission);
   const credentials = { ...options.credentials };
   if (typeof options.canProcessDna !== 'function') throw new CreatorProviderError('permission');
@@ -148,7 +153,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             retrieved_at: seedReceipt.retrieved_at, source_observed_at: null, source_url: seedUrl,
             permission, modalities: ['metadata'] } });
       }
-      const profile = await call(context, 'profile', 'scrapecreators', 'profile', profileRequest(request.supplied_url), undefined,
+      const profile = await call(context, 'profile', 'scrapecreators', 'profile',
+        profileRequest(request.supplied_url, cacheMaxAge.profile), undefined,
         body => {
           const clean = sanitizedScrape(body, 'profile');
           if (characterizeProfile(clean).kind === 'malformed') throw new Error('Invalid profile');
@@ -161,7 +167,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const pages: (ScanReceipt & { requestedCursor: string | null })[] = [];
       let cursor: string | null = null;
       for (let page = 0; page < request.max_pages; page++) {
-        const r = await call(context, `feed:${page}`, 'scrapecreators', 'feed', feedRequest(request.supplied_url, options.region, cursor), undefined,
+        const r = await call(context, `feed:${page}`, 'scrapecreators', 'feed',
+          feedRequest(request.supplied_url, parsed.user.id, options.region, cursor), undefined,
           body => sanitizedScrape(body, 'feed'));
         pages.push({ ...r, requestedCursor: cursor });
         const replay = characterizeFeed({ profileBody: profile.body, attempts: pages,
@@ -207,7 +214,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         : (observedViews[observedViews.length / 2 - 1]! + observedViews[observedViews.length / 2]!) / 2;
       for (const url of result.urls) {
         const nativeId = parseTikTokUrl(url).videoId!;
-        const r = await call(context, `video:${nativeId}`, 'scrapecreators', 'video', detailRequest(url, options.region), undefined,
+        const r = await call(context, `video:${nativeId}`, 'scrapecreators', 'video',
+          detailRequest(url, options.region, cacheMaxAge.detail), undefined,
           body => {
             const clean = sanitizedScrape(body, 'video');
             // Identity check before storing a success; provenance is assigned below from receipt metadata.
@@ -219,7 +227,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const multiplier = medianViews !== undefined && o.metrics.views !== null
           ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
         references.push({ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
-          retrieved_at: o.provenance.retrieved_at, published_at: o.published_at,
+          retrieved_at: o.provenance.retrieved_at,
+          source_observed_at: o.provenance.source_observed_at, published_at: o.published_at,
           caption: o.caption, views: o.metrics.views,
           ...(o.thumbnail_url ? { thumbnail_url: o.thumbnail_url } : {}),
           duration_seconds: o.duration_seconds, likes: o.metrics.likes,

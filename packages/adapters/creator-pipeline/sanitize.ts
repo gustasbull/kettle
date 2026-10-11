@@ -17,12 +17,19 @@ export function sourceObservedAt(body: string): string | null {
 function video(raw: unknown) {
   const v = record(raw);
   const media = record(v.video);
-  const cover = record(media.cover);
-  const urls = Array.isArray(cover.url_list) && cover.url_list.length <= 20
-    ? cover.url_list.filter((value): value is string => typeof value === 'string' && TikTokImageUrl.safeParse(value).success) : [];
+  const imageUrls = (source: unknown) => {
+    const values = record(source).url_list;
+    return Array.isArray(values) && values.length <= 20
+      ? values.filter((value): value is string => typeof value === 'string' && TikTokImageUrl.safeParse(value).success)
+      : [];
+  };
+  const dynamic = imageUrls(media.dynamic_cover);
+  const cover = imageUrls(media.cover);
   return { ...pick(v, ['aweme_id', 'desc', 'create_time']),
     author: pick(v.author, ['uid', 'unique_id']),
-    video: { ...pick(v.video, ['duration']), ...(urls.length ? { cover: { url_list: urls } } : {}) },
+    video: { ...pick(v.video, ['duration']),
+      ...(dynamic.length ? { dynamic_cover: { url_list: dynamic } } : {}),
+      ...(cover.length ? { cover: { url_list: cover } } : {}) },
     statistics: pick(v.statistics, ['play_count', 'digg_count', 'comment_count', 'share_count', 'collect_count']) };
 }
 export function sanitizedScrape(body: string, kind: 'profile' | 'feed' | 'video'): string {

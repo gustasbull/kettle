@@ -79,6 +79,11 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
   await run(scan.id);scan=job(await call('render_creator_job',{job_id:scan.id}));assert.equal(scan.state,'succeeded');assert.equal(scan.result?.kind,'scan');
   assert.equal(f.http.length,3);assert.equal(new URL(f.http[0]!.url).hostname,'api.lightreel.ai');assert.equal(scan.result!.kind,'scan');if(scan.result!.kind!=='scan')throw Error('scan');
+  const profileRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v1/tiktok/profile')!.url);
+  const feedRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v3/tiktok/profile/videos')!.url);
+  assert.equal(profileRequest.searchParams.get('cache_max_age'),'1d');
+  assert.equal(feedRequest.searchParams.get('user_id'),'9000000000000000001');
+  assert.equal(feedRequest.searchParams.has('cache_max_age'),false);
   const dna=scan.result!.dna;
   assert.equal(dna.seed_review?.url,seedUrl);assert.equal(dna.seed_review?.access_basis,'transcript_or_caption_only');
   assert.ok(!JSON.stringify(dna.seed_review).includes('conversation_id'));
@@ -86,6 +91,12 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   let rec=job(await call('start_creator_recommendations',recInput));await run(rec.id);rec=job(await call('render_creator_job',{job_id:rec.id}));
   assert.equal(rec.state,'succeeded');if(rec.result?.kind!=='recommendations')throw Error(JSON.stringify(rec));
   const batch=rec.result.batch;assert.equal(batch.ideas.length,1);assert.equal(f.http.length,5);
+  const detailRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v2/tiktok/video')!.url);
+  assert.equal(detailRequest.searchParams.get('cache_max_age'),'7d');
+  assert.equal(detailRequest.searchParams.get('get_transcript'),'false');
+  assert.equal(detailRequest.searchParams.get('download_media'),'false');
+  assert.equal(batch.references[0]!.source_observed_at,'2026-10-08T14:30:00.000Z');
+  assert.notEqual(batch.references[0]!.retrieved_at,batch.references[0]!.source_observed_at);
   const variants=creatorScriptsFixture().variants.map(({id:_id,...v})=>({...v,reference_ids:batch.ideas[0]!.reference_ids}));
   const saveInput={batch_id:batch.id,idea_id:batch.ideas[0]!.id,request_id:crypto.randomUUID(),variants};
   let saved=job(await call('save_creator_scripts',saveInput));const constructions=providerConstructions,requests=f.http.length;
@@ -114,7 +125,7 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));
   assert.deepEqual(content._meta.ui.csp,{
     connectDomains:[],
-    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com'],
+    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com','https://tiktokcdn-us.com','https://*.tiktokcdn-us.com'],
     frameDomains:[],baseUriDomains:[],
   });
   identity.block();

@@ -6,8 +6,13 @@ import { runCreatorPipelineJob, canProcessCapturedDna, type DurableStep, type At
 import { createPipelineSupabaseRepository } from '../../packages/database/creator-pipeline-supabase.ts';
 import { createCreatorSupabaseRepository } from '../../packages/database/creator-supabase.ts';
 import { createCreatorPipelineProvider } from '../../packages/adapters/creator-pipeline/provider.ts';
+import type { ScrapeCreatorsCachePolicy } from '../../packages/adapters/creator-pipeline/requests.ts';
 import { createCreatorTelemetry, type CreatorTelemetry } from './creator-telemetry.ts';
 import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
+
+const CREATOR_CACHE_MAX_AGE = Object.freeze({
+  profile: '1d', detail: '7d',
+} satisfies ScrapeCreatorsCachePolicy);
 
 export function pipelineConfigured(env:Env):boolean {
   return String(env.CREATOR_PIPELINE_ENABLED)==='true' && [env.LIGHTREEL_API_KEY,env.SCRAPECREATORS_API_KEY,
@@ -59,6 +64,7 @@ export class CreatorPipelineWorkflow extends WorkflowEntrypoint<Env,{job_id:stri
       return createCreatorPipelineProvider({fetch:(url,init)=>fetch(url,init),
         credentials:{scrapeCreators:this.env.SCRAPECREATORS_API_KEY!,lightreel:this.env.LIGHTREEL_API_KEY!},
         model:this.env.CREATOR_MODEL!,maxOutputTokens:6000,region:'US',maxHistoryReads:0,
+        cacheMaxAge:CREATOR_CACHE_MAX_AGE,
         ...(captured.seed_url?{seedUrl:captured.seed_url}:{}),
         permission:{status:'approved',basis:this.env.CREATOR_SOURCE_PERMISSION_BASIS!,permitted_uses:['store','display','model_processing'],retention:'Development proof only; source records are restricted to the allocated test account and require explicit retention review before production.'},
         canProcessDna:view=>Boolean(captured.stored&&canProcessCapturedDna(captured.stored,view)),

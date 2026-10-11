@@ -4,6 +4,7 @@ import type { CreatorPipelineAdapterOptions } from '../../packages/adapters/crea
 import { normalizedFixtureInput } from './normalized-fixture.ts';
 import { creatorScriptsFixture } from './pipeline-fixtures.ts';
 import { fictionalVideo } from './fixtures.ts';
+import { scrapeCreatorsOfficialShapeFixture } from './scrapecreators-official-shape-fixture.ts';
 export function fakeGuard() {
   let id = 1000;
   const successes = new Map<string, unknown>();
@@ -25,10 +26,12 @@ export function fakeGuard() {
 export function providerHttpFixture() {
   const input = normalizedFixtureInput();
   const video = fictionalVideo();
+  const official = scrapeCreatorsOfficialShapeFixture();
   const http: { url: string; init: RequestInit }[] = [];
   const options: CreatorPipelineAdapterOptions = {
     credentials: { scrapeCreators: 'synthetic-sc', lightreel: 'synthetic-lr', openai: 'synthetic-oa' },
     model: 'explicit-fixture-model', maxOutputTokens: 2000, region: 'US', maxHistoryReads: 0,
+    cacheMaxAge: { profile: '1d', detail: '7d' },
     permission: { status: 'approved', basis: 'Synthetic unit-test permission, not real authorization.',
       permitted_uses: ['store', 'display', 'model_processing'], retention: 'Test process only' },
     canProcessDna: () => true, // Test stub only. Production must resolve captured source rights.
@@ -36,11 +39,10 @@ export function providerHttpFixture() {
       http.push({ url, init });
       const u = new URL(url);
       if (u.pathname === '/v1/tiktok/profile') return new Response(input.profileAttempt.body);
-      if (u.pathname === '/v3/tiktok/profile/videos') return new Response(input.feedAttempts[0]!.body);
+      if (u.pathname === '/v3/tiktok/profile/videos') return Response.json(official.feed);
       if (u.hostname === 'api.lightreel.ai') return Response.json({ conversationId: 'synthetic-chat', answer: {
         urls: [`https://www.tiktok.com/@fictional_kettle_creator/video/${video.aweme_id}`] } });
-      if (u.pathname === '/v2/tiktok/video') return Response.json({ success: true, credits_charged: 1,
-        aweme_detail: { ...video, author: { ...video.author, unique_id: 'fictional_kettle_creator' } } });
+      if (u.pathname === '/v2/tiktok/video') return Response.json(official.detail);
       if (u.hostname === 'api.openai.com') {
         const body = JSON.parse(init.body as string);
         const grounding = JSON.parse(body.input[0].content[0].text);

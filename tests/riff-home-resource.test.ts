@@ -13,6 +13,11 @@ import {
 } from '../apps/worker/riff-home-resource.ts';
 
 test('Riff Home keeps the prior URI readable while publishing the current fullscreen MCP App', async (t) => {
+  const policy = await import('../packages/contracts/tiktok-image-policy.ts').catch(() => undefined);
+  assert.ok(policy, 'shared lightweight TikTok image policy must exist');
+  const resourceDomains = ['https://tiktokcdn.com', 'https://*.tiktokcdn.com',
+    'https://tiktokcdn-us.com', 'https://*.tiktokcdn-us.com'];
+  assert.deepEqual(policy.TIKTOK_IMAGE_RESOURCE_DOMAINS, resourceDomains);
   const server = new McpServer({ name: 'riff-home-fixture', version: '1' });
   registerRiffHomeResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -46,9 +51,10 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
   });
   assert.deepEqual(RIFF_HOME_META.ui.csp, {
     connectDomains: [],
-    resourceDomains: ['https://tiktokcdn.com', 'https://*.tiktokcdn.com'],
+    resourceDomains,
     frameDomains: [], baseUriDomains: [],
   });
+  assert.deepEqual(RIFF_HOME_META.ui.csp.resourceDomains, policy.TIKTOK_IMAGE_RESOURCE_DOMAINS);
   const html = content.text as string;
   assert.match(html, /Riff Home/);
   assert.equal((html.match(/<script>/g) ?? []).length, 1);
