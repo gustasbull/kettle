@@ -85,7 +85,7 @@ function creatorIntent(rawSource: string) {
   const sourceUrl = /^@[\w.]{1,100}$/.test(trimmed) ? `https://www.tiktok.com/${trimmed}` : trimmed;
   let parsed: URL | undefined;
   try { parsed = new URL(sourceUrl); } catch { /* An idea is not a URL. */ }
-  return { trimmed, sourceUrl, parsed, key: parsed ? `url:${parsed.href}` : `idea:${trimmed}` };
+  return { trimmed, sourceUrl, parsed, key: parsed ? `url:${sourceUrl}` : `idea:${trimmed}` };
 }
 
 function pickLocalVideo(doc: Document): Promise<File | undefined> {
@@ -257,7 +257,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         return { status: 'failed', message: failureMessage(outcome.failure,
           'Riff could not confirm a valid saved job. Try this same link again safely.') };
       }
-      if (outcome.status !== 'response') {
+      const job = outcome.status === 'response' ? readJob(outcome.value) : undefined;
+      if (!job) {
         const reconciled = await reconcileStart(exactInput);
         if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
         if (reconciled.status === 'found') {
@@ -275,10 +276,6 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
           message: 'Riff did not save this analysis. The link is still here; try it again to reuse the same request safely.',
         };
         return { status: 'failed', message: 'Riff could not confirm whether this analysis started. Try the same link again safely.' };
-      }
-      const job = readJob(outcome.value);
-      if (!job) {
-        return { status: 'failed', message: 'Riff could not confirm a valid saved job. Try this same link again safely.' };
       }
       if (creatorRequest === pendingRequest) creatorRequest = undefined;
       view.showJob(job); observe(job); if (active(job)) void loadWork();
