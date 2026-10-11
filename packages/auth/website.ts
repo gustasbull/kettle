@@ -454,7 +454,7 @@ function one(form: URLSearchParams, name: string, maximum: number) {
 function responseHeaders() {
   return new Headers({
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com; frame-ancestors 'none'; base-uri 'none'",
     'Content-Type': 'text/html; charset=utf-8',
     'Referrer-Policy': 'same-origin',
     'X-Content-Type-Options': 'nosniff',
