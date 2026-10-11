@@ -14,7 +14,7 @@ export interface CreatorPipelineLimits {
   maxPollIntervalMs?: number;
   maxPolls?: number;
   pollWindowMs?: number;
-  performance?: { start(stage: 'poll_observation' | 'panel_render'): (status: 'ok' | 'error' | 'timeout') => void };
+  performance?: { start(stage: 'poll_observation' | 'panel_render'): (status: 'ok' | 'error' | 'timeout' | 'rejected') => void };
 }
 
 /** Structured public data only. Neither model text nor private metadata is a fallback. */
@@ -87,27 +87,28 @@ export function createCreatorPipelineController(
       void refresh(true);
     }, Math.min(delay, Math.max(1, pollWindowMs - (Date.now() - started))));
   }
-  function apply(raw: unknown, refreshing: boolean) {
+  function apply(raw: unknown, refreshing: boolean): 'ok' | 'error' | 'rejected' {
     const parsed = CreatorJobOutput.safeParse(raw);
-    if (!parsed.success) { clear('invalid'); return; }
+    if (!parsed.success) { clear('invalid'); return 'rejected'; }
     const result = parsed.data;
     if (!result.ok) {
       if (result.error.code === 'UNAVAILABLE' && refreshing && job) {
-        paused = true; publish('Updates paused. Refresh or reopen in chat to try again.'); return;
+        paused = true; publish('Updates paused. Refresh or reopen in chat to try again.'); return 'error';
       }
-      clear(result.error.code === 'UNAUTHENTICATED' ? 'reauthorize' : 'unavailable'); return;
+      clear(result.error.code === 'UNAUTHENTICATED' ? 'reauthorize' : 'unavailable'); return 'error';
     }
     const next = result.data.job;
     if (!selection || selection.job_id !== next.id || (job &&
         (next.project_id !== job.project_id || next.kind !== job.kind || next.created_at !== job.created_at))) {
-      clear('invalid'); return;
+      clear('invalid'); return 'rejected';
     }
     if (job && next.revision < job.revision) {
-      paused = true; publish('An older response was ignored. Refresh or reopen in chat.'); return;
+      paused = true; publish('An older response was ignored. Refresh or reopen in chat.'); return 'rejected';
     }
     if (job && ((next.revision === job.revision && JSON.stringify(next) !== JSON.stringify(job)) ||
-        (!active(job) && active(next)))) { clear('invalid'); return; }
+        (!active(job) && active(next)))) { clear('invalid'); return 'rejected'; }
     job = next; stopInitial(); publish(); schedule();
+    return 'ok';
   }
   async function refresh(automatic = false) {
     if (disposed || blocked || !connected || !tools || !job || !selection || pending) return;
@@ -126,11 +127,12 @@ export function createCreatorPipelineController(
           timer = setTimeout(() => { timedOut = true; abort.abort(); }, timeoutMs);
         }),
       ]);
-      if (disposed || requestEpoch !== epoch) return;
-      pending = undefined; apply(output, true);
-      finishObservation?.('ok');
+      if (disposed || requestEpoch !== epoch) { finishObservation?.('rejected'); return; }
+      pending = undefined;
+      const outcome = apply(output, true);
+      finishObservation?.(outcome);
     } catch {
-      if (disposed || requestEpoch !== epoch) return;
+      if (disposed || requestEpoch !== epoch) { finishObservation?.('rejected'); return; }
       pending = undefined;
       if (timedOut) { finishObservation?.('timeout'); paused = true; publish('Updates timed out. Refresh or reopen in chat to try again.'); }
       else { finishObservation?.('error'); clear('connection'); }

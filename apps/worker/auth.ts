@@ -20,11 +20,11 @@ export async function authServices(env: Env, config: RuntimeAuthConfig, telemetr
   );
   const operations = createOperations(verifier, createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
   const creatorOperations = createCreatorOperations(verifier, createCreatorSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
-  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry), (id, accountId)=>dispatchCreatorJob(env,id,accountId,telemetry),operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts',telemetry);
+  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry), (id, accountId, operationTelemetry)=>dispatchCreatorJob(env,id,accountId,operationTelemetry??telemetry),operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts',telemetry);
   const riffCreatorOperations = createRiffCreatorRuntime({
     supabaseUrl: env.SUPABASE_URL!, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
     maxProfilesPerAccount: 1, allowanceTtlSeconds: 604_800,
-  }, verifier, (id, accountId) => dispatchCreatorJob(env, id, accountId, telemetry), () => pipelineConfigured(env), fetch, telemetry);
+  }, verifier, (id, accountId, operationTelemetry) => dispatchCreatorJob(env, id, accountId, operationTelemetry ?? telemetry), () => pipelineConfigured(env), fetch, telemetry);
   return { config: config.mcp, verifier, operations, creatorOperations, pipelineOperations, riffCreatorOperations };
 }
 

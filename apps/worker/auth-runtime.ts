@@ -63,9 +63,9 @@ export function createRemoteAuthInputsCache(
       const cacheKey = JSON.stringify([config.issuer, config.resource]);
       const existing = entries.get(cacheKey);
       if (existing) {
-        telemetry?.record({ stage: 'auth_metadata', clock: 'monotonic', status: 'ok',
-          duration_ms: 0, cache_state: 'hit' });
-        return existing.value;
+        return observed(telemetry,
+          { stage: 'auth_metadata', clock: 'monotonic', cache_state: 'hit' },
+          () => existing.value);
       }
 
       const value = observed(telemetry,

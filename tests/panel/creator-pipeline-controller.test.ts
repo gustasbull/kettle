@@ -57,6 +57,14 @@ function setup(t: TestContext, limits: CreatorPipelineLimits = {}) {
     tick:async(ms:number)=>{t.mock.timers.tick(ms);await flush();}};
 }
 
+function observedSetup(t: TestContext) {
+  const pollStatuses: string[] = [];
+  const fixture = setup(t, { performance: { start(stage) {
+    return status => { if (stage === 'poll_observation') pollStatuses.push(status); };
+  } } });
+  return { ...fixture, pollStatuses };
+}
+
 test('requires validated selection and handshake; missing tools displays without reads', async t=>{
   const f=setup(t), value=output();
   f.controller.receiveInput({job_id:value.data.job.id}); f.controller.receiveResult(value);
@@ -141,6 +149,30 @@ test('timeout aborts and pauses automatic reads; explicit refresh recovers witho
   await f.tick(20);assert.equal(f.calls.length,1);
   const retry=f.controller.refresh();f.calls[1]!.resolve(output('succeeded',2));await retry;
   f.calls[0]!.resolve(output('running',3));await flush();assert.equal(f.visible()?.state,'succeeded');
+});
+test('successful poll performance finishes ok',async t=>{
+  const f=observedSetup(t);f.launch();await f.tick(20);
+  f.calls[0]!.resolve(output('running',2));await flush();
+  assert.deepEqual(f.pollStatuses,['ok']);
+});
+test('malformed poll performance finishes rejected',async t=>{
+  const f=observedSetup(t);f.launch();await f.tick(20);
+  f.calls[0]!.resolve({ok:true,data:{job:{}}});await flush();
+  assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.reason(),'invalid');
+});
+test('unavailable poll performance finishes error',async t=>{
+  const f=observedSetup(t);f.launch();await f.tick(20);
+  f.calls[0]!.resolve(creatorFailure('UNAVAILABLE'));await flush();
+  assert.deepEqual(f.pollStatuses,['error']);assert.match(f.notice()!,/paused/);
+});
+test('stale poll performance finishes rejected',async t=>{
+  const f=observedSetup(t);f.launch(output('running',4));await f.tick(20);
+  f.calls[0]!.resolve(output('running',3));await flush();
+  assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.visible()?.revision,4);
+});
+test('timed out poll performance finishes timeout',async t=>{
+  const f=observedSetup(t);f.launch();await f.tick(20);await f.tick(100);
+  assert.deepEqual(f.pollStatuses,['timeout']);assert.equal(f.calls[0]!.signal.aborted,true);
 });
 test('transient UNAVAILABLE pauses; unknown rejection clears',async t=>{
   const f=setup(t);f.launch();await f.tick(20);f.calls[0]!.resolve(creatorFailure('UNAVAILABLE'));await flush();

@@ -1,5 +1,5 @@
 type PanelStage = 'tool_call' | 'poll_observation' | 'panel_render';
-type PanelStatus = 'ok' | 'error' | 'timeout';
+type PanelStatus = 'ok' | 'error' | 'timeout' | 'rejected';
 type PanelFingerprint = { resource_version: string; bundle_version: string };
 type LocalPerformance = Pick<Performance, 'now' | 'measure'>;
 

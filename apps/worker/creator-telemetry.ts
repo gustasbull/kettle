@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
+import type { CreatorCorrelation, CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 
 const UUID = z.uuid();
 const stages = z.enum([
@@ -31,6 +31,7 @@ const bundleVersion = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
 const eventSchema = z.strictObject({
   event: z.literal('creator_latency'),
+  trace_id: UUID.optional(),
   request_id: UUID.optional(),
   job_id: UUID.optional(),
   stage: stages,
@@ -48,8 +49,11 @@ const eventSchema = z.strictObject({
   resource_version: version.optional(),
   bundle_version: bundleVersion.optional(),
 }).superRefine((event, context) => {
-  if ((event.request_id === undefined) === (event.job_id === undefined)) {
-    context.addIssue({ code: 'custom', message: 'Exactly one correlation ID is required' });
+  if (event.request_id !== undefined && event.job_id !== undefined) {
+    context.addIssue({ code: 'custom', message: 'At most one durable correlation ID is allowed' });
+  }
+  if (event.trace_id === undefined && event.request_id === undefined && event.job_id === undefined) {
+    context.addIssue({ code: 'custom', message: 'A validated correlation ID is required' });
   }
   if ((event.stage === 'queue_to_running') !== (event.clock === 'wall')) {
     context.addIssue({ code: 'custom', message: 'Only queue elapsed uses a wall clock' });
@@ -62,7 +66,7 @@ export type CreatorTelemetryMeasureFields = Omit<CreatorTelemetryEvent, 'event' 
 export interface CreatorTelemetry {
   record(candidate: unknown): CreatorTelemetryEvent | undefined;
   measure<T>(fields: CreatorTelemetryMeasureFields, operation: () => Promise<T>): Promise<T>;
-  scope(correlation: { request_id: string } | { job_id: string }): CreatorLatencyObserver;
+  scope(correlation: CreatorCorrelation): CreatorLatencyObserver;
 }
 
 /**
@@ -82,6 +86,14 @@ export function createCreatorTelemetry(options: {
     try { emit(event); } catch { /* Observation cannot alter product behavior. */ }
     return event;
   };
+  const bind = (correlation: CreatorCorrelation): CreatorLatencyObserver => ({
+    record(fields) { return record({ ...fields, ...correlation, event: 'creator_latency' }); },
+    measure(fields, operation) { return telemetry.measure({ ...fields, ...correlation }, operation); },
+    scope(next) {
+      const trace = 'trace_id' in correlation ? { trace_id: correlation.trace_id } : {};
+      return bind({ ...trace, ...next } as CreatorCorrelation);
+    },
+  });
   const telemetry: CreatorTelemetry = {
     record,
     async measure(fields, operation) {
@@ -97,12 +109,7 @@ export function createCreatorTelemetry(options: {
         throw error;
       }
     },
-    scope(correlation) {
-      return {
-        record(fields) { return record({ ...fields, ...correlation, event: 'creator_latency' }); },
-        measure(fields, operation) { return telemetry.measure({ ...fields, ...correlation }, operation); },
-      };
-    },
+    scope: bind,
   };
   return telemetry;
 }

@@ -16,12 +16,12 @@ import { Id, Project, result } from '../contracts/index.ts';
 import { observed, type CreatorLatencyObserver } from './creator-observability.ts';
 
 export interface RiffCreatorRepository {
-  find(accountId: string, input: CreatorStartInput): Promise<unknown>;
-  start(accountId: string, input: CreatorStartInput, source: CanonicalSource): Promise<unknown>;
-  list(accountId: string, input: ListRiffWorkInput): Promise<unknown>;
+  find(accountId: string, input: CreatorStartInput, telemetry?: CreatorLatencyObserver): Promise<unknown>;
+  start(accountId: string, input: CreatorStartInput, source: CanonicalSource, telemetry?: CreatorLatencyObserver): Promise<unknown>;
+  list(accountId: string, input: ListRiffWorkInput, telemetry?: CreatorLatencyObserver): Promise<unknown>;
 }
 export type RiffCreatorSourceResolver = (value: string) => Promise<CanonicalSource>;
-export type RiffCreatorDispatch = (jobId: string, accountId: string) => Promise<void>;
+export type RiffCreatorDispatch = (jobId: string, accountId: string, telemetry?: CreatorLatencyObserver) => Promise<void>;
 
 const StoredRiffCreatorOutput = result(z.strictObject({
   project: Project,
@@ -75,12 +75,13 @@ export function createRiffCreatorOperations(
     }
     const parsed = StartRiffCreatorInput.safeParse(rawInput);
     if (!parsed.success) return failure('VALIDATION_ERROR');
+    const requestTelemetry = telemetry?.scope?.({ request_id: parsed.data.request_id }) ?? telemetry;
     if (operation === 'get_riff_creator_start') {
       try {
         return projectStored(
-          StoredRiffCreatorOutput.parse(await observed(telemetry,
+          StoredRiffCreatorOutput.parse(await observed(requestTelemetry,
             { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
-            () => repository.find(identity.account_id, parsed.data))),
+            () => repository.find(identity.account_id, parsed.data, requestTelemetry))),
           identity.account_id,
           parsed.data,
         );
@@ -91,33 +92,35 @@ export function createRiffCreatorOperations(
     if (!isEnabled()) return failure('UNAVAILABLE');
 
     try {
-      const existing = StoredRiffCreatorOutput.parse(await observed(telemetry,
+      const existing = StoredRiffCreatorOutput.parse(await observed(requestTelemetry,
         { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
-        () => repository.find(identity.account_id, parsed.data)));
+        () => repository.find(identity.account_id, parsed.data, requestTelemetry)));
       if (existing.ok || existing.error.code !== 'NOT_FOUND') {
         const projected = projectStored(existing, identity.account_id, parsed.data);
         if (projected.ok && projected.data.job.state === 'queued') {
-          try { await observed(telemetry,
+          const jobTelemetry = requestTelemetry?.scope?.({ job_id: projected.data.job.id }) ?? requestTelemetry;
+          try { await observed(jobTelemetry,
             { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
-            () => dispatch(projected.data.job.id, identity.account_id)); } catch { /* durable queued intent */ }
+            () => dispatch(projected.data.job.id, identity.account_id, jobTelemetry)); } catch { /* durable queued intent */ }
         }
         return projected;
       }
 
       let source: CanonicalSource;
-      try { source = CanonicalRiffCreatorSource.parse(await observed(telemetry,
+      try { source = CanonicalRiffCreatorSource.parse(await observed(requestTelemetry,
         { stage: 'application_operation', clock: 'monotonic', operation: 'start' },
         () => resolveSource(parsed.data.source_url))); }
       catch (error) {
         return failure((error as { code?: string })?.code === 'SOURCE_UNAVAILABLE' ? 'UNAVAILABLE' : 'VALIDATION_ERROR');
       }
-      const stored = StoredRiffCreatorOutput.parse(await repository.start(identity.account_id, parsed.data, source));
+      const stored = StoredRiffCreatorOutput.parse(await repository.start(identity.account_id, parsed.data, source, requestTelemetry));
       const projected = projectStored(stored, identity.account_id, parsed.data);
       if (projected.ok && JSON.stringify(projected.data.source) !== JSON.stringify(source)) return failure('UNAVAILABLE');
       if (projected.ok && projected.data.job.state === 'queued') {
-        try { await observed(telemetry,
+        const jobTelemetry = requestTelemetry?.scope?.({ job_id: projected.data.job.id }) ?? requestTelemetry;
+        try { await observed(jobTelemetry,
           { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
-          () => dispatch(projected.data.job.id, identity.account_id)); } catch { /* reconciler retries durable intent */ }
+          () => dispatch(projected.data.job.id, identity.account_id, jobTelemetry)); } catch { /* reconciler retries durable intent */ }
       }
       return projected;
     } catch {

@@ -10,7 +10,8 @@ import { observed, type CreatorLatencyObserver } from './creator-observability.t
 
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
   | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'list_creator_dispatches';
-export interface PipelineRepository { call(operation: PipelineRepositoryOperation, accountId: string, input: unknown): Promise<unknown> }
+export interface PipelineRepository { call(operation: PipelineRepositoryOperation, accountId: string, input: unknown,
+  telemetry?: CreatorLatencyObserver): Promise<unknown> }
 export const StoredCreatorJob = z.object({
   id:Id, account_id:Id, project_id:Id, request_id:Id, kind:z.enum(['scan','recommendations','scripts']),
   state:z.enum(['queued','running','succeeded','failed','needs_reconciliation']),revision:z.number().int().positive(),
@@ -33,7 +34,7 @@ export function publicCreatorJob(job:StoredCreatorJob):CreatorJobView {
       job.state==='failed'?'This job could not complete. Check the research allowance and source permissions before starting a new request.':null});
 }
 export function createPipelineOperations(verifier:IdentityVerifier, repository:PipelineRepository,
-  dispatch:(jobId:string,accountId:string)=>Promise<void>,isEnabled:(operation:PipelineOperation)=>boolean=()=>true,
+  dispatch:(jobId:string,accountId:string,telemetry?:CreatorLatencyObserver)=>Promise<void>,isEnabled:(operation:PipelineOperation)=>boolean=()=>true,
   telemetry?:CreatorLatencyObserver) {
   return {async execute(operation:PipelineOperation, credential:string|null, raw:unknown) {
     if(!credential)return failure('UNAUTHENTICATED');
@@ -42,11 +43,13 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
     const contract=pipelineContracts[operation];
     if(!identity.scopes.includes(contract.scope))return failure('FORBIDDEN');
     const parsed=contract.input.safeParse(raw);if(!parsed.success)return failure('VALIDATION_ERROR');
+    const operationTelemetry=telemetry?.scope?.('request_id' in parsed.data
+      ? {request_id:parsed.data.request_id} : {job_id:parsed.data.job_id})??telemetry;
     if(operation!=='get_creator_job'&&!isEnabled(operation)){const unavailable=failure('UNAVAILABLE');unavailable.error.message='Creator research is not enabled yet. Provider configuration or a test allocation is still required.';return unavailable;}
     try {
-      const response=StoredCreatorJobOutput.parse(await observed(telemetry,
+      const response=StoredCreatorJobOutput.parse(await observed(operationTelemetry,
         {stage:'application_operation',clock:'monotonic',operation:operation==='get_creator_job'?'read':operation==='save_creator_scripts'?'persist':'start'},
-        ()=>repository.call(operation,identity.account_id,parsed.data)));
+        ()=>repository.call(operation,identity.account_id,parsed.data,operationTelemetry)));
       if(!response.ok)return failure(response.error.code);
       const job=response.data.job;
       if(job.account_id!==identity.account_id || ('job_id' in parsed.data && job.id!==parsed.data.job_id)
@@ -54,10 +57,11 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
         || ('request_id' in parsed.data && job.request_id!==parsed.data.request_id))return failure('UNAVAILABLE');
       if(operation!=='get_creator_job'&&job.kind!==(operation==='save_creator_scripts'?'scripts':operation.replace('start_creator_','')))return failure('UNAVAILABLE');
       const publicOutput=CreatorJobOutput.parse({ok:true,data:{job:publicCreatorJob(job)}});
+      const jobTelemetry=operationTelemetry?.scope?.({job_id:job.id})??operationTelemetry;
       // Intent is already durable. A dispatch gap is reconciled by the scheduled outbox.
-      if(operation!=='get_creator_job'&&job.state==='queued')try{await observed(telemetry,
+      if(operation!=='get_creator_job'&&job.state==='queued')try{await observed(jobTelemetry,
         {stage:'application_operation',clock:'monotonic',operation:'dispatch'},
-        ()=>dispatch(job.id,job.account_id));}catch{/* durable queued intent */}
+        ()=>dispatch(job.id,job.account_id,jobTelemetry));}catch{/* durable queued intent */}
       return publicOutput;
     }catch{return failure('UNAVAILABLE');}
   }};

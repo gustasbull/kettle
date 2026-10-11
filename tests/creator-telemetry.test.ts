@@ -8,6 +8,7 @@ import { createPanelPerformance } from '../apps/panel/creator-performance.ts';
 
 const requestId = '11111111-1111-4111-8111-111111111111';
 const jobId = '22222222-2222-4222-8222-222222222222';
+const traceId = '33333333-3333-4333-8333-333333333333';
 
 test('creator telemetry emits only a frozen allowlisted event with integer monotonic duration', () => {
   const emitted: CreatorTelemetryEvent[] = [];
@@ -111,6 +112,24 @@ test('creator telemetry creates a correlation-bound observer without exposing ca
     event: 'creator_latency', job_id: jobId, stage: 'receipt_persistence', status: 'ok',
     clock: 'monotonic', duration_ms: 3, provider: 'lightreel', operation: 'persist',
   }]);
+});
+
+test('HTTP traces stay distinct while logical request scope hands off to job scope', async () => {
+  const emitted: CreatorTelemetryEvent[] = [];
+  let now = 0;
+  const telemetry = createCreatorTelemetry({ emit: event => emitted.push(event), now: () => now++ });
+  const trace = telemetry.scope({ trace_id: traceId } as never);
+  const request = (trace as typeof trace & { scope?: typeof telemetry.scope }).scope?.({ request_id: requestId });
+  assert.ok(request, 'a request-local observer can be rebound after the logical request ID is validated');
+  await request.measure({ stage: 'application_operation', clock: 'monotonic', operation: 'start' }, async () => 'stored');
+  const job = (request as typeof request & { scope?: typeof telemetry.scope }).scope?.({ job_id: jobId });
+  assert.ok(job, 'a logical request observer can hand off to the returned durable job ID');
+  await job.measure({ stage: 'workflow_dispatch', clock: 'monotonic', operation: 'dispatch' }, async () => 'sent');
+
+  assert.deepEqual(emitted.map(event => ({ trace_id: event.trace_id, request_id: event.request_id, job_id: event.job_id })), [
+    { trace_id: traceId, request_id: requestId, job_id: undefined },
+    { trace_id: traceId, request_id: undefined, job_id: jobId },
+  ]);
 });
 
 test('panel performance measurements remain browser-local and carry only the served fingerprint', () => {

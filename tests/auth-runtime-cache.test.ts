@@ -9,6 +9,7 @@ import {
 import { internalPermissions, type AuthConfig } from '../packages/auth/index.ts';
 import type { IdentityVerifier } from '../packages/application/operations.ts';
 import { accountA } from './fixtures.ts';
+import { createCreatorTelemetry, type CreatorTelemetryEvent } from '../apps/worker/creator-telemetry.ts';
 
 const configFor = (name: string): AuthConfig => ({
   issuer: `https://${name}.supabase.co/auth/v1`,
@@ -77,6 +78,28 @@ test('remote auth cache observation reports only hit or miss without issuer, tok
     ['auth_metadata', 'miss'], ['auth_metadata', 'hit'],
   ]);
   assert.doesNotMatch(JSON.stringify(events), /observed-cache|issuer|jwks|token|key/i);
+});
+
+test('coalesced auth cache hits measure the actual pending discovery wait', async () => {
+  const config = configFor('coalesced-cache');
+  const emitted: CreatorTelemetryEvent[] = [];
+  const ticks = [0, 5, 25, 40];
+  const telemetry = createCreatorTelemetry({
+    emit: event => emitted.push(event), now: () => ticks.shift()!,
+  }).scope({ trace_id: '44444444-4444-4444-8444-444444444444' });
+  let resolveFetch!: (response: Response) => void;
+  const fetcher = (async () => new Promise<Response>(resolve => { resolveFetch = resolve; })) as typeof fetch;
+  const cache = createRemoteAuthInputsCache();
+
+  const first = cache.get(config, fetcher, telemetry);
+  const coalesced = cache.get(config, fetcher, telemetry);
+  assert.equal(emitted.length, 0, 'a pending cache hit is not recorded as an immediate zero-duration success');
+  resolveFetch(Response.json(metadataFor(config)));
+  await Promise.all([first, coalesced]);
+
+  assert.deepEqual(emitted.map(event => [event.cache_state, event.duration_ms]), [
+    ['miss', 25], ['hit', 35],
+  ]);
 });
 
 test('failed or foreign discovery is never retained in the remote auth cache', async () => {

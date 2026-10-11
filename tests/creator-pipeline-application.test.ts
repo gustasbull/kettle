@@ -28,7 +28,7 @@ function input(kind:PipelineOperation='start_creator_recommendations') {
 function harness(job=stored(), verifier=identity) {
   const calls:{op:string;owner:string;input:unknown}[]=[],dispatches:string[][]=[];
   const repository:PipelineRepository={async call(op,owner,raw){calls.push({op,owner,input:raw});return wrapped(job);}};
-  const operations=createPipelineOperations(verifier,repository,async(...args)=>{dispatches.push(args);});
+  const operations=createPipelineOperations(verifier,repository,async(jobId,accountId)=>{dispatches.push([jobId,accountId]);});
   return {calls,dispatches,operations};
 }
 function code(result:Awaited<ReturnType<ReturnType<typeof createPipelineOperations>['execute']>>) {
@@ -77,6 +77,33 @@ test('reads never dispatch; repeated durable queued start retains job identity; 
   await h.operations.execute('get_creator_job','token',input('get_creator_job'));assert.equal(h.dispatches.length,2);
   const ops=createPipelineOperations(identity,{async call(){return wrapped(stored());}},async()=>{throw Error('dispatch gap');});
   assert.equal((await ops.execute('start_creator_recommendations','token',input())).ok,true);
+});
+
+test('start observations use the validated logical request then the returned durable job',async()=>{
+  const correlations:Array<Record<string,string>>=[];
+  const events:Array<{correlation?:Record<string,string>;stage:unknown;operation:unknown}>=[];
+  const scoped=(correlation?:Record<string,string>):any=>({
+    scope(next:Record<string,string>){correlations.push(next);return scoped(next);},
+    record(fields:Record<string,unknown>){events.push({correlation,stage:fields.stage,operation:fields.operation});},
+    async measure<T>(fields:Record<string,unknown>,run:()=>Promise<T>){
+      events.push({correlation,stage:fields.stage,operation:fields.operation});return run();
+    },
+  });
+  let dispatchTelemetry:unknown;
+  const operations=createPipelineOperations(identity,
+    {async call(_operation,_owner,_input,telemetry){
+      assert.equal(telemetry === undefined, false, 'the RPC boundary receives logical request scope');
+      return wrapped(stored());
+    }},
+    async(_jobId,_accountId,telemetry?:unknown)=>{dispatchTelemetry=telemetry;},()=>true,scoped());
+
+  assert.equal((await operations.execute('start_creator_recommendations','token',input())).ok,true);
+  assert.deepEqual(correlations,[{request_id:request},{job_id:id(620)}]);
+  assert.ok(dispatchTelemetry);
+  assert.deepEqual(events.map(event=>[event.correlation,event.stage,event.operation]),[
+    [{request_id:request},'application_operation','start'],
+    [{job_id:id(620)},'application_operation','dispatch'],
+  ]);
 });
 
 test('repository identity, request, project and kind mismatches never dispatch',async()=>{

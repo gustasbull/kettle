@@ -27,8 +27,9 @@ export function createRiffCreatorSupabaseRepository(
     operation: RiffCreatorStorageOperation,
     accountId: string,
     input: unknown,
+    operationTelemetry?: CreatorLatencyObserver,
   ) => {
-    const response = await observed(telemetry, { stage: 'supabase_rpc', clock: 'monotonic',
+    const response = await observed(operationTelemetry ?? telemetry, { stage: 'supabase_rpc', clock: 'monotonic',
       operation: operation === 'get_riff_creator_start' ? 'find' : operation === 'list_riff_work' ? 'list' : 'start',
       endpoint: operation === 'get_riff_creator_start' ? 'riff_creator_find'
         : operation === 'list_riff_work' ? 'riff_creator_list' : 'riff_creator_start' }, () => fetcher(new URL(`/rest/v1/rpc/kettle_${operation}`, baseUrl), {
@@ -40,14 +41,16 @@ export function createRiffCreatorSupabaseRepository(
     return response.json();
   };
   return {
-    find: (accountId: string, input: StartRiffCreatorInput) => call('get_riff_creator_start', accountId, input),
-    start: (accountId: string, input: StartRiffCreatorInput, source: CanonicalRiffCreatorSource) => call(
+    find: (accountId: string, input: StartRiffCreatorInput, operationTelemetry?: CreatorLatencyObserver) => call('get_riff_creator_start', accountId, input, operationTelemetry),
+    start: (accountId: string, input: StartRiffCreatorInput, source: CanonicalRiffCreatorSource,
+      operationTelemetry?: CreatorLatencyObserver) => call(
       'start_riff_creator', accountId, {
         input, source,
         max_profiles_per_account: policy.maxProfilesPerAccount,
         allowance_ttl_seconds: policy.allowanceTtlSeconds,
       },
+      operationTelemetry,
     ),
-    list: (accountId: string, input: ListRiffWorkInput) => call('list_riff_work', accountId, input),
+    list: (accountId: string, input: ListRiffWorkInput, operationTelemetry?: CreatorLatencyObserver) => call('list_riff_work', accountId, input, operationTelemetry),
   };
 }

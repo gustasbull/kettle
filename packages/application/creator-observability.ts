@@ -25,9 +25,12 @@ export type CreatorObservationFields = {
   bundle_version?: string;
 };
 
+export type CreatorCorrelation = { trace_id: string } | { request_id: string } | { job_id: string };
+
 export interface CreatorLatencyObserver {
   record(fields: CreatorObservationFields & { status: NonNullable<CreatorObservationFields['status']>; duration_ms: number }): unknown;
   measure<T>(fields: Omit<CreatorObservationFields, 'status' | 'duration_ms'>, operation: () => Promise<T>): Promise<T>;
+  scope?(correlation: CreatorCorrelation): CreatorLatencyObserver;
 }
 
 export function observed<T>(observer: CreatorLatencyObserver | undefined,

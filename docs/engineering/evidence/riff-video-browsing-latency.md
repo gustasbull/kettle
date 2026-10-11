@@ -16,8 +16,11 @@ this record.
   `riff:tool_call`, `riff:poll_observation`, and `riff:panel_render`. They carry
   only stage, status, resource version, and bundle SHA-256. There is no browser
   reporting endpoint.
-- Worker telemetry constructs a fresh strict object. It accepts one validated
-  request or job UUID and enum/bounded numeric fields only. URLs, handles,
+- Worker telemetry constructs a fresh strict object. It accepts a validated
+  HTTP trace UUID and at most one validated logical request or job UUID, plus
+  enum/bounded numeric fields only. The HTTP trace remains distinct while the
+  operation re-scopes first to its durable request and then to its returned job,
+  allowing the Workflow's job scope to join the chain. URLs, handles,
   captions, provider bodies, exception text, headers, tokens, credentials,
   email, account IDs, issuer/subject, and arbitrary objects cannot be emitted.
 - Checkpoint persistence is not implemented in the current job contract. The
@@ -38,7 +41,7 @@ entry can be tied to deployed bytes.
 | --- | --- | ---: | ---: |
 | Riff Home `riff-home-v3` | `sha256:f7b4c0005d8ed1a2e245f58f0351e58dc7b677454e811f1097d59066fbbae308` | 471,831 / 500,000 | 104,697 / 110,000 |
 | Onboarding `riff-onboarding-v1` | `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0` | 382,496 / 400,000 | 80,543 / 85,000 |
-| Pipeline `creator-pipeline-v3` | `sha256:d66b1be73d156d255785f85a0311700055e4c943e75f823f0aebca614ee9b271` | 611,415 / 650,000 | 135,924 / 145,000 |
+| Pipeline `creator-pipeline-v3` | `sha256:acf3780c96e37f1a845df594ca7eb460f71255e75848dfee85ff3cbebcfac248` | 611,493 / 650,000 | 135,947 / 145,000 |
 
 Evidence class: `fixture` (local deterministic production build). Rebuilding
 unchanged inputs produced identical hashes; changing only Home source changed

@@ -53,7 +53,7 @@ export default {
     const url = new URL(request.url);
     const endpoint = url.pathname === '/mcp' ? 'worker_mcp' : url.pathname === '/' ? 'worker_home'
       : url.pathname === '/health' ? 'worker_health' : isWebsiteAuthPath(url) ? 'worker_oauth' : 'worker_not_found';
-    const telemetry = createCreatorTelemetry().scope({ request_id: crypto.randomUUID() });
+    const telemetry = createCreatorTelemetry().scope({ trace_id: crypto.randomUUID() });
     return telemetry.measure({ stage: 'request_receipt', clock: 'monotonic', operation: 'read', endpoint },
       () => routeRequest(request, env, telemetry));
   },
