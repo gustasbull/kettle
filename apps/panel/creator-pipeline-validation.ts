@@ -1,9 +1,15 @@
-import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
-import { isCreatorJobView } from './riff-home-validation.ts';
+import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
+import type { RiffVideoCard } from '../../packages/contracts/riff-videos.ts';
+import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
+import { isCreatorJobStatusView, isCreatorJobView } from './riff-home-validation.ts';
 
 type JsonObject = Record<string, unknown>;
 export type CreatorJobPublicOutput = { ok: true; data: { job: CreatorJobView } } | {
   ok: false; error: { code: 'UNAUTHENTICATED'|'FORBIDDEN'|'VALIDATION_ERROR'|'NOT_FOUND'|'VERSION_CONFLICT'|'IDEMPOTENCY_CONFLICT'|'UNAVAILABLE'; message:string; retryable:boolean; recovery:'reauthorize'|'correct_input'|'reload'|'retry_same_request'|'contact_support' } };
+type PublicFailure=Extract<CreatorJobPublicOutput,{ok:false}>;
+export type CreatorJobStatusPublicOutput={ok:true;data:{status:CreatorJobStatusView}}|PublicFailure;
+export type RiffVideoCatalogPage={cards:RiffVideoCard[];next_cursor:string|null;coverage:string;freshness:string};
+export type RiffVideosPublicOutput={ok:true;data:RiffVideoCatalogPage}|PublicFailure;
 
 const id = (value:unknown):value is string => typeof value==='string'
   &&/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i.test(value);
@@ -36,6 +42,9 @@ function safeTree(value:unknown,maxBytes=1_500_000):boolean {
 function httpUrl(value:unknown):value is string {
   if(typeof value!=='string'||value.length>2_048)return false;
   try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password;}catch{return false;}
+}
+function imageUrl(value:unknown):value is string {
+  return typeof value==='string'&&value.length<=4_096&&isAllowedTikTokImageUrl(value);
 }
 function creatorUrl(value:unknown):value is string {
   if(!httpUrl(value))return false;
@@ -77,7 +86,7 @@ function canonicalSource(value:unknown):JsonObject|undefined {
     ||!new RegExp(`^/@${String(item.handle).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}/video/\\d{1,30}$`).test(new URL(item.video_url).pathname))return;
   return item;
 }
-function failure(value:unknown):CreatorJobPublicOutput|undefined {
+function failure(value:unknown):PublicFailure|undefined {
   const outer=record(value,['ok','error']);if(!outer||outer.ok!==false)return;
   const error=record(outer.error,['code','message','retryable','recovery']);if(!error)return;
   const codes=['UNAUTHENTICATED','FORBIDDEN','VALIDATION_ERROR','NOT_FOUND','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','UNAVAILABLE'];
@@ -97,7 +106,64 @@ function jobOutput(value:unknown):CreatorJobPublicOutput|undefined {
   return {ok:true,data:{job:structuredClone(job) as CreatorJobView}};
 }
 
+function statusOutput(value:unknown):CreatorJobStatusPublicOutput|undefined {
+  if(!safeTree(value))return;
+  const failed=failure(value);if(failed)return failed;
+  const outer=record(value,['ok','data']);if(!outer||outer.ok!==true)return;
+  const data=record(outer.data,['status']);if(!data||!isCreatorJobStatusView(data.status))return;
+  return {ok:true,data:{status:structuredClone(data.status)}};
+}
+function nullableCount(value:unknown){return value===null||Number.isSafeInteger(value)&&Number(value)>=0;}
+function videoMetrics(value:unknown){
+  const item=record(value,['views','likes','comments','shares','saves']);
+  return !!item&&nullableCount(item.views)&&nullableCount(item.likes)&&nullableCount(item.comments)
+    &&nullableCount(item.shares)&&nullableCount(item.saves);
+}
+function videoCard(value:unknown):value is RiffVideoCard {
+  const item=record(value,['id','platform','native_id','canonical_url','caption','thumbnail_url','published_at','duration_seconds',
+    'metrics','retrieved_at','source_observed_at','observed_at','origin','role','permission_basis','limitations']);
+  if(!item||!id(item.id)||item.platform!=='tiktok'||!text(item.native_id,200)||!creatorUrl(item.canonical_url)
+    ||!(item.caption===null||typeof item.caption==='string'&&item.caption.length<=10_000)
+    ||!(item.thumbnail_url===null||imageUrl(item.thumbnail_url))
+    ||!(item.published_at===null||timestamp(item.published_at))
+    ||!(item.duration_seconds===null||typeof item.duration_seconds==='number'&&Number.isFinite(item.duration_seconds)
+      &&item.duration_seconds>0&&item.duration_seconds<=86_400)
+    ||!videoMetrics(item.metrics)||!timestamp(item.retrieved_at)
+    ||!(item.source_observed_at===null||timestamp(item.source_observed_at))||!timestamp(item.observed_at)
+    ||!['fixture','live'].includes(String(item.origin))||!['own_profile','discovered_reference'].includes(String(item.role))
+    ||!text(item.permission_basis,2_000)||!Array.isArray(item.limitations)||item.limitations.length>20
+    ||!item.limitations.every(value=>text(value,1_000)))return false;
+  return new URL(String(item.canonical_url)).hostname.replace(/^www\./,'')==='tiktok.com';
+}
+function videosOutput(value:unknown):RiffVideosPublicOutput|undefined {
+  if(!safeTree(value))return;
+  const failed=failure(value);if(failed)return failed;
+  const outer=record(value,['ok','data']);if(!outer||outer.ok!==true)return;
+  const data=record(outer.data,['cards','next_cursor','coverage','freshness']);
+  if(!data||!Array.isArray(data.cards)||data.cards.length>20||!data.cards.every(videoCard)
+    ||!(data.next_cursor===null||text(data.next_cursor,1_024))||!text(data.coverage,1_000)||!text(data.freshness,1_000))return;
+  return {ok:true,data:structuredClone(data) as RiffVideoCatalogPage};
+}
+
+function structuredOutput<T>(raw:unknown,parse:(value:unknown)=>T|undefined):T|undefined {
+  try{
+    if(!safeTree(raw)||raw===null||typeof raw!=='object'||Array.isArray(raw))return;
+    const keys=Reflect.ownKeys(raw);if(keys.some(key=>typeof key!=='string'||!['structuredContent','isError','content','_meta'].includes(key)))return;
+    const envelope=raw as JsonObject;if(!Object.hasOwn(envelope,'structuredContent'))return;
+    const parsed=parse(envelope.structuredContent);if(!parsed)return;
+    return envelope.isError===true&&(parsed as {ok?:unknown}).ok===true?undefined:parsed;
+  }catch{return;}
+}
+
 export function parseCreatorJobOutput(value:unknown):CreatorJobPublicOutput|undefined { try{return jobOutput(value);}catch{return;} }
+export function parseCreatorJobStatusOutput(value:unknown):CreatorJobStatusPublicOutput|undefined { try{return statusOutput(value);}catch{return;} }
+export function parseRiffVideosOutput(value:unknown):RiffVideosPublicOutput|undefined { try{return videosOutput(value);}catch{return;} }
+export function creatorJobStatusStructuredOutput(raw:unknown):CreatorJobStatusPublicOutput|undefined {
+  return structuredOutput(raw,statusOutput);
+}
+export function riffVideosStructuredOutput(raw:unknown):RiffVideosPublicOutput|undefined {
+  return structuredOutput(raw,videosOutput);
+}
 export function creatorJobStructuredOutput(raw:unknown):CreatorJobPublicOutput|undefined {
   try {
     if(!safeTree(raw)||raw===null||typeof raw!=='object'||Array.isArray(raw))return;

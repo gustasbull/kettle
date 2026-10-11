@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { build } from 'esbuild';
 
-test('Riff Home reproduces the Paper Home surface without app-owned chrome', async (t) => {
+test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcrumb chrome', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHome } from './apps/panel/riff-home/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
@@ -17,6 +17,7 @@ test('Riff Home reproduces the Paper Home surface without app-owned chrome', asy
       refreshJob: async job=>{ window.events.push({kind:'refresh-job',jobId:job.id}); return {status:'sent',message:'Saved job refreshed.'}; },
       startRecommendations: async ({job,dna})=>{ window.events.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id}); return {status:'sent',message:'Discovery started.'}; },
       makeMine: async ({job,batch,idea})=>{ window.events.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id}); return {status:'sent',message:'Continue in ChatGPT.'}; },
+      onDiscoveryOpen: ()=>{ window.events.push({kind:'catalog-open'}); },
     });
     window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fictional Creator',onboarding_seen_at:null}});
     window.fixture=scenario=>pipelineFixture(scenario);
@@ -31,6 +32,11 @@ test('Riff Home reproduces the Paper Home surface without app-owned chrome', asy
       'Paper marks the panel chrome as ChatGPT-owned, so the app must not duplicate it');
     assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
+    assert.match(await page.locator('.riff-home__chrome').textContent(),/Riff\s*\/\s*Home/);
+    assert.equal(await page.locator('.riff-home').evaluate(node=>getComputedStyle(node).padding),'12px');
+    assert.match(await page.locator('.riff-home').evaluate(node=>getComputedStyle(node).backgroundImage),/radial-gradient/);
+    assert.equal(await page.locator('.riff-home__composer').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 246, 250)');
+    assert.equal(await page.locator('.riff-home__submit').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(113, 56, 212)');
     assert.equal(await page.getByRole('heading', { name: 'Let’s make your next video go viral.' }).count(), 1);
     assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).count(), 0, 'welcome belongs in chat, not Home');
     const creatorInput = page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
@@ -55,18 +61,25 @@ test('Riff Home reproduces the Paper Home surface without app-owned chrome', asy
       'Paper upload icon is visible');
     assert.equal(await page.getByRole('button', { name: 'View recent work' }).locator('svg').count(), 1,
       'Paper recent-work arrow is visible');
-    const messageCount = await page.evaluate(() => window.events.filter(event => event.kind === 'message').length);
+    const actionCount = await page.evaluate(() => window.events.filter(event => event.kind !== 'catalog-open').length);
     const trending = page.getByRole('button', { name: 'Trending videos', exact: true });
     await trending.click();
-    assert.equal(await trending.getAttribute('aria-pressed'), 'true');
-    assert.match(await page.getByRole('status').textContent(), /add a public TikTok profile or video link/i);
+    assert.equal(await page.locator('button[data-library="videos"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.getByRole('heading', { name: 'Find your next breakout idea.' }).count(), 1);
+    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'catalog-open').length), 1,
+      'the Videos shortcut may read the one cached catalog page');
+    await page.evaluate(() => window.view.showHome());
     const hooks = page.getByRole('button', { name: 'Hooks', exact: true });
     await hooks.click();
-    assert.equal(await trending.getAttribute('aria-pressed'), 'false');
-    assert.equal(await hooks.getAttribute('aria-pressed'), 'true');
-    assert.match(await page.getByRole('status').textContent(), /hook analysis.*link/i);
-    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'message').length), messageCount,
-      'library navigation stays inside Riff instead of starting a slow model turn');
+    assert.equal(await page.locator('button[data-library="videos"]').getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.locator('button[data-library="hooks"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.getByRole('heading', { name: 'Stop the scroll.' }).count(), 1);
+    assert.equal(await page.locator('[data-idea-card], [data-catalog-card]').count(), 0);
+    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'catalog-open').length), 1,
+      'an unsupported local library does not read the catalog or start provider work');
+    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind !== 'catalog-open').length), actionCount,
+      'shortcut navigation stays inside Riff instead of starting a tool or model turn');
+    await page.evaluate(() => window.view.showHome());
     assert.equal(await page.getByText('Pick up where you left off').count(), 1);
     assert.equal(await page.getByText('Loading recent work…').count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
@@ -93,11 +106,21 @@ test('Riff Home reproduces the Paper Home surface without app-owned chrome', asy
 
     await page.evaluate(() => window.view.showJob(window.fixture('video-analysis')));
     assert.equal(await page.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).count(), 1);
-    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 0);
+    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 1);
+    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isVisible(), false);
+    assert.equal(await page.locator('.riff-pipeline').getAttribute('data-embedded'),'true');
+    assert.equal(await page.locator('.riff-pipeline').evaluate(node=>getComputedStyle(node).padding),'0px');
+    await page.evaluate(() => {
+      document.querySelector('#riff-home-input').value='https://vm.tiktok.com/edited-draft/';
+      window.view.acknowledgeStart('https://vm.tiktok.com/ZN8kT9uhV/');
+    });
     await page.evaluate(() => window.view.showHome());
     assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 1);
-    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').inputValue(), '',
-      'mounting the saved job clears the completed source intent');
+    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').inputValue(), 'https://vm.tiktok.com/edited-draft/',
+      'a late acknowledgement cannot erase a newer exact draft');
+    await creatorInput.fill('https://vm.tiktok.com/ZN8kT9uhV/');
+    await page.evaluate(() => { window.view.showJob(window.fixture('video-analysis'));window.view.acknowledgeStart('https://vm.tiktok.com/ZN8kT9uhV/');window.view.showHome(); });
+    assert.equal(await creatorInput.inputValue(),'', 'only the exact acknowledged source is cleared');
     await page.close();
   }
 });

@@ -1,5 +1,7 @@
-import type { CreatorJobView, PipelineReference } from '../../../packages/contracts/creator-pipeline.ts';
+import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../../packages/contracts/creator-pipeline.ts';
 import type { CreatorDnaView } from '../../../packages/contracts/creator-operations.ts';
+import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import { riffSymbol } from '../riff-ui/brand.ts';
 import { safeHttpUrl, type RiffActionResult, type RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
 import { creatorPipelineStyles } from './styles.ts';
@@ -29,7 +31,10 @@ export type CreatorPipelineOptions = {
     variant: ScriptResult['scripts']['variants'][number];
     state: 'saved' | 'filmed';
   }) => Promise<RiffActionResult>;
+  onDiscoveryOpen?: () => void;
+  embeddedChrome?:boolean;
 };
+export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string};
 
 const unavailable: RiffPanelAction = async () => ({
   status: 'unsupported', message: 'Continue with this request in the ChatGPT composer.',
@@ -37,7 +42,10 @@ const unavailable: RiffPanelAction = async () => ({
 
 /** Pure presentation plus explicit host handoffs. It never fetches, saves, retries, or starts provider work. */
 export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipelineOptions = {}): {
-  render(job: CreatorJobView): void;
+  render(job: CreatorJobView, presentation?:CreatorPipelinePresentation): void;
+  setCatalog(page:RiffVideoCatalogPage|undefined):void;
+  showCatalog(library?:RiffDiscoveryLibrary):void;
+  setNotice(message:string):void;
   setDisplayMode(mode: RiffCreatorDisplayMode): void;
   dispose(): void;
 } {
@@ -129,21 +137,42 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   const style = el('style'); style.textContent = riffBaseStyles + creatorPipelineStyles;
   const wrapper = el('div', undefined, 'riff-app riff-pipeline');
+  wrapper.dataset.embedded=String(options.embeddedChrome===false);
+  const chrome=el('header',undefined,'riff-pipeline__chrome');const trail=el('div',undefined,'riff-pipeline__chrome-trail');
+  const rail=el('span',undefined,'riff-pipeline__rail-symbol');rail.setAttribute('aria-hidden','true');
+  const railSvg=svg(18,18,'0 0 24 24');const railRect=doc.createElementNS('http://www.w3.org/2000/svg','rect');
+  for(const [name,value] of Object.entries({x:'3',y:'4',width:'18',height:'16',rx:'3',fill:'none',stroke:'#697180','stroke-width':'1.6'}))railRect.setAttribute(name,value);
+  railSvg.append(railRect);path(railSvg,'M9 4v16',{fill:'none',stroke:'#697180','stroke-width':'1.6'});rail.append(railSvg);
+  const brand=el('span',undefined,'riff-pipeline__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,el('span','Riff'));
+  const separator=el('span','/','riff-pipeline__separator');const location=el('span','Analysis','riff-pipeline__location');trail.append(rail,brand,separator,location);chrome.append(trail);
+  chrome.hidden=options.embeddedChrome===false;
   const surface = el('section', undefined, 'riff-pipeline__surface');
   surface.setAttribute('aria-label', 'Riff creator workflow');
   const content = el('div', undefined, 'riff-pipeline__content');
   const status = el('p', '', 'riff-pipeline__status');
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); status.setAttribute('aria-atomic', 'true');
-  surface.append(content, status); wrapper.append(surface); root.replaceChildren(style, wrapper);
+  surface.append(content, status); wrapper.append(chrome,surface); root.replaceChildren(style, wrapper);
 
   let disposed = false;
   let mode: RiffCreatorDisplayMode = options.displayMode ?? 'inline';
   let current: CreatorJobView | undefined;
+  let currentStatus:CreatorJobStatusView|undefined;
+  let catalog:RiffVideoCatalogPage|undefined;
+  let sourceUrl:string|undefined;
+  let showingCatalog=false;
+  let screenKind='';
   let identity: string | undefined;
   let ideaIndex = 0;
   let discoveryLibrary: RiffDiscoveryLibrary = 'videos';
   let discoveryFilter = 'For you';
   let studioTab = 0;
+  let catalogIndex=0;
+  let catalogRequested=false;
+
+  const enterDiscovery=(loadCatalog=false)=>{
+    screenKind='discovery';
+    if(loadCatalog&&!catalogRequested){catalogRequested=true;options.onDiscoveryOpen?.();}
+  };
 
   const setStatus = (text: string) => { if (status.textContent !== text) status.textContent = text; };
   const title = (text: string, className = '') => {
@@ -178,6 +207,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if (!src) return undefined;
     const image = el('img', undefined, className); image.src = src; image.alt = alt;
     image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
+    image.addEventListener('error',()=>image.remove(),{once:true});
     return image;
   };
   const metric = (label: string, value: number, kind: 'views' | 'likes' | 'saves' = 'views') => {
@@ -200,8 +230,11 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     return `Use ${selection} as inspiration for the CTA of my current Riff video. Draft only the ending adapted to the “${filter}” preference, preserve the existing hook and main content, and show the proposal in chat without claiming it was saved.`;
   };
 
-  function renderPending(job: CreatorJobView) {
+  function renderPending(job: CreatorJobView,statusView?:CreatorJobStatusView) {
     screen('pending');
+    const progress=statusView?.progress??job.progress;
+    const stage=statusView?.stage??job.stage;
+    content.dataset.stage=stage;
     const scan = job.kind === 'scan';
     const recommendations = job.kind === 'recommendations';
     const profileScan = scan && job.source_kind === 'profile';
@@ -231,27 +264,47 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     intro.append(heading, el('p', loading.subtitle)); card.append(intro);
     if (recommendations) {
       const strip = el('div', undefined, 'riff-loading-references'); strip.setAttribute('aria-label', 'Matching reference videos');
-      for (let index = 0; index < 7; index += 1) strip.append(el('span', undefined, 'riff-loading-reference'));
+      const references=progress.kind==='recommendations'?progress.references:[];
+      for (let index = 0; index < 7; index += 1) {
+        const reference=references[index];
+        const slot=safeLink(reference?.url,`Open matching reference ${index+1}`,'riff-loading-reference');
+        const preview=mediaImage(reference?.thumbnail_url,'Matching reference video','riff-media-image');if(preview)slot.append(preview);
+        strip.append(slot);
+      }
       card.append(strip);
     } else if (profileScan) {
       const strip = el('div', undefined, 'riff-loading-references riff-loading-profile');
       strip.setAttribute('aria-label', 'Loading profile and recent videos');
-      strip.append(el('span', undefined, 'riff-loading-profile__avatar'));
-      for (let index = 0; index < 6; index += 1) strip.append(el('span', undefined, 'riff-loading-reference'));
+      const scanProgress=progress.kind==='scan'?progress:undefined;
+      const avatar=el('span',undefined,'riff-loading-profile__avatar');
+      const avatarImage=mediaImage(scanProgress?.profile?.avatar_url,'Creator profile photo','riff-media-image');if(avatarImage)avatar.append(avatarImage);
+      strip.append(avatar);
+      for (let index = 0; index < 6; index += 1) {
+        const video=scanProgress?.videos[index];
+        const slot=safeLink(video?.url,`Open recent video ${index+1}`,'riff-loading-reference');
+        const preview=mediaImage(video?.thumbnail_url,'Recent creator video','riff-media-image');if(preview)slot.append(preview);
+        strip.append(slot);
+      }
       card.append(strip);
     } else if (scan) {
       const video = el('div', undefined, 'riff-loading-video');
-      video.append(el('span', undefined, 'riff-loading-video__media'));
+      const scanProgress=progress.kind==='scan'?progress:undefined;
+      const first=scanProgress?.videos[0];
+      const submitted=(stage==='accepted'||stage==='reviewing_video')?sourceUrl:undefined;
+      const media=safeLink(first?.url??submitted,'Open submitted video','riff-loading-video__media');
+      const preview=mediaImage(first?.thumbnail_url,'Submitted video preview','riff-media-image');if(preview)media.append(preview);
+      video.append(media);
       const copy = el('span', undefined, 'riff-loading-video__copy'); copy.append(el('strong', loading.sourceTitle), el('span', loading.sourceCopy));
       video.append(copy); card.append(video);
     }
     const progressGroup = el('div', undefined, 'riff-loading-progress');
     const activity = el('div', undefined, 'riff-loading-activity'); activity.append(spinnerIcon(), el('span', loading.activity));
-    const progress = el('div', undefined, 'riff-progress'); progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-label', loading.activity);
+    const progressBar = el('div', undefined, 'riff-progress'); progressBar.setAttribute('role', 'progressbar'); progressBar.setAttribute('aria-label', loading.activity);
     const footer = el('div', undefined, 'riff-loading-footer'); const complete = el('span', undefined, 'riff-loading-complete');
     complete.append(checkIcon(), el('span', loading.done)); footer.append(complete, el('span', loading.next));
-    progressGroup.append(activity, progress, footer); card.append(progressGroup); content.append(card);
-    setStatus(job.state === 'queued' ? 'Queued.' : 'In progress.'); return heading;
+    progressGroup.append(activity, progressBar, footer); card.append(progressGroup); content.append(card);
+    const limitations=progress.limitations;
+    setStatus(limitations.length?limitations.join(' '):(statusView?.state??job.state) === 'queued' ? 'Queued.' : 'In progress.'); return heading;
   }
 
   function renderFailure(job: CreatorJobView) {
@@ -261,6 +314,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const intro = el('div', undefined, 'riff-loading-intro'); const heading = el('h1', headingText); heading.tabIndex = -1;
     intro.append(heading, el('p', 'Continue from the Riff conversation in ChatGPT.')); card.append(intro); content.append(card);
     setStatus(headingText); return heading;
+  }
+
+  function appendFailure(state:'failed'|'needs_reconciliation',limitations:readonly string[]=[]){
+    const headingText=state==='needs_reconciliation'?'This outcome needs review.':'This workflow could not finish.';
+    const card=el('section',undefined,'riff-loading-card riff-recovery-card');
+    const intro=el('div',undefined,'riff-loading-intro');intro.append(el('h2',headingText),el('p','Continue from the Riff conversation in ChatGPT.'));
+    card.append(intro);content.append(card);setStatus(limitations.length?`${limitations.join(' ')} ${headingText}`:headingText);
   }
 
   const analysisDimensions: Array<[string, PaperDimension, CreatorDnaView['claims'][number]['dimension'][]]> = [
@@ -416,6 +476,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     idea.reference_ids.map(id => references.get(id)).find((reference): reference is PipelineReference => Boolean(reference));
 
   function renderDiscovery(job: CreatorJobView & { result: { kind: 'recommendations' } }) {
+    if(mode==='fullscreen')enterDiscovery(true);
     const batch = job.result.batch;
     const references = new Map(batch.references.map(reference => [reference.id, reference]));
     const valid = batch.ideas.filter(idea => idea.reference_ids.every(id => references.has(id)));
@@ -475,20 +536,21 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       control.setAttribute('aria-pressed', String(active)); filters.append(control);
     });
     content.append(filters);
-    if (!valid.length) { setStatus('No videos are available.'); return heading; }
+    const visible=discoveryLibrary==='videos'&&discoveryFilter==='For you'?valid:[];
+    if (!visible.length) { setStatus('No videos are available.'); return heading; }
 
-    ideaIndex = Math.min(ideaIndex, valid.length - 1);
+    ideaIndex = Math.min(ideaIndex, visible.length - 1);
     const carousel = el('section', undefined, 'riff-discovery-carousel'); carousel.dataset.discoveryCarousel = '';
-    carousel.dataset.focus = 'discovery-carousel'; carousel.tabIndex = 0; carousel.setAttribute('aria-label', `Video ${ideaIndex + 1} of ${valid.length}`);
+    carousel.dataset.focus = 'discovery-carousel'; carousel.tabIndex = 0; carousel.setAttribute('aria-label', `Video ${ideaIndex + 1} of ${visible.length}`);
     carousel.addEventListener('keydown', event => {
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-      event.preventDefault(); ideaIndex = (ideaIndex + (event.key === 'ArrowRight' ? 1 : -1) + valid.length) % valid.length; render(job);
+      event.preventDefault(); ideaIndex = (ideaIndex + (event.key === 'ArrowRight' ? 1 : -1) + visible.length) % visible.length; render(job);
     });
     const stage = el('div', undefined, 'riff-discovery-stage');
-    valid.forEach((idea, index) => {
+    visible.forEach((idea, index) => {
       let delta = index - ideaIndex;
-      if (delta > Math.floor(valid.length / 2)) delta -= valid.length;
-      if (delta < -Math.floor(valid.length / 2)) delta += valid.length;
+      if (delta > Math.floor(visible.length / 2)) delta -= visible.length;
+      if (delta < -Math.floor(visible.length / 2)) delta += visible.length;
       const position = delta === 0 ? 'active' : delta === -1 ? 'left-one' : delta === 1 ? 'right-one' : delta < 0 ? 'left-two' : 'right-two';
       const card = el('article', undefined, `riff-idea-card riff-idea-card--${position}`); card.dataset.ideaCard = idea.id;
       if (delta === 0) card.dataset.activeIdea = idea.id;
@@ -528,17 +590,62 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     });
     carousel.append(stage);
     const navigation = el('div', undefined, 'riff-carousel-navigation');
-    const previous = button('', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex - 1 + valid.length) % valid.length; render(job); }, 'previous-idea');
+    const previous = button('', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex - 1 + visible.length) % visible.length; render(job); }, 'previous-idea');
     previous.setAttribute('aria-label', 'Previous idea'); previous.append(arrowIcon('previous'));
     const dots = el('div', undefined, 'riff-discovery-dots'); dots.setAttribute('role', 'group'); dots.setAttribute('aria-label', 'Video position');
-    valid.forEach((_, index) => {
+    visible.forEach((_, index) => {
       const dot = button('', 'riff-discovery-dot', () => { ideaIndex = index; render(job); }, `idea-dot-${index}`);
       dot.setAttribute('aria-label', `Go to idea ${index + 1}`); dot.setAttribute('aria-current', String(index === ideaIndex)); dots.append(dot);
     });
-    const next = button('', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex + 1) % valid.length; render(job); }, 'next-idea');
+    const next = button('', 'riff-carousel-arrow', () => { ideaIndex = (ideaIndex + 1) % visible.length; render(job); }, 'next-idea');
     next.setAttribute('aria-label', 'Next idea'); next.append(arrowIcon('next'));
     navigation.append(previous, dots, next); carousel.append(navigation, el('p', 'Use the left and right arrow keys', 'riff-carousel-hint'));
-    content.append(carousel); setStatus(`${valid.length} ${libraryData.find(([kind]) => kind === discoveryLibrary)![1].toLowerCase()} shown.`); return heading;
+    content.append(carousel); setStatus(`${visible.length} videos shown.`); return heading;
+  }
+
+  function renderCatalogDiscovery(){
+    if(disposed||mode!=='fullscreen')return;
+    enterDiscovery(discoveryLibrary==='videos');location.textContent='Discover videos';showingCatalog=true;content.replaceChildren();screen('discovery');
+    const views={videos:{title:'Find your next breakout idea.',copy:'Explore viral formats picked for you. Find your angle. Make it yours.',filters:['For you','Quick demos','Before / after','How-to','Reactions','Challenges']},
+      hooks:{title:'Stop the scroll.',copy:'Find a hook that grabs attention. Make it sound like you.',filters:['For you','Questions','Bold claims','Visual hooks','Problems','Storytelling']},
+      showcases:{title:'Make your product stand out.',copy:'Turn your product’s best benefit into a video worth watching.',filters:['Quick demos','Before / after','Unboxing','Tutorials','Screen recordings']},
+      ctas:{title:'Turn views into action.',copy:'Give viewers a reason to save, share, follow, or try your product.',filters:['For you','Save','Comment','Follow','Share','Try it']}} as const;
+    const libraries=[['videos','Videos'],['hooks','Hooks'],['showcases','Product showcases'],['ctas','CTAs']] as const;
+    const view=views[discoveryLibrary];if(!(view.filters as readonly string[]).includes(discoveryFilter))discoveryFilter=view.filters[0];
+    const header=el('header',undefined,'riff-discovery-header');const headingGroup=title(view.title,'riff-discovery-title');header.append(headingGroup.group);
+    const tabs=el('div',undefined,'riff-libraries');tabs.setAttribute('aria-label','Discovery libraries');tabs.setAttribute('role','tablist');
+    libraries.forEach(([kind,label])=>{const selected=kind===discoveryLibrary;const control=button(label,`riff-library${selected?' riff-library--active':''}`,()=>{
+      discoveryLibrary=kind;discoveryFilter=views[kind].filters[0];catalogIndex=0;renderCatalogDiscovery();
+    },`library-${kind}`);control.setAttribute('role','tab');control.setAttribute('aria-selected',String(selected));control.tabIndex=selected?0:-1;tabs.append(control);});
+    header.append(tabs);content.append(header,el('p',view.copy,'riff-discovery-copy'));
+    const filters=el('div',undefined,'riff-discovery-filters');filters.setAttribute('role','group');filters.setAttribute('aria-label','Video filters');
+    view.filters.forEach(label=>{const selected=label===discoveryFilter;const control=button(label,`riff-filter${selected?' riff-filter--active':''}`,()=>{
+      discoveryFilter=label;catalogIndex=0;renderCatalogDiscovery();
+    },`filter-${label}`);control.setAttribute('aria-pressed',String(selected));filters.append(control);});content.append(filters);
+    const cards=discoveryLibrary==='videos'&&discoveryFilter==='For you'?(catalog?.cards.slice(0,8)??[]):[];
+    if(!cards.length){setStatus('No videos are available.');return;}
+    catalogIndex=Math.min(catalogIndex,cards.length-1);
+    const carousel=el('section',undefined,'riff-discovery-carousel');carousel.dataset.discoveryCarousel='';carousel.tabIndex=0;
+    carousel.dataset.focus='discovery-carousel';carousel.setAttribute('aria-label',`Video ${catalogIndex+1} of ${cards.length}`);
+    carousel.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft'].includes(event.key))return;event.preventDefault();
+      catalogIndex=(catalogIndex+(event.key==='ArrowRight'?1:-1)+cards.length)%cards.length;renderCatalogDiscovery();});
+    const stage=el('div',undefined,'riff-discovery-stage');cards.forEach((card,index)=>{
+      let delta=index-catalogIndex;if(delta>Math.floor(cards.length/2))delta-=cards.length;if(delta< -Math.floor(cards.length/2))delta+=cards.length;
+      const position=delta===0?'active':delta===-1?'left-one':delta===1?'right-one':delta<0?'left-two':'right-two';
+      const article=el('article',undefined,`riff-idea-card riff-idea-card--${position}`);article.dataset.catalogCard=card.id;if(delta===0)article.dataset.activeCatalog=card.id;
+      const media=safeLink(card.canonical_url,'Open saved video','riff-idea-media');const preview=mediaImage(card.thumbnail_url??undefined,'Saved video preview','riff-media-image');if(preview)media.append(preview);
+      const play=el('span',undefined,'riff-idea-play');play.append(playIcon());media.append(play);
+      const observed=[['views',card.metrics.views,eyeIcon()],['likes',card.metrics.likes,heartIcon()],['saves',card.metrics.saves,saveIcon('#544276')]] as const;
+      const stats=el('span',undefined,'riff-idea-stats');let hasStats=false;
+      for(const [label,value,icon] of observed){if(value===null)continue;hasStats=true;const stat=el('span',undefined,'riff-idea-stat');stat.setAttribute('aria-label',`${formatMetric(value)} ${label}`);stat.append(icon,el('strong',formatMetric(value)));stats.append(stat);}
+      if(hasStats)media.append(stats);
+      article.append(media);if(delta===0&&card.caption)article.append(el('p',card.caption,'riff-idea-title'));stage.append(article);
+    });
+    carousel.append(stage);const navigation=el('div',undefined,'riff-carousel-navigation');
+    const previous=button('','riff-carousel-arrow',()=>{catalogIndex=(catalogIndex-1+cards.length)%cards.length;renderCatalogDiscovery();},'previous-video');previous.setAttribute('aria-label','Previous video');previous.append(arrowIcon('previous'));
+    const dots=el('div',undefined,'riff-discovery-dots');dots.setAttribute('role','group');dots.setAttribute('aria-label','Video position');cards.forEach((_card,index)=>{const dot=button('','riff-discovery-dot',()=>{catalogIndex=index;renderCatalogDiscovery();},`catalog-dot-${index}`);dot.setAttribute('aria-label',`Go to video ${index+1}`);dot.setAttribute('aria-current',String(index===catalogIndex));dots.append(dot);});
+    const next=button('','riff-carousel-arrow',()=>{catalogIndex=(catalogIndex+1)%cards.length;renderCatalogDiscovery();},'next-video');next.setAttribute('aria-label','Next video');next.append(arrowIcon('next'));
+    navigation.append(previous,dots,next);carousel.append(navigation,el('p','Use the left and right arrow keys','riff-carousel-hint'));content.append(carousel);setStatus(`${cards.length} videos shown.`);
   }
 
   function scriptPart(label: string, copy: string, tip?: string) {
@@ -650,28 +757,38 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     setStatus('Studio shown.'); return heading;
   }
 
-  function render(job: CreatorJobView) {
+  function render(job: CreatorJobView,presentation:CreatorPipelinePresentation={}) {
     if (disposed) return;
     const nextIdentity = `${job.project_id}:${job.id}`;
     const same = identity === nextIdentity;
     const active = doc.activeElement as HTMLElement | null;
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
-    if (!same) { ideaIndex = 0; discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0; }
-    identity = nextIdentity; current = job; wrapper.dataset.mode = mode; content.replaceChildren();
+    if (!same) { ideaIndex = 0; catalogIndex=0;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined; }
+    if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
+    if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
+    identity = nextIdentity; current = job;currentStatus=presentation.status;showingCatalog=false; wrapper.dataset.mode = mode; content.replaceChildren();
     let heading: HTMLElement;
-    if (job.state === 'queued' || job.state === 'running') heading = renderPending(job);
-    else if (job.state === 'failed' || job.state === 'needs_reconciliation') heading = renderFailure(job);
-    else if (job.result?.kind === 'scan') heading = renderAnalysis(job as CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } });
+    const observedState=presentation.status?.state??job.state;
+    location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
+    if (job.state === 'queued' || job.state === 'running') {
+      screenKind='pending';heading = renderPending(job,presentation.status);
+      if(observedState==='failed'||observedState==='needs_reconciliation')appendFailure(observedState,presentation.status?.progress.limitations??job.progress.limitations);
+    }
+    else if (job.state === 'failed' || job.state === 'needs_reconciliation') {screenKind='failure';heading = renderFailure(job);}
+    else if (job.result?.kind === 'scan') {screenKind='analysis';heading = renderAnalysis(job as CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } });}
     else if (job.result?.kind === 'recommendations') heading = renderDiscovery(job as CreatorJobView & { result: { kind: 'recommendations' } });
-    else if (job.result?.kind === 'scripts') heading = renderStudio(job as CreatorJobView & { result: { kind: 'scripts' } });
+    else if (job.result?.kind === 'scripts') {screenKind='studio';heading = renderStudio(job as CreatorJobView & { result: { kind: 'scripts' } });}
     else { const result = title('Saved result unavailable.'); content.append(result.group); heading = result.heading; setStatus('Saved result unavailable.'); }
     if (hadFocus) ([...content.querySelectorAll<HTMLElement>('[data-focus]')].find(node => node.dataset.focus === focusKey) ?? heading).focus({ preventScroll: true });
   }
 
   return {
     render,
-    setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode; if (current) render(current); },
-    dispose() { if (disposed) return; disposed = true; current = undefined; root.replaceChildren(); },
+    setCatalog(page){catalog=page?structuredClone(page):undefined;if(showingCatalog)renderCatalogDiscovery();},
+    showCatalog(library='videos'){if(disposed)return;discoveryLibrary=library;discoveryFilter=library==='showcases'?'Quick demos':'For you';catalogIndex=0;renderCatalogDiscovery();},
+    setNotice(message){if(!disposed)setStatus(message);},
+    setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
+    dispose() { if (disposed) return; disposed = true; current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogRequested=false;root.replaceChildren(); },
   };
 }

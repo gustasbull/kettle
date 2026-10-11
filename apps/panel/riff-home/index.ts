@@ -1,6 +1,7 @@
-import type { CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
-import { mountCreatorPipeline, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
-import { riffLockup } from '../riff-ui/brand.ts';
+import type { CreatorJobStatusView, CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
+import { mountCreatorPipeline, type RiffDiscoveryLibrary, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
+import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
 
@@ -47,6 +48,7 @@ export type RiffHomeActions = {
     variant: ScriptResult['scripts']['variants'][number];
     state: 'saved' | 'filmed';
   }) => Promise<RiffActionResult>;
+  onDiscoveryOpen?:()=>void;
 };
 
 export function riffHomeStructuredOutput(value: unknown): RiffHomeState {
@@ -74,19 +76,27 @@ export function riffHomeStructuredOutput(value: unknown): RiffHomeState {
 
 const homeStyles = `
 ${riffBaseStyles}
-html, body { margin: 0; min-height: 100%; background: #FFFFFF; }
+html, body { margin: 0; min-height: 100%; background: #FCFCFE; }
 body { min-height: 100vh; }
-.riff-home { min-height: 100vh; background: #FFFFFF; color: #242426; }
+.riff-home { min-height: 100vh; padding: 12px; background: radial-gradient(circle, rgba(101,86,122,.06) .6px, transparent .85px) center/16px 16px, radial-gradient(at 10% 70%, #DCEBFA 0%, transparent 60%), radial-gradient(at 70% 65%, #E6DDF6 0%, transparent 58%), radial-gradient(at 92% 30%, #F5E2EF 0%, transparent 55%), #FCFCFE; color: #242426; }
 .riff-home__account { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.riff-home__home { display: flex; min-height: 100vh; width: 100%; align-items: center; flex-direction: column; gap: 20px; padding: calc(28px + var(--riff-safe-top, 0px)) calc(28px + var(--riff-safe-right, 0px)) calc(40px + var(--riff-safe-bottom, 0px)) calc(28px + var(--riff-safe-left, 0px)); border-radius: 0 0 24px 24px; background: #FFFFFF; }
+.riff-home__chrome { display:flex; width:100%; flex:0 0 auto; align-items:center; justify-content:space-between; padding:calc(16px + var(--riff-safe-top,0px)) 24px 8px; border-radius:24px 24px 0 0; }
+.riff-home__chrome-trail { display:flex; width:fit-content; height:44px; align-items:center; gap:14px; }
+.riff-home__rail-symbol { display:flex; width:36px; height:36px; flex:0 0 auto; align-items:center; justify-content:center; border:1px solid #E3E7EE; border-radius:10px; background:#FFF; box-shadow:0 1px 3px #18243A08; }
+.riff-home__rail-symbol svg { width:18px;height:18px; }
+.riff-home__brand { display:flex;align-items:center;gap:8px;color:#242426;font-size:14px;font-weight:600;line-height:20px; }
+.riff-home__brand svg { width:22px;height:22px; }
+.riff-home__separator { color:#ABB0B9;font-size:14px;line-height:20px; }
+.riff-home__location { color:#242426;font-size:13px;line-height:20px; }
+.riff-home__home { display: flex; min-height: calc(100vh - 92px); width: 100%; align-items: center; flex-direction: column; gap: 20px; padding: 28px calc(28px + var(--riff-safe-right, 0px)) calc(40px + var(--riff-safe-bottom, 0px)) calc(28px + var(--riff-safe-left, 0px)); border-radius: 0 0 24px 24px; background: transparent; }
 .riff-home__hero { display: flex; width: 100%; align-items: center; flex-direction: column; gap: 16px; padding: 12px 0 4px; text-align: center; }
 .riff-home__hero-mark { width: 104px; height: 38px; flex: 0 0 auto; color: #0D0E12; }
 .riff-home h1 { width: fit-content; max-width: 100%; color: #202124; font-size: 40px; font-weight: 600; line-height: 48px; letter-spacing: -.02em; text-align: center; text-wrap: balance; }
-.riff-home__composer { display: flex; width: 760px; max-width: 100%; flex-direction: column; gap: 12px; padding: 14px; border: 0; border-radius: 20px; background: #EFF4FF; box-shadow: 0 3px 6px #20355608, 0 12px 24px #20355610; }
+.riff-home__composer { display: flex; width: 760px; max-width: 100%; flex-direction: column; gap: 12px; padding: 14px; border: 0; border-radius: 20px; background: linear-gradient(150deg, #E6EDF033, #FAFBFC66), #F0F6FA; box-shadow: inset 0 1px 0 #FFFFFFAA, 0 8px 18px #396E9012; }
 .riff-home__label { display: none; }
 .riff-home__chips { display: flex; width: 100%; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .riff-home__chip, .riff-home__upload, .riff-home__submit, .riff-home__recent-next, .riff-home__recent-card { appearance: none; border: 0; cursor: pointer; }
-.riff-home__chip { display: flex; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #425779; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; }
+.riff-home__chip { display: flex; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #6933A1; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; }
 .riff-home__chip svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .riff-home__input-shell { display: flex; width: 100%; flex-direction: column; gap: 22px; padding: 18px; border: 1px solid #DDE5F4; border-radius: 14px; background: #FFFFFF; }
 .riff-home__composer textarea { display: block; width: 100%; height: 22px; min-height: 22px; resize: none; overflow: auto; padding: 0; border: 0; outline: 0; color: #242426; background: transparent; font-size: 15px; line-height: 22px; }
@@ -94,7 +104,7 @@ body { min-height: 100vh; }
 .riff-home__composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .riff-home__upload { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0; color: #566279; background: transparent; font-size: 13px; font-weight: 400; line-height: 20px; }
 .riff-home__upload svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.riff-home__submit { display: flex; height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0 22px; border-radius: 999px; color: #FFFFFF; background: linear-gradient(in oklab 180deg, oklab(60.9% -0.012 -0.211) 0%, oklab(56.7% -0.015 -0.224) 100%); box-shadow: inset 0 1px 0 #FFFFFF40, 0 2px 3px #254BCC33, 0 6px 12px #3865F840; font-size: 14px; font-weight: 600; line-height: 20px; }
+.riff-home__submit { display: flex; height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0 22px; border-radius: 999px; color: #FFFFFF; background: radial-gradient(circle farthest-corner at 50% 45% in oklab, oklab(46.1% .087 -.206) 0%, oklab(50.7% .09 -.203) 55%, oklab(61.7% .089 -.17) 100%), #7138D4; box-shadow: inset 0 1px 2px #FFFFFF55, 0 4px 8px #54259B33, 0 10px 20px #7444CD33; font-size: 14px; font-weight: 600; line-height: 20px; }
 .riff-home__composer textarea:focus-visible { outline: 3px solid var(--color-ring-primary, #3865F8); outline-offset: 3px; border-radius: 2px; }
 .riff-home__chip:disabled, .riff-home__upload:disabled, .riff-home__submit:disabled, .riff-home__recent-next:disabled, .riff-home__recent-card:disabled { cursor: wait; opacity: .62; }
 .riff-home__status { width: 760px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; text-align: left; }
@@ -102,7 +112,7 @@ body { min-height: 100vh; }
 .riff-home__section { display: flex; width: 760px; max-width: 100%; flex-direction: column; gap: 12px; padding-top: 8px; }
 .riff-home__section-head { display: flex; align-items: center; justify-content: space-between; }
 .riff-home__section h2 { color: #202124; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0; }
-.riff-home__recent-next { display: flex; width: 32px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; color: #35578B; background: #F3F6FC; box-shadow: 0 2px 4px #2035560A; }
+.riff-home__recent-next { display: flex; width: 32px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; color: #35578B; background: #F0F3F7; box-shadow: 0 2px 4px #2035560A; }
 .riff-home__recent-next svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .riff-home__recents { display: flex; width: 100%; gap: 14px; overflow-x: auto; padding: 2px 0 12px 2px; scrollbar-width: none; scroll-snap-type: x proximity; }
 .riff-home__recents::-webkit-scrollbar { display: none; }
@@ -115,7 +125,7 @@ body { min-height: 100vh; }
 .riff-home__recent-title { display: -webkit-box; overflow: hidden; color: #242931; font-size: 13px; font-weight: 600; line-height: 18px; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .riff-home__recent-stage { color: #667285; font-size: 11px; font-weight: 400; line-height: 16px; }
 .riff-home__recent-state { flex: 0 0 auto; padding: 12px 0; color: #667285; font-size: 13px; line-height: 18px; }
-.riff-home__workflow { width: 100%; min-height: 100vh; background: #FFFFFF; }
+.riff-home__workflow { width: 100%; min-height: calc(100vh - 92px); background: transparent; }
 @media (max-width: 480px) {
   .riff-home__home { padding-inline: calc(16px + var(--riff-safe-left, 0px)) calc(16px + var(--riff-safe-right, 0px)); }
   .riff-home h1 { font-size: 34px; line-height: 41px; }
@@ -125,10 +135,10 @@ body { min-height: 100vh; }
 `;
 
 const libraries = [
-  ['videos', 'Trending videos', 'Add a public TikTok profile or video link below. Riff will analyze it, then find evidence-backed video directions here.'],
-  ['hooks', 'Hooks', 'Hook analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
-  ['showcases', 'Product showcases', 'Showcase analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
-  ['ctas', 'Calls to action', 'CTA analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
+  ['videos', 'Trending videos'],
+  ['hooks', 'Hooks'],
+  ['showcases', 'Product showcases'],
+  ['ctas', 'Calls to action'],
 ] as const;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -200,6 +210,12 @@ function paperRecentArrow(doc: Document) {
   return svg;
 }
 
+function paperRailIcon(doc:Document){
+  const svg=iconRoot(doc);svg.setAttribute('width','18');svg.setAttribute('height','18');
+  svg.append(svgNode(doc,'rect',{x:'3',y:'4',width:'18',height:'16',rx:'3',fill:'none',stroke:'#697180','stroke-width':'1.6'}),
+    svgNode(doc,'path',{d:'M9 4v16',fill:'none',stroke:'#697180','stroke-width':'1.6'}));return svg;
+}
+
 function tiktokBadge(doc: Document) {
   const svg = iconRoot(doc);
   const d = 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z';
@@ -216,7 +232,12 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   setRecents(items: RiffRecentWork[]): void;
   setRecentsState(state: RiffRecentsState): void;
   setBusy(message: string): void;
-  showJob(job: CreatorJobView): void;
+  showJob(job: CreatorJobView, presentation?:{status?:CreatorJobStatusView;sourceUrl?:string}): void;
+  acknowledgeStart(source:string):void;
+  setCatalog(page:RiffVideoCatalogPage|undefined):void;
+  showCatalog(library?:RiffDiscoveryLibrary):void;
+  setWorkflowNotice(message:string):void;
+  clearPrivate():void;
   showHome(): void;
   dispose(): void;
 } {
@@ -229,6 +250,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   };
   const style = node('style'); style.textContent = homeStyles;
   const app = node('main', undefined, 'riff-app riff-home');
+  const chrome=node('header',undefined,'riff-home__chrome');const trail=node('div',undefined,'riff-home__chrome-trail');
+  const rail=node('span',undefined,'riff-home__rail-symbol');rail.setAttribute('aria-hidden','true');rail.append(paperRailIcon(doc));
+  const brand=node('span',undefined,'riff-home__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,node('span','Riff'));
+  const separator=node('span','/','riff-home__separator');const location=node('span','Home','riff-home__location');trail.append(rail,brand,separator,location);chrome.append(trail);
   const account = node('p', 'Connecting…', 'riff-home__account');
   const home = node('section', undefined, 'riff-home__home');
   const hero = node('section', undefined, 'riff-home__hero');
@@ -242,7 +267,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   input.placeholder = 'Share a video or profile link, or tell me what you want to make…';
   const chips = node('div', undefined, 'riff-home__chips');
   const libraryControls: HTMLButtonElement[] = [];
-  for (const [kind, title, guidance] of libraries) {
+  for (const [kind, title] of libraries) {
     const chip = node('button', undefined, 'riff-home__chip'); chip.type = 'button'; chip.dataset.library = kind;
     chip.append(paperShortcutIcon(doc, kind), node('span', title));
     chip.setAttribute('aria-pressed', 'false');
@@ -250,8 +275,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       if (disposed) return;
       invocationEpoch++;
       for (const control of libraryControls) control.setAttribute('aria-pressed', String(control === chip));
-      status.textContent = guidance;
-      input.focus({ preventScroll: true });
+      showCatalog(kind);
     });
     libraryControls.push(chip); chips.append(chip);
   }
@@ -276,7 +300,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
 
   const workflow = node('section', undefined, 'riff-home__workflow'); workflow.hidden = true;
   const workflowRoot = node('div'); workflow.append(workflowRoot);
-  app.append(account, home, workflow); root.replaceChildren(style, app);
+  app.append(chrome,account, home, workflow); root.replaceChildren(style, app);
 
   let disposed = false;
   let pipeline: ReturnType<typeof mountCreatorPipeline> | undefined;
@@ -297,14 +321,24 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const showHome = () => {
     if (disposed) return;
     invocationEpoch++;
-    if (!home.isConnected) app.insertBefore(home, workflow);
-    home.hidden = false; workflow.hidden = true;
+    location.textContent='Home';home.hidden = false; workflow.hidden = true;
+  };
+  const ensurePipeline=()=>pipeline??=mountCreatorPipeline(workflowRoot,{
+    displayMode:'fullscreen',sendPrompt:actions.send,embeddedChrome:false,
+    requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
+    startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
+    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,
+  });
+  const showCatalog=(library:RiffDiscoveryLibrary='videos')=>{
+    if(disposed)return;
+    invocationEpoch++;location.textContent='Discover videos';home.hidden=true;workflow.hidden=false;
+    ensurePipeline().showCatalog(library);workflow.scrollIntoView({block:'start'});
   };
 
   form.addEventListener('submit', event => {
-    event.preventDefault(); const value = input.value.trim();
-    if (!value) { status.textContent = 'Add a video link, profile link, or idea first.'; input.focus(); return; }
-    void invoke(() => actions.start(value), 'Starting your Riff analysis…', submit);
+    event.preventDefault(); const rawValue=input.value;
+    if (!rawValue.trim()) { status.textContent = 'Add a video link, profile link, or idea first.'; input.focus(); return; }
+    void invoke(() => actions.start(rawValue), 'Starting your Riff analysis…', submit);
   });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) form.requestSubmit();
@@ -372,21 +406,19 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setRecents(items) { if (!disposed) renderRecentsState({ status: 'ready', items }); },
     setRecentsState(state) { if (!disposed) renderRecentsState(state); },
     setBusy(message) { if (!disposed) status.textContent = message; },
-    showJob(job) {
+    showJob(job,presentation={}) {
       if (disposed) return;
       invocationEpoch++;
-      input.value = '';
-      home.remove(); workflow.hidden = false;
-      pipeline ??= mountCreatorPipeline(workflowRoot, {
-        displayMode: 'fullscreen', sendPrompt: actions.send,
-        requestFullscreen: async () => ({ status: 'sent', message: 'Already open in Riff.' }),
-        startRecommendations: actions.startRecommendations,
-        makeMine: actions.makeMine,
-        setVariantState: actions.setVariantState,
-      });
-      pipeline.render(job);
+      location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
+      home.hidden=true; workflow.hidden = false;
+      ensurePipeline().render(job,presentation);
       workflow.scrollIntoView({ block: 'start' });
     },
+    acknowledgeStart(source){if(!disposed&&input.value===source)input.value='';},
+    setCatalog(page){pipeline?.setCatalog(page);},
+    showCatalog,
+    setWorkflowNotice(message){pipeline?.setNotice(message);},
+    clearPrivate(){if(disposed)return;input.value='';pipeline?.dispose();pipeline=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
       if (disposed) return; disposed = true; pipeline?.dispose(); pipeline = undefined; root.replaceChildren();

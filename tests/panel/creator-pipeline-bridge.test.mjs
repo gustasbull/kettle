@@ -16,6 +16,9 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     import { creatorJobFixture } from './evals/creator-loop/pipeline-fixtures.ts';
     import { creatorFailure } from './packages/application/creator-operations.ts';
     window.makeOutput = kind => ({ok:true,data:{job:creatorJobFixture(kind)}});
+    window.makeStatus = job => ({ok:true,data:{status:{id:job.id,kind:job.kind,state:job.state,stage:job.stage,
+      revision:job.revision,created_at:job.created_at,updated_at:job.updated_at,progress:job.progress,
+      terminal_result_available:job.state==='succeeded'}}});
     window.output = window.makeOutput('recommendations');
     window.startInput = {request_id:'00000000-0000-4000-8000-000000000622',source_url:'https://www.tiktok.com/@fixture'};
     const startJob = window.makeOutput('scan').data.job;
@@ -49,7 +52,13 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
           window.send('ui/notifications/tool-input',{arguments:direct?window.startInput:{job_id:window.output.data.job.id}});
           window.send('ui/notifications/tool-result',{structuredContent:direct?window.startOutput:window.output,content:[]}); window.ready=true;
         }
-        if(m.method==='tools/call') { window.calls.push(m); if(window.respond) window.reply(m.id,{structuredContent:location.search==='?start'?{ok:true,data:{job:window.startOutput.data.job}}:window.output,content:[]}); }
+        if(m.method==='tools/call') { window.calls.push(m); if(window.respond) {
+          const active=location.search==='?start'?window.startOutput.data.job:window.output.data.job;
+          const structuredContent=m.params.name==='get_creator_job_status'?window.makeStatus(active):
+            m.params.name==='list_riff_videos'?{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}:
+            {ok:true,data:{job:active}};
+          window.reply(m.id,{structuredContent,content:[]});
+        } }
         if(m.method==='ui/request-display-mode') { window.displayRequests.push(m.params); window.reply(m.id,{mode:'fullscreen'}); window.send('ui/notifications/host-context-changed',{displayMode:'fullscreen'}); }
         if(m.method==='ui/message') { window.messages.push(m.params); window.reply(m.id,{}); }
         if(m.method==='ui/notifications/size-changed') window.sizes.push(m.params);
@@ -94,6 +103,9 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     await frame.getByRole('button',{name:'Open discovery'}).click();
     await frame.waitForFunction(()=>document.body.textContent.includes('Find your next breakout idea.'));
     assert.deepEqual(await page.evaluate(()=>window.displayRequests),[{mode:'fullscreen'}]);
+    await page.waitForFunction(()=>window.calls.some(call=>call.params.name==='list_riff_videos'),undefined,{timeout:2_000});
+    assert.deepEqual(await page.evaluate(()=>window.calls.filter(call=>call.params.name==='list_riff_videos').map(call=>call.params.arguments)),
+      [{project_id:'00000000-0000-4000-8000-000000000100',sort:'observed_at_desc',limit:8}]);
     await frame.getByRole('button',{name:'Make it mine'}).click();
     await page.waitForFunction(()=>window.messages.length===1);
     const sent=await page.evaluate(()=>window.messages[0]);
@@ -101,10 +113,11 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.doesNotMatch(sent.content[0].text,internalUuid);
     assert.doesNotMatch(sent.content[0].text,/\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant)\b|\bversion\s+\d+\b/i);
     assert.deepEqual(sent._meta['openai/message'],{target:'active',send:true});
+    await page.evaluate(()=>{window.calls=[];});
   });
-  await t.test('explicit refresh reads only get_creator_job; duplicate calls suppressed',async()=>{
+  await t.test('explicit refresh reads only compact status; duplicate calls suppressed',async()=>{
     await frame.evaluate(()=>Promise.all([window.bridge.refresh(),window.bridge.refresh()]));
-    assert.deepEqual(await page.evaluate(()=>window.calls.map(m=>({name:m.params.name,arguments:m.params.arguments}))),[{name:'get_creator_job',arguments:{job_id:'00000000-0000-4000-8000-000000000620'}}]);
+    assert.deepEqual(await page.evaluate(()=>window.calls.map(m=>({name:m.params.name,arguments:m.params.arguments}))),[{name:'get_creator_job_status',arguments:{job_id:'00000000-0000-4000-8000-000000000620'}}]);
   });
   await t.test('timeout recovers with explicit retry and ignores late result',async()=>{
     await page.evaluate(()=>{window.respond=false;});
@@ -125,7 +138,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     frame=await launch('?running');
     await frame.waitForFunction(()=>document.querySelector('#review').textContent.includes('Automatic updates paused'));
     assert.equal(await page.evaluate(()=>window.calls.length),2);
-    assert.ok(await page.evaluate(()=>window.calls.every(m=>m.params.name==='get_creator_job')));
+    assert.ok(await page.evaluate(()=>window.calls.every(m=>m.params.name==='get_creator_job_status')));
     await page.evaluate(()=>{
       window.output=window.makeOutput('recommendations');window.output.data.job.revision=4;
       window.send('ui/notifications/tool-result',{structuredContent:window.output,content:[]});

@@ -12,6 +12,7 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.fixtures={scan:pipelineFixture('video-analysis'),ideas:pipelineFixture('ideas')};
+    window.fixtures.ideas.id='00000000-0000-4000-8000-000000000630';
     window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,pollIntervalMs:20,maxPolls:2});
   ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
   const server = createServer((req, res) => {
@@ -424,6 +425,7 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
   await frame.waitForFunction(() => window.starts.length === 1);
   await page.evaluate(() => window.changeAccount());
   await frame.waitForFunction(() => !document.querySelector('.riff-home__submit')?.disabled);
+  await input.fill(source);
   await submit.click(); await frame.getByText(/Use a public TikTok video or creator-profile link/i).waitFor();
   const starts = await frame.evaluate(() => window.starts);
   assert.notEqual(starts[0].request_id, starts[1].request_id);
@@ -545,6 +547,7 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.complete=pipelineFixture('video-analysis');
+    window.complete.revision=3;
     window.pending=structuredClone(window.complete); window.pending.state='queued'; window.pending.result=null; window.pending.revision=1;
     window.pending.stage='accepted'; window.pending.progress={kind:'scan',profile:null,videos:[],limitations:[]};
     window.running=structuredClone(window.pending); window.running.state='running'; window.running.revision=2; window.running.stage='reviewing_video';
@@ -556,7 +559,7 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
     res.setHeader('Content-Type', 'text/html');
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
-      window.getCalls=0; window.listCalls=0; window.ready=false;
+      window.statusCalls=0; window.fullCalls=0; window.listCalls=0; window.ready=false;
       const frame=()=>document.querySelector('iframe').contentWindow;
       const result=(id,structuredContent)=>frame().postMessage({jsonrpc:'2.0',id,result:{content:[],structuredContent}},'*');
       addEventListener('message',e=>{const m=e.data;
@@ -568,11 +571,15 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
         if(m.method!=='tools/call')return;
         if(m.params.name==='list_riff_work'){window.listCalls++;return result(m.id,{ok:true,data:{work:[]}});}
         if(m.params.name==='start_riff_creator')return result(m.id,{ok:true,data:{job:frame().pending}});
-        if(m.params.name==='get_creator_job'){
-          window.getCalls++;
-          if(window.getCalls===1)return;
-          return result(m.id,{ok:true,data:{job:window.getCalls===2?frame().running:frame().complete}});
+        if(m.params.name==='get_creator_job_status'){
+          window.statusCalls++;
+          if(window.statusCalls===1)return;
+          const job=window.statusCalls===2?frame().running:frame().complete;
+          return result(m.id,{ok:true,data:{status:{id:job.id,kind:job.kind,state:job.state,stage:job.stage,
+            revision:job.revision,created_at:job.created_at,updated_at:job.updated_at,progress:job.progress,
+            terminal_result_available:job.state==='succeeded'}}});
         }
+        if(m.params.name==='get_creator_job'){window.fullCalls++;return result(m.id,{ok:true,data:{job:frame().complete}});}
       });
     </script><iframe src="/frame"></iframe>`);
   });
@@ -588,7 +595,8 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
   await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).waitFor();
   assert.equal(await frame.getByRole('button', { name: /Refresh saved job/ }).count(), 0);
   assert.equal(await frame.locator('.riff-home__job-id').count(), 0);
-  assert.equal(await page.evaluate(() => window.getCalls), 3, 'a transient read timeout does not stop bounded polling');
+  assert.equal(await page.evaluate(() => window.statusCalls), 3, 'a transient compact-status timeout does not stop bounded polling');
+  assert.equal(await page.evaluate(() => window.fullCalls), 1, 'the terminal result is read in full exactly once');
   await page.waitForFunction(() => window.listCalls >= 3);
   await frame.evaluate(() => window.bridge.dispose());
 });

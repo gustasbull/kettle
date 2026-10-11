@@ -150,7 +150,10 @@ export class App {
   private async receive(message:JsonRpcMessage){
     if(message.id!==undefined&&!message.method){
       const pending=this.pending.get(message.id);if(!pending)return;
-      if(message.error)pending.reject(new Error(typeof message.error.message==='string'?message.error.message:'Host request failed'));
+      if(message.error){
+        const error=new Error(typeof message.error.message==='string'?message.error.message:'Host request failed') as Error&{code?:number;data?:unknown};
+        error.code=message.error.code;error.data=message.error.data;pending.reject(error);
+      }
       else pending.resolve(message.result);return;
     }
     const params=plainObject(message.params)?message.params:{};

@@ -70,7 +70,7 @@ test('requires validated selection and handshake; missing tools displays without
   f.controller.receiveInput({job_id:value.data.job.id}); f.controller.receiveResult(value);
   assert.equal(f.visible(),undefined); await f.tick(30); assert.equal(f.calls.length,0);
   f.controller.connected(false); await f.controller.refresh(); await f.tick(300);
-  assert.deepEqual(f.visible(),value.data.job); assert.equal(f.calls.length,0);
+  assert.deepEqual(Object.fromEntries(Object.entries(f.visible()!).filter(([key])=>key!=='job'&&key!=='status')),value.data.job); assert.equal(f.calls.length,0);
 });
 
 test('polling is bounded, only selected read input, one in flight; manual refresh never resets budget',async t=>{

@@ -4,9 +4,9 @@ import {
 } from './mcp-app-lite.ts';
 import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
-import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
+import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
-import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
+import { parseStartRiffCreatorInput, riffVideosStructuredOutput } from './creator-pipeline-validation.ts';
 
 const WAIT_MS = 10_000;
 
@@ -28,6 +28,8 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const card = doc.createElement('div');
   host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
+  let currentProjectId:string|undefined,catalogAttempted=false,catalogLoading=false;
+  const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
     view?.dispose(); view = undefined; card.replaceChildren();
@@ -75,21 +77,35 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
       return { status: 'failed' as const, message: 'Fullscreen could not open. Continue from the inline summary.' };
     }
   };
+  const loadCatalog=async()=>{
+    if(catalogAttempted||catalogLoading||!bridgeReady)return;catalogAttempted=true;catalogLoading=true;
+    try{
+      const result=riffVideosStructuredOutput(await app.callServerTool({name:'list_riff_videos',arguments:{...(currentProjectId?{project_id:currentProjectId}:{}),sort:'observed_at_desc',limit:8}},
+        {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}));
+      if(result?.ok)view?.setCatalog(result.data);
+    }catch{/* Discovery keeps the approved empty state. */}finally{catalogLoading=false;}
+  };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
-    job(job, status) {
+    job(snapshot, status) {
       view ??= mountCreatorPipeline(card, {
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
-        sendPrompt, requestFullscreen,
+        sendPrompt, requestFullscreen,onDiscoveryOpen:()=>void loadCatalog(),
       });
-      view.render(job);
+      currentProjectId=snapshot.job.project_id;
+      view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{})});
+      if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length)sourceByJob.delete(snapshot.job.id);
       message.textContent = status.notice ?? '';
       message.hidden = !status.notice;
     },
+    notice(text){message.textContent=text;message.hidden=false;view?.setNotice(text);},
     cleared(reason) { clearCard(messages[reason]); },
-  }, async (input, signal) => creatorJobStructuredOutput(await app.callServerTool(
-    { name: 'get_creator_job', arguments: input },
-    { signal, timeout: timeoutMs + 1_000, maxTotalTimeout: timeoutMs + 1_000 })), { ...limits, performance: localPerformance });
+  }, {
+    readStatus:async(input,signal)=>creatorJobStatusStructuredOutput(await app.callServerTool({name:'get_creator_job_status',arguments:input},
+      {signal,timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000})),
+    readFull:async(input,signal)=>creatorJobStructuredOutput(await app.callServerTool({name:'get_creator_job',arguments:input},
+      {signal,timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000})),
+  }, { ...limits, performance: localPerformance });
   // Receiving a job before initialization must not cancel the handshake deadline.
   const initialTimer = setTimeout(() => controller.connectionFailed(), timeoutMs);
   const applyContext = (context: McpUiHostContext | undefined) => {
@@ -140,6 +156,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     view?.dispose(); view = undefined; host.remove();
     clearTimeout(initialTimer);
     window.removeEventListener('pagehide', dispose);
+    doc.removeEventListener('visibilitychange',visibilityChanged);
     app.ontoolinput = undefined;
     app.ontoolresult = undefined;
     app.ontoolcancelled = undefined;
@@ -149,11 +166,13 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   app.ontoolinput = (params) => {
     // start_riff_creator has no job ID until its result arrives. Keep the
     // loading state alive rather than rejecting a valid direct-start launch.
-    if (!parseStartRiffCreatorInput(params.arguments)) controller.receiveInput(params.arguments);
+    const start=parseStartRiffCreatorInput(params.arguments);
+    pendingSource=start&&/^https:\/\/www\.tiktok\.com\/@[\w.]+\/video\/\d{1,30}$/.test(start.source_url)?start.source_url:undefined;
+    if (!start) controller.receiveInput(params.arguments);
   };
   app.ontoolresult = (params) => {
     const output = creatorJobStructuredOutput(params);
-    if (output?.ok) controller.receiveInput({ job_id: output.data.job.id });
+    if (output?.ok){controller.receiveInput({ job_id: output.data.job.id });if(pendingSource)sourceByJob.set(output.data.job.id,pendingSource);pendingSource=undefined;}
     controller.receiveResult(output);
   };
   app.ontoolcancelled = () => controller.connectionFailed();
@@ -162,6 +181,8 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   // Acknowledge teardown before closing the transport, so the host receives its response.
   app.onteardown = async () => { setTimeout(dispose, 0); return {}; };
   window.addEventListener('pagehide', dispose, { once: true });
+  const visibilityChanged=()=>controller.visibilityChanged(doc.hidden);
+  doc.addEventListener('visibilitychange',visibilityChanged);
   if (window.parent === window) {
     controller.connectionFailed();
   } else {

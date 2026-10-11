@@ -1,11 +1,12 @@
 import {
   App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
   type McpUiHostContext,
-} from '@modelcontextprotocol/ext-apps/app-with-deps';
+} from './mcp-app-lite.ts';
 import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
-import { isCreatorJobView } from './riff-home-validation.ts';
+import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput } from './creator-pipeline-controller.ts';
+import { riffVideosStructuredOutput } from './creator-pipeline-validation.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
@@ -44,8 +45,8 @@ const envelope = (raw: unknown) => {
 };
 
 function readJob(raw: unknown): CreatorJobView | undefined {
-  const result = envelope(raw); const data = object(result?.data);
-  return result?.ok === true && isCreatorJobView(data?.job) ? data.job : undefined;
+  const result=creatorJobStructuredOutput(raw);
+  return result?.ok?result.data.job:undefined;
 }
 
 const failureCodes = new Set([
@@ -104,24 +105,24 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   const localPerformance = panelPerformanceFromDocument(root.ownerDocument, performance);
   const timeoutMs = options.timeoutMs ?? 10_000;
   const toolTimeoutMs = options.toolTimeoutMs ?? 45_000;
-  const pollIntervalMs = options.pollIntervalMs ?? 1_500;
-  const maxPollIntervalMs = options.maxPollIntervalMs ?? 5_000;
-  // The faster cap surfaces 30–60 second provider completions promptly while
-  // retaining a bounded observation window beyond the provider's 540s SLA.
-  const maxPolls = options.maxPolls ?? 120;
+  const pollIntervalMs = options.pollIntervalMs ?? 2_000;
+  const maxPollIntervalMs = options.maxPollIntervalMs ?? 15_000;
+  const maxPolls = options.maxPolls ?? 42;
   const app = new App({ name: 'riff-home', version: '1.1.0' }, { availableDisplayModes: ['fullscreen'] }, { autoResize: true });
   let connected = false;
   let disposed = false;
   let homeState: RiffHomeState = { status: 'loading' };
   let initialWorkLoadStarted = false;
   let workLoadEpoch = 0;
-  let pollEpoch = 0;
-  let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let activeAccountId: string | undefined;
   let creatorRequest: { accountId: string | undefined; key: string; requestId: string } | undefined;
   let recommendationRequest: { key: string; requestId: string } | undefined;
   let actionEpoch = 0;
   const terminalWorkRefreshes = new Set<string>();
+  const sourceByJob=new Map<string,string>();
+  let catalogAttempted=false,catalogLoading=false;
+  let currentProjectId:string|undefined;
+  let controller!:ReturnType<typeof createCreatorPipelineController>;
 
   type DeadlineResult<T> = { status: 'resolved'; value: T } | { status: 'rejected'; reason: unknown } | { status: 'timeout' };
   const withDeadline = <T>(promise: Promise<T>, deadlineMs: number): Promise<DeadlineResult<T>> => new Promise(resolve => {
@@ -271,7 +272,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
         if (reconciled.status === 'found') {
           if (creatorRequest === pendingRequest) creatorRequest = undefined;
-          view.showJob(reconciled.job); observe(reconciled.job); if (active(reconciled.job)) void loadWork();
+          observe(reconciled.job,sourceUrl);view.acknowledgeStart(rawSource);if (active(reconciled.job)) void loadWork();
           return { status: 'sent', message: 'Analysis started. Riff recovered the saved job here.' };
         }
         if (reconciled.status === 'application_error') {
@@ -286,7 +287,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         return { status: 'failed', message: 'Riff could not confirm whether this analysis started. Try the same link again safely.' };
       }
       if (creatorRequest === pendingRequest) creatorRequest = undefined;
-      view.showJob(job); observe(job); if (active(job)) void loadWork();
+      observe(job,sourceUrl);view.acknowledgeStart(rawSource);if (active(job)) void loadWork();
       return { status: 'sent', message: 'Analysis started. Riff will update this saved job here.' };
     },
     send,
@@ -318,24 +319,12 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (outcome.status !== 'response') return { status: 'failed', message: 'Riff could not confirm the latest saved state. Try again.' };
       const job = readJob(outcome.value);
       if (!job) return { status: 'failed', message: 'That saved Riff job could not be opened.' };
-      view.showJob(job); observe(job); return { status: 'sent', message: 'Saved Riff work opened.' };
+      observe(job);return { status: 'sent', message: 'Saved Riff work opened.' };
     },
     refreshRecents: () => loadWork(),
     async refreshJob(savedJob) {
-      const epoch = ++actionEpoch;
-      const outcome = await callTool('get_creator_job', { job_id: savedJob.id });
-      if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
-      if (outcome.status === 'application_error') return {
-        status: 'failed', message: failureMessage(outcome.failure, 'Riff could not refresh this saved job.'),
-      };
-      if (outcome.status !== 'response') return { status: 'failed', message: 'The refresh could not be confirmed. Your saved job is unchanged; try again.' };
-      const job = readJob(outcome.value);
-      if (!job) return { status: 'failed', message: 'Riff could not refresh this saved job.' };
-      if (job.id !== savedJob.id || job.project_id !== savedJob.project_id || job.kind !== savedJob.kind) {
-        return { status: 'failed', message: 'Riff returned a different saved job, so this view was not changed.' };
-      }
-      view.showJob(job); observe(job);
-      return { status: 'sent', message: active(job) ? 'Saved job refreshed. Work is still in progress.' : 'Saved job refreshed.' };
+      actionEpoch++;await controller.refresh();
+      return {status:'sent',message:active(savedJob)?'Saved job refreshed. Work is still in progress.':'Saved job refreshed.'};
     },
     async startRecommendations({ dna }) {
       const epoch = ++actionEpoch;
@@ -362,7 +351,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         return { status: 'failed', message: 'Riff could not confirm a valid discovery job. Try this same analysis again safely.' };
       }
       if (recommendationRequest === pendingRequest) recommendationRequest = undefined;
-      view.showJob(job); observe(job); if (active(job)) void loadWork();
+      observe(job);if (active(job)) void loadWork();
       return { status: 'sent', message: 'Discovery started. Riff will update this saved job here.' };
     },
     makeMine: ({ library, intent }) => {
@@ -370,42 +359,56 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (library !== 'videos') return send(intent);
       return send(`${intent} Create two or three evidence-grounded filming variants with timed hook, main-content, and CTA sections, concrete filming directions, a platform caption, and hashtags. Save them in Studio only if Riff confirms the write; otherwise show them in chat and say they are not saved.`);
     },
+    onDiscoveryOpen:()=>void loadCatalog(),
   });
   const render = (state: RiffHomeState) => { const finish = localPerformance.start('panel_render'); view.render(state); finish('ok'); };
   render(homeState);
 
-  function observe(job: CreatorJobView) {
-    const epoch = ++pollEpoch; clearTimeout(pollTimer);
-    if (!active(job)) { refreshTerminalWork(job); return; }
-    if (maxPolls < 1) return;
-    let polls = 0;
-    const schedule = () => {
-      const delay = Math.min(maxPollIntervalMs, Math.round(pollIntervalMs * (1.6 ** polls)));
-      pollTimer = setTimeout(() => void poll(), delay);
-    };
-    const poll = async () => {
-      const finishObservation = localPerformance.start('poll_observation');
-      if (disposed || epoch !== pollEpoch || polls >= maxPolls) return;
-      polls++;
-      const outcome = await callTool('get_creator_job', { job_id: job.id });
-      if (disposed || epoch !== pollEpoch) return;
-      const next = outcome.status === 'response' ? readJob(outcome.value) : undefined;
-      if (!next || next.id !== job.id || next.project_id !== job.project_id || next.kind !== job.kind) {
-        finishObservation('error');
-        if (polls < maxPolls) schedule();
-        return;
-      }
-      view.showJob(next);
-      finishObservation('ok');
-      if (active(next)) { if (polls < maxPolls) schedule(); }
-      else refreshTerminalWork(next);
-    };
-    schedule();
+  const controllerTool=async(name:'get_creator_job_status'|'get_creator_job',input:{job_id:string},signal:AbortSignal)=>{
+    if(!connected)throw new Error('Disconnected');
+    if(app.getHostCapabilities()?.serverTools)return app.callServerTool({name,arguments:input},{signal,timeout:toolTimeoutMs,maxTotalTimeout:toolTimeoutMs});
+    if(!window.openai?.callTool)throw new Error('Read tools unavailable');
+    return Promise.race([window.openai.callTool(name,input),new Promise<never>((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('Cancelled')),{once:true}))]);
+  };
+  controller=createCreatorPipelineController({
+    loading(){view.setBusy('Loading your saved creator job…');},
+    job(snapshot){
+      currentProjectId=snapshot.job.project_id;
+      const source=sourceByJob.get(snapshot.job.id);
+      view.showJob(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(source?{sourceUrl:source}:{})});
+      const observedState=snapshot.status?.state??snapshot.job.state;
+      if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length||observedState!=='queued'&&observedState!=='running')sourceByJob.delete(snapshot.job.id);
+      if(observedState!=='queued'&&observedState!=='running')refreshTerminalWork(snapshot.job,observedState,snapshot.status?.revision);
+    },
+    notice(message){view.setWorkflowNotice(message);},
+    cleared(reason){
+      const messages={reauthorize:'Reconnect Riff in ChatGPT, then reopen this saved work.',unavailable:'This saved Riff work is unavailable.',invalid:'Riff returned mismatched saved work. Reopen it from ChatGPT.',connection:'Riff lost the saved-work connection. Reopen it from ChatGPT.'} as const;
+      if(reason==='reauthorize')view.clearPrivate();else view.showHome();view.setBusy(messages[reason]);
+    },
+  },{
+    readStatus:async(input,signal)=>creatorJobStatusStructuredOutput(await controllerTool('get_creator_job_status',input,signal)),
+    readFull:async(input,signal)=>creatorJobStructuredOutput(await controllerTool('get_creator_job',input,signal)),
+  },{timeoutMs:Math.min(toolTimeoutMs,10_000),pollIntervalMs,maxPollIntervalMs,maxPolls,pollWindowMs:600_000,performance:localPerformance});
+  controller.reset();
+
+  function observe(job:CreatorJobView,submittedUrl?:string){
+    if(/^https:\/\/www\.tiktok\.com\/@[\w.]+\/video\/\d{1,30}$/.test(submittedUrl??''))sourceByJob.set(job.id,submittedUrl!);
+    controller.receiveInput({job_id:job.id});controller.receiveResult({ok:true,data:{job}});
   }
 
-  function refreshTerminalWork(job: CreatorJobView) {
-    if (active(job)) return;
-    const key = `${job.id}:${job.revision}:${job.state}`;
+  async function loadCatalog(){
+    if(disposed||!connected||catalogAttempted||catalogLoading)return;catalogAttempted=true;catalogLoading=true;
+    try{
+      const outcome=await callTool('list_riff_videos',{...(currentProjectId?{project_id:currentProjectId}:{}),sort:'observed_at_desc',limit:8});
+      if(outcome.status==='response'){
+        const result=riffVideosStructuredOutput(outcome.value);if(result?.ok)view.setCatalog(result.data);
+      }
+    }finally{catalogLoading=false;}
+  }
+
+  function refreshTerminalWork(job: CreatorJobView,state=job.state,revision=job.revision) {
+    if (state==='queued'||state==='running') return;
+    const key = `${job.id}:${revision}:${state}`;
     if (terminalWorkRefreshes.has(key)) return;
     terminalWorkRefreshes.add(key); void loadWork();
   }
@@ -460,11 +463,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     creatorRequest = undefined;
     recommendationRequest = undefined;
     workLoadEpoch++;
-    pollEpoch++;
-    clearTimeout(pollTimer);
+    controller.reset();sourceByJob.clear();currentProjectId=undefined;catalogAttempted=false;catalogLoading=false;view.setCatalog(undefined);
     terminalWorkRefreshes.clear();
     initialWorkLoadStarted = false;
-    view.showHome();
+    view.clearPrivate();
   };
 
   const applyContext = (context: McpUiHostContext | undefined) => {
@@ -483,8 +485,9 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   }, timeoutMs);
   function dispose() {
     if (disposed) return;
-    disposed = true; connected = false; pollEpoch++; clearTimeout(pollTimer); clearTimeout(timer); handshake.abort(); view.dispose();
+    disposed = true; connected = false;controller.dispose();clearTimeout(timer); handshake.abort(); view.dispose();
     window.removeEventListener('pagehide', dispose);
+    root.ownerDocument.removeEventListener('visibilitychange',visibilityChanged);
     app.ontoolresult = undefined; app.ontoolcancelled = undefined; app.onhostcontextchanged = undefined;
     void app.close();
   }
@@ -508,6 +511,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     invalidateAccountBoundary();
   };
   window.addEventListener('pagehide', dispose, { once: true });
+  const visibilityChanged=()=>controller.visibilityChanged(root.ownerDocument.hidden);
+  root.ownerDocument.addEventListener('visibilitychange',visibilityChanged);
   if (window.parent === window) {
     clearTimeout(timer); render({ status: 'error', message: 'Preview mode. Open Riff from ChatGPT to connect your account.' });
   } else {
@@ -516,6 +521,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     }).then(() => {
       if (disposed) return;
       connected = true; clearTimeout(timer); applyContext(app.getHostContext());
+      controller.connected(!!app.getHostCapabilities()?.serverTools||!!window.openai?.callTool);
       ensureInitialWork();
     }).catch(() => { if (!disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' }); });
   }

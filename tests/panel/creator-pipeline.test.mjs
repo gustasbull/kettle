@@ -10,13 +10,14 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
-    window.actions=[]; window.fullscreen=[]; window.connectedActions=[];
+    window.actions=[]; window.fullscreen=[]; window.connectedActions=[]; window.discoveryLoads=[];
     window.boot=(scenario='scan',mode='fullscreen')=>{
       window.view?.dispose();
       window.view=mountCreatorPipeline(document.getElementById('root'),{
         displayMode:mode,
         sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
         requestFullscreen:async()=>{window.fullscreen.push(true);window.view.setDisplayMode('fullscreen');return {status:'sent',message:'Opened fullscreen.'}},
+        onDiscoveryOpen:()=>window.discoveryLoads.push('catalog'),
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
     };
@@ -36,6 +37,9 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  await page.route('https://p16-sign.tiktokcdn.com/**', route => route.fulfill({
+    status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64'),
+  }));
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setContent('<div id="root"></div>');
@@ -66,6 +70,102 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('button', { name: /retry|refresh/i }).count(), 0);
     await page.evaluate(() => show('needs_reconciliation'));
     assert.equal(await root.getByRole('button', { name: /retry|refresh/i }).count(), 0);
+  });
+
+  await t.test('safe compact progress fills only existing Paper slots and survives terminal failure', async () => {
+    await page.evaluate(() => {
+      boot('scan', 'fullscreen');
+      const provenance = {
+        origin: 'fixture', retrieved_at: '2026-10-11T12:00:00Z', source_observed_at: '2026-10-11T11:58:00Z',
+        permission_basis: 'Authored browser fixture for safe rendering.', limitations: [],
+      };
+      const video = (index) => ({
+        platform: 'tiktok', native_id: String(9000000000000000100 + index),
+        url: `https://www.tiktok.com/@fictional_kettle_creator/video/${9000000000000000100 + index}`,
+        caption: `Observed video ${index}`, published_at: '2026-10-10T12:00:00Z', duration_seconds: 12,
+        thumbnail_url: `https://p16-sign.tiktokcdn.com/riff-progress-${index}.jpeg`,
+        metrics: { views: index === 0 ? 0 : 100 + index, likes: 10, comments: 1, shares: 0, saves: 2 }, provenance,
+      });
+      window.job.state = 'running'; window.job.result = null; window.job.source_kind = 'profile';
+      window.job.stage = 'reading_posts'; window.job.revision = 2;
+      const progress = {
+        kind: 'scan',
+        profile: { platform: 'tiktok', native_id: 'fictional_kettle_creator', url: 'https://www.tiktok.com/@fictional_kettle_creator',
+          handle: 'fictional_kettle_creator', display_name: 'Fictional creator', bio: null, follower_count: 1200,
+          avatar_url: 'https://p16-sign.tiktokcdn.com/riff-progress-avatar.jpeg', provenance },
+        videos: [video(0), video(1)], limitations: ['Two safe observations are available.'],
+      };
+      window.progressStatus = { id: window.job.id, kind: 'scan', state: 'running', stage: 'reading_posts', revision: 2,
+        created_at: window.job.created_at, updated_at: '2026-10-11T12:00:00Z', progress, terminal_result_available: false };
+      window.view.render(window.job, { status: window.progressStatus });
+    });
+    assert.equal(await root.locator('.riff-loading-profile__avatar img').count(), 1);
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference img').count(), 2);
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference').count(), 6,
+      'unfilled Paper slots remain skeletons');
+    const progressiveImage = root.locator('.riff-loading-profile .riff-loading-reference img').first();
+    assert.equal(await progressiveImage.getAttribute('loading'), 'lazy');
+    assert.equal(await progressiveImage.getAttribute('decoding'), 'async');
+    assert.equal(await progressiveImage.getAttribute('referrerpolicy'), 'no-referrer');
+    await progressiveImage.evaluate(image => image.dispatchEvent(new Event('error')));
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference img').count(), 1,
+      'one expired image degrades locally');
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference').count(), 6,
+      'the failed image never removes its Paper slot');
+    await page.evaluate(() => {
+      window.progressStatus = { ...window.progressStatus, state: 'failed', revision: 3,
+        updated_at: '2026-10-11T12:00:01Z', terminal_result_available: false };
+      window.view.render(window.job, { status: window.progressStatus });
+    });
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference img').count(), 2);
+    assert.equal(await root.getByRole('heading', { name: 'This workflow could not finish.' }).count(), 1);
+    assert.match(await root.getByRole('status').textContent(), /could not finish/i);
+    assert.match(await root.getByRole('status').textContent(), /Two safe observations are available/i,
+      'terminal failure retains the last truthful limitations');
+
+    await page.evaluate(() => {
+      boot('scan', 'fullscreen');
+      window.job.state = 'running'; window.job.result = null; window.job.source_kind = 'video';
+      window.job.stage = 'accepted'; window.job.progress = { kind: 'scan', profile: null, videos: [], limitations: [] };
+      window.view.render(window.job, { sourceUrl: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000999' });
+    });
+    assert.equal(await root.locator('.riff-loading-video__media').getAttribute('href'),
+      'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000999');
+    await page.evaluate(() => {
+      const provenance = { origin: 'fixture', retrieved_at: '2026-10-11T12:00:00Z', source_observed_at: null,
+        permission_basis: 'Authored browser fixture for safe rendering.', limitations: [] };
+      const progress = { kind: 'scan', profile: null, limitations: [], videos: [{ platform: 'tiktok', native_id: '9000000000000000998',
+        url: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000998', caption: null, published_at: null,
+        duration_seconds: null, thumbnail_url: 'https://p16-sign.tiktokcdn.com/riff-progress-video.jpeg',
+        metrics: { views: null, likes: null, comments: null, shares: null }, provenance }] };
+      window.view.render(window.job, { sourceUrl: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000999',
+        status: { id: window.job.id, kind: 'scan', state: 'running', stage: 'reviewing_video', revision: 2,
+          created_at: window.job.created_at, updated_at: '2026-10-11T12:00:00Z', progress, terminal_result_available: false } });
+    });
+    assert.equal(await root.locator('.riff-loading-video__media').getAttribute('href'),
+      'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000998',
+      'the canonical submitted URL is ephemeral once safe progress arrives');
+
+    await page.evaluate(() => {
+      boot('ideas', 'fullscreen'); window.job.state = 'running'; window.job.result = null; window.job.stage = 'enriching_references';
+      const provenance = { origin: 'fixture', retrieved_at: '2026-10-11T12:00:00Z', source_observed_at: null,
+        permission_basis: 'Authored browser fixture for safe rendering.', limitations: [] };
+      const references = [0, 1, 2].map(index => ({ platform: 'tiktok', native_id: `90000000000000002${index}`,
+        url: `https://www.tiktok.com/@fictional_reference/video/90000000000000002${index}`, caption: null, published_at: null,
+        duration_seconds: null, thumbnail_url: `https://p16-sign.tiktokcdn.com/riff-reference-progress-${index}.jpeg`,
+        metrics: { views: null, likes: null, comments: null, shares: null }, provenance }));
+      const progress = { kind: 'recommendations', identities: references.map(({ provenance: _provenance, caption: _caption,
+        published_at: _publishedAt, duration_seconds: _duration, thumbnail_url: _thumbnail, metrics: _metrics, ...item }) => ({
+          ...item, retrieved_at: provenance.retrieved_at, origin: provenance.origin,
+          permission_basis: provenance.permission_basis, limitations: [],
+        })), references, limitations: [] };
+      window.view.render(window.job, { status: { id: window.job.id, kind: 'recommendations', state: 'running',
+        stage: 'enriching_references', revision: 2, created_at: window.job.created_at, updated_at: '2026-10-11T12:00:00Z',
+        progress, terminal_result_available: false } });
+    });
+    assert.equal(await root.locator('.riff-loading-references .riff-loading-reference').count(), 7);
+    assert.equal(await root.locator('.riff-loading-references .riff-loading-reference img').count(), 3);
+    assert.equal(await root.locator('[role="progressbar"][aria-valuenow]').count(), 0);
   });
 
   await t.test('video Analysis matches Paper media-and-six-row composition and hides developer metadata', async () => {
@@ -209,6 +309,11 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await filters.getByRole('button', { name: 'For you' }).getAttribute('aria-pressed'), 'true');
     await filters.getByRole('button', { name: 'Quick demos' }).click();
     assert.equal(await filters.getByRole('button', { name: 'Quick demos' }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await root.locator('[data-idea-card]').count(), 0,
+      'an unsupported filter stays empty instead of reusing recommendations');
+    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
+    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 0);
+    await filters.getByRole('button', { name: 'For you' }).click();
     const carousel = root.locator('[data-discovery-carousel]');
     assert.equal(await root.locator('[data-idea-card]').count(), 3);
     assert.equal(await root.locator('[data-active-idea]').count(), 1);
@@ -229,7 +334,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     const selectionMessage = await page.evaluate(() => window.actions.at(-1));
     assert.match(selectionMessage, /complete video direction|whole video/i);
     assert.match(selectionMessage, /Fictional desk idea 3/i);
-    assert.match(selectionMessage, /Quick demos/i);
+    assert.match(selectionMessage, /For you/i);
     assert.doesNotMatch(selectionMessage, internalUuid);
     assert.doesNotMatch(selectionMessage, internalWorkflowLanguage);
     await root.getByRole('button', { name: 'Bookmark idea' }).click();
@@ -256,61 +361,93 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('[data-active-idea]').textContent(), /3\.1×/);
   });
 
-  await t.test('every Paper Discovery library remains data-backed and clickable without inventing metadata', async () => {
+  await t.test('unsupported Paper Discovery libraries remain approved empty states without false reuse', async () => {
     await page.evaluate(() => boot('ideas', 'fullscreen'));
+    const actionCount = await page.evaluate(() => window.actions.length);
     const libraries = root.getByRole('tablist', { name: 'Discovery libraries' });
-    await libraries.getByRole('tab', { name: 'Hooks', exact: true }).click();
-    assert.equal(await libraries.getByRole('tab', { name: 'Hooks', exact: true }).getAttribute('aria-selected'), 'true');
-    assert.equal(await root.getByRole('heading', { name: 'Stop the scroll.' }).count(), 1);
-    assert.match(await root.textContent(), /Find a hook that grabs attention\. Make it sound like you\./);
-    assert.equal(await root.getByRole('button', { name: 'Use this hook' }).count(), 1);
+    const unsupported = [
+      ['Hooks', 'Stop the scroll.', 'Find a hook that grabs attention. Make it sound like you.', ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling']],
+      ['Product showcases', 'Make your product stand out.', 'Turn your product’s best benefit into a video worth watching.', ['Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings']],
+      ['CTAs', 'Turn views into action.', 'Give viewers a reason to save, share, follow, or try your product.', ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it']],
+    ];
+    for (const [library, heading, copy, filters] of unsupported) {
+      await libraries.getByRole('tab', { name: library, exact: true }).click();
+      assert.equal(await libraries.getByRole('tab', { name: library, exact: true }).getAttribute('aria-selected'), 'true');
+      assert.equal(await root.getByRole('heading', { name: heading }).count(), 1);
+      assert.match(await root.textContent(), new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      for (const filter of filters) assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
+      assert.equal(await root.locator('[data-idea-card]').count(), 0);
+      assert.equal(await root.getByRole('button', { name: /Use this (?:hook|showcase|CTA)/i }).count(), 0);
+      assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
+    }
+    assert.equal(await page.evaluate(() => window.actions.length), actionCount,
+      'local library and filter controls never call ChatGPT');
+    await libraries.getByRole('tab', { name: 'Videos', exact: true }).click();
+    await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
+    assert.equal(await root.locator('[data-idea-card]').count(), 0);
+    await root.getByRole('button', { name: 'For you', exact: true }).click();
     assert.equal(await root.locator('[data-idea-card]').count(), 1);
-    assert.match(await root.locator('[data-active-idea]').textContent(), /One useful desk change/);
-    for (const filter of ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling']) {
-      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
-    }
-    await root.getByRole('button', { name: 'Questions', exact: true }).click();
-    await root.getByRole('button', { name: 'Use this hook' }).click();
-    const hookMessage = await page.evaluate(() => window.actions.at(-1));
-    assert.match(hookMessage, /use.*One useful desk change.*(?:hook|opening)/i);
-    assert.match(hookMessage, /Questions/i);
-    assert.match(hookMessage, /only (?:the )?(?:hook|opening)|preserve.*main content.*CTA/i);
-    assert.doesNotMatch(hookMessage, internalUuid);
-    assert.doesNotMatch(hookMessage, internalWorkflowLanguage);
-    await libraries.getByRole('tab', { name: 'Product showcases', exact: true }).click();
-    assert.equal(await root.getByRole('heading', { name: 'Make your product stand out.' }).count(), 1);
-    assert.match(await root.textContent(), /Turn your product’s best benefit into a video worth watching\./);
-    assert.equal(await root.getByRole('button', { name: 'Use this showcase' }).count(), 1);
-    for (const filter of ['Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings']) {
-      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
-    }
-    await root.getByRole('button', { name: 'Use this showcase' }).click();
-    const showcaseMessage = await page.evaluate(() => window.actions.at(-1));
-    assert.match(showcaseMessage, /use.*One useful desk change.*(?:showcase|demonstration|main content)/i);
-    assert.match(showcaseMessage, /only (?:the )?(?:showcase|demonstration|main content)|preserve.*hook.*CTA/i);
-    assert.doesNotMatch(showcaseMessage, internalUuid);
-    assert.doesNotMatch(showcaseMessage, internalWorkflowLanguage);
-    await libraries.getByRole('tab', { name: 'CTAs', exact: true }).click();
-    assert.equal(await root.getByRole('heading', { name: 'Turn views into action.' }).count(), 1);
-    assert.match(await root.textContent(), /Give viewers a reason to save, share, follow, or try your product\./);
-    assert.equal(await root.getByRole('button', { name: 'Use this CTA' }).count(), 1);
-    for (const filter of ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it']) {
-      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
-    }
-    await root.getByRole('button', { name: 'Save', exact: true }).click();
-    await root.getByRole('button', { name: 'Use this CTA' }).click();
-    const ctaMessage = await page.evaluate(() => window.actions.at(-1));
-    assert.match(ctaMessage, /use.*One useful desk change.*(?:CTA|call to action|ending)/i);
-    assert.match(ctaMessage, /only (?:the )?(?:CTA|call to action|ending)|preserve.*hook.*main content/i);
-    assert.match(ctaMessage, /Save/i);
-    assert.doesNotMatch(ctaMessage, internalUuid);
-    assert.doesNotMatch(ctaMessage, internalWorkflowLanguage);
-    assert.equal(new Set([hookMessage, showcaseMessage, ctaMessage]).size, 3,
-      'each component library sends a distinct semantic intent');
+    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 1);
     assert.doesNotMatch(await root.textContent(), /timestamped|saved reference captions|Batch limitations/i);
     await page.evaluate(() => show('empty'));
     assert.equal(await root.locator('[data-idea-card]').count(), 0);
     assert.doesNotMatch(await root.textContent(), /Batch limitations|DNA ID/i);
+  });
+
+  await t.test('provider-free catalog uses neutral Paper cards and all loaded browsing stays local', async () => {
+    const loadsAtStart = await page.evaluate(() => window.discoveryLoads.length);
+    await page.evaluate(() => {
+      boot('scan', 'fullscreen');
+      const cards = Array.from({ length: 9 }, (_, index) => ({
+        id: `00000000-0000-4000-8000-0000000008${String(index).padStart(2, '0')}`,
+        platform: 'tiktok', native_id: `90000000000000008${index}`,
+        canonical_url: `https://www.tiktok.com/@fictional_catalog/video/90000000000000008${index}`,
+        caption: `Observed catalog caption ${index + 1}`,
+        thumbnail_url: `https://p16-sign.tiktokcdn.com/riff-catalog-${index}.jpeg`,
+        published_at: null, duration_seconds: null,
+        metrics: { views: index === 0 ? 0 : index * 100, likes: null, comments: null, shares: null, saves: null },
+        retrieved_at: '2026-10-11T12:00:00Z', source_observed_at: null, observed_at: `2026-10-11T11:5${index}:00Z`,
+        origin: 'fixture', role: 'discovered_reference',
+        permission_basis: 'Authored browser fixture for safe rendering.', limitations: [],
+      }));
+      window.view.setCatalog({ cards, next_cursor: 'unused-cursor', coverage: 'Saved observations only.', freshness: 'As last observed.' });
+      window.view.showCatalog();
+    });
+    assert.equal(await root.locator('[data-catalog-card]').count(), 8, 'the first Paper catalog page is capped at eight cards');
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsAtStart + 1,
+      'fullscreen Videos requests one catalog page');
+    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
+    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 0);
+    assert.equal(await root.locator('[data-idea-card]').count(), 0, 'catalog observations are never recommendation ideas');
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/);
+    assert.equal(await root.locator('[data-active-catalog] a').getAttribute('href'),
+      'https://www.tiktok.com/@fictional_catalog/video/900000000000000080');
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /0/, 'an observed zero is not treated as missing');
+    const catalogImage = root.locator('[data-active-catalog] img');
+    assert.equal(await catalogImage.getAttribute('loading'), 'lazy');
+    assert.equal(await catalogImage.getAttribute('decoding'), 'async');
+    assert.equal(await catalogImage.getAttribute('referrerpolicy'), 'no-referrer');
+    await catalogImage.evaluate(image => image.dispatchEvent(new Event('error')));
+    assert.equal(await root.locator('[data-active-catalog]').count(), 1);
+    assert.equal(await root.locator('[data-active-catalog] img').count(), 0);
+    const arrowDuration = await page.evaluate(() => {
+      const start = performance.now();
+      document.querySelector('[data-focus="next-video"]')?.click();
+      return performance.now() - start;
+    });
+    assert.ok(arrowDuration < 100, `loaded carousel arrow took ${arrowDuration}ms`);
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 2/);
+    const loadsBeforeLocalControls = await page.evaluate(() => window.discoveryLoads.length);
+    await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 0, 'an unbacked filter remains empty');
+    await root.getByRole('tab', { name: 'Hooks', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 0, 'an unbacked library remains empty');
+    await root.getByRole('tab', { name: 'Videos', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 8);
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsBeforeLocalControls,
+      'arrows, tabs and loaded filters never make another tool call');
+    assert.doesNotMatch(await root.locator('[data-catalog-card]').allTextContents().then(values => values.join(' ')),
+      /recommended|viral|Make it mine|Why it fits|Batch limitations/i);
   });
 
   await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {

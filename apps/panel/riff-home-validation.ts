@@ -1,4 +1,4 @@
-import type { CreatorJobView, PipelineReference } from '../../packages/contracts/creator-pipeline.ts';
+import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../packages/contracts/creator-pipeline.ts';
 import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -106,6 +106,23 @@ function jobProgress(value:unknown,kind:string){
         &&value.native_id===identity.native_id&&value.url===identity.url;});
   }
   const item=shape(value,['kind','limitations']);return !!item&&item.kind==='scripts'&&textList(item.limitations,20,500);
+}
+
+export function isCreatorJobStatusView(value: unknown): value is CreatorJobStatusView {
+  const status=shape(value,['id','kind','state','stage','revision','created_at','updated_at','progress','terminal_result_available']);
+  if(!status||!id(status.id)||!enumValue(status.kind,['scan','recommendations','scripts'])
+    ||!enumValue(status.state,['queued','running','succeeded','failed','needs_reconciliation'])
+    ||!enumValue(status.stage,['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','researching_formats','enriching_references','saving'])
+    ||!Number.isSafeInteger(status.revision)||Number(status.revision)<1||!timestamp(status.created_at)||!timestamp(status.updated_at)
+    ||!jobProgress(status.progress,String(status.kind))||typeof status.terminal_result_available!=='boolean')return false;
+  const stagePaths={scan:['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','saving'],
+    recommendations:['accepted','researching_formats','enriching_references','saving'],scripts:['accepted','building_analysis','saving']} as const;
+  if(!stagePaths[status.kind].includes(status.stage as never))return false;
+  if(status.terminal_result_available!==(status.state==='succeeded')||(status.state==='succeeded'&&status.stage!=='saving'))return false;
+  if(status.state==='queued'&&(status.stage!=='accepted'||JSON.stringify(status.progress)!==JSON.stringify(status.kind==='scan'
+    ?{kind:'scan',profile:null,videos:[],limitations:[]}:status.kind==='recommendations'
+      ?{kind:'recommendations',identities:[],references:[],limitations:[]}:{kind:'scripts',limitations:[]})))return false;
+  return true;
 }
 
 function evidence(value: unknown) {
