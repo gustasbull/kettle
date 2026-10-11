@@ -164,6 +164,13 @@ export function creatorJobStatusStructuredOutput(raw:unknown):CreatorJobStatusPu
 export function riffVideosStructuredOutput(raw:unknown):RiffVideosPublicOutput|undefined {
   return structuredOutput(raw,videosOutput);
 }
+/** Discovery accepts one bounded, role-filtered page; any mixed or oversized page fails closed. */
+export function riffDiscoveryCatalogStructuredOutput(raw:unknown):RiffVideosPublicOutput|undefined {
+  const parsed=structuredOutput(raw,videosOutput);
+  if(!parsed||!parsed.ok)return parsed;
+  if(parsed.data.cards.length>8||parsed.data.cards.some(card=>card.role!=='discovered_reference'))return;
+  return parsed;
+}
 export function creatorJobStructuredOutput(raw:unknown):CreatorJobPublicOutput|undefined {
   try {
     if(!safeTree(raw)||raw===null||typeof raw!=='object'||Array.isArray(raw))return;

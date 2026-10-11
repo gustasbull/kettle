@@ -3,7 +3,7 @@ import {
   type McpUiHostContext,
 } from './mcp-app-lite.ts';
 import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
-import { mountCreatorPipeline } from './creator-pipeline/index.ts';
+import { mountCreatorPipeline, riffCatalogProposalHandoff } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
 import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
@@ -30,6 +30,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
   let currentProjectId:string|undefined;
+  const catalogOwnerKey=`authenticated-bridge:${crypto.randomUUID()}`;
   const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
@@ -81,11 +82,11 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const catalogLoader=createRiffVideoCatalogLoader(
     args=>app.callServerTool({name:'list_riff_videos',arguments:args},
       {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}),
-    page=>view?.setCatalog(page),
+    state=>view?.setCatalogState(state),
   );
   const loadCatalog=(projectId=currentProjectId)=>{
     if(!projectId||projectId!==currentProjectId||!bridgeReady)return;
-    return catalogLoader.load({ownerKey:projectId,projectId});
+    return catalogLoader.load({ownerKey:catalogOwnerKey,projectId});
   };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
@@ -94,6 +95,8 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
         sendPrompt, requestFullscreen,
         onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
+        proposeCatalogReference:proposal=>sendPrompt(riffCatalogProposalHandoff(proposal)),
+        onCatalogRetry:()=>void catalogLoader.retry(),
       });
       if(currentProjectId!==snapshot.job.project_id){
         currentProjectId=snapshot.job.project_id;catalogLoader.reset();

@@ -8,6 +8,7 @@ import {
 } from '../../apps/panel/creator-pipeline-controller.ts';
 import {
   creatorJobStatusStructuredOutput,
+  riffDiscoveryCatalogStructuredOutput,
   riffVideosStructuredOutput,
 } from '../../apps/panel/creator-pipeline-validation.ts';
 import { emptyCreatorJobProgress, type CreatorJobStatusView, type CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
@@ -71,6 +72,15 @@ test('strict compact status and catalog boundaries accept only structured public
   const catalog = { ok: true as const, data: { cards: [], next_cursor: 'opaque-do-not-follow', coverage: 'Saved observations only.', freshness: 'As last observed.' } };
   assert.deepEqual(riffVideosStructuredOutput({ structuredContent: catalog }), catalog);
   assert.equal(riffVideosStructuredOutput({ structuredContent: { ...catalog, secret: true } }), undefined);
+  assert.deepEqual(riffDiscoveryCatalogStructuredOutput({structuredContent:catalog}),catalog);
+  const own={...catalog,data:{...catalog.data,cards:[{
+    id:'00000000-0000-4000-8000-000000000801',platform:'tiktok',native_id:'9000000000000000801',
+    canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000801',caption:null,thumbnail_url:null,
+    published_at:null,duration_seconds:null,metrics:{views:null,likes:null,comments:null,shares:null,saves:null},
+    retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',
+    role:'own_profile',permission_basis:'Authored fixture.',limitations:[],
+  }]}};
+  assert.equal(riffDiscoveryCatalogStructuredOutput({structuredContent:own}),undefined);
 });
 
 test('polls compact status, suppresses equal revisions, and reads the full job exactly once at success', async t => {

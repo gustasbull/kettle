@@ -40,6 +40,14 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     if (req.url === '/frame') res.end(`<div id="review"></div><script>${bundle.outputFiles[0].text}</script>`);
     else res.end(`<script>${fixture.outputFiles[0].text}</script><script>
       window.calls=[]; window.sizes=[]; window.messages=[]; window.displayRequests=[]; window.ready=false; window.respond=true;
+      window.catalogPage={ok:true,data:{cards:[{
+        id:'00000000-0000-4000-8000-000000000801',platform:'tiktok',native_id:'9000000000000000801',
+        canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000801',caption:'Saved studio reference',thumbnail_url:null,
+        published_at:null,duration_seconds:null,metrics:{views:0,likes:null,comments:null,shares:null,saves:null},
+        retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',
+        role:'discovered_reference',permission_basis:'Authored bridge fixture.',limitations:[],
+      }],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}};
+      if(location.search==='?scripts')window.output=window.makeOutput('scripts');
       if(location.search==='?running'){window.output.data.job.state='running';window.output.data.job.result=null;}
       window.send=(method,params)=>document.querySelector('iframe').contentWindow.postMessage({jsonrpc:'2.0',method,params},'*');
       window.reply=(id,result)=>document.querySelector('iframe').contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
@@ -55,7 +63,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
         if(m.method==='tools/call') { window.calls.push(m); if(window.respond) {
           const active=location.search==='?start'?window.startOutput.data.job:window.output.data.job;
           const structuredContent=m.params.name==='get_creator_job_status'?window.makeStatus(active):
-            m.params.name==='list_riff_videos'?{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}:
+            m.params.name==='list_riff_videos'?(window.catalogPage??{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}):
             {ok:true,data:{job:active}};
           window.reply(m.id,{structuredContent,content:[]});
         } }
@@ -106,7 +114,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.deepEqual(await page.evaluate(()=>window.displayRequests),[{mode:'fullscreen'}]);
     await page.waitForFunction(()=>window.calls.some(call=>call.params.name==='list_riff_videos'),undefined,{timeout:2_000});
     assert.deepEqual(await page.evaluate(()=>window.calls.filter(call=>call.params.name==='list_riff_videos').map(call=>call.params.arguments)),
-      [{project_id:'00000000-0000-4000-8000-000000000100',sort:'observed_at_desc',limit:8}]);
+      [{project_id:'00000000-0000-4000-8000-000000000100',role:'discovered_reference',sort:'observed_at_desc',limit:8}]);
     await frame.getByRole('button',{name:'Make it mine'}).click();
     await page.waitForFunction(()=>window.messages.length===1);
     const sent=await page.evaluate(()=>window.messages[0]);
@@ -116,6 +124,27 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.deepEqual(sent._meta['openai/message'],{target:'active',send:true});
     await page.evaluate(()=>{window.calls=[];});
   });
+  await t.test('Studio catalog proposals preserve all four part contexts in the actual ChatGPT handoff',async()=>{
+    const mappings=[
+      ['Full video','Explore videos','Make it mine','full video','videos'],
+      ['Hook','Explore hooks','Use this hook','hook','hooks'],
+      ['Main content','Explore showcases','Use this showcase','main content','showcases'],
+      ['CTA','Explore CTAs','Use this CTA','CTA','ctas'],
+    ];
+    for(let index=0;index<mappings.length;index++){
+      const [tab,explore,action,part,library]=mappings[index];
+      frame=await launch('?scripts');
+      await frame.getByRole('heading',{name:'Your script, ready to film.'}).waitFor();
+      await frame.getByRole('button',{name:'Open Studio'}).click();
+      await frame.getByRole('tab',{name:tab,exact:true}).click();await frame.getByRole('button',{name:explore,exact:true}).click();
+      await frame.getByRole('button',{name:action,exact:true}).click();await page.waitForFunction(()=>window.messages.length===1);
+      const text=await page.evaluate(()=>window.messages[0].content[0].text);
+      assert.match(text,new RegExp(`Studio context \\(${part} → ${library}\\)`));
+      assert.match(text,/Keep the current script unchanged/);assert.match(text,/unsaved proposal/);
+      assert.doesNotMatch(text,/has been selected|has been saved|has been written/i);
+    }
+  });
+  frame=await launch();
   await t.test('explicit refresh reads only compact status; duplicate calls suppressed',async()=>{
     await frame.evaluate(()=>Promise.all([window.bridge.refresh(),window.bridge.refresh()]));
     assert.deepEqual(await page.evaluate(()=>window.calls.map(m=>({name:m.params.name,arguments:m.params.arguments}))),[{name:'get_creator_job_status',arguments:{job_id:'00000000-0000-4000-8000-000000000620'}}]);
@@ -187,5 +216,5 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.equal(await page.evaluate(()=>window.sizes.length),count);
   });
   assert.deepEqual(errors,[]);
-  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/?start',url+'/frame'].includes(r)));
+  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/?start',url+'/?scripts',url+'/frame'].includes(r)));
 });

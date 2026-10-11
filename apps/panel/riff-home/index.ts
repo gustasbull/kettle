@@ -1,6 +1,6 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
-import { mountCreatorPipeline, type RiffDiscoveryLibrary, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
-import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import { mountCreatorPipeline, type RiffCatalogProposal, type RiffDiscoveryLibrary, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
+import type { RiffVideoCatalogState } from '../riff-video-catalog-loader.ts';
 import {
   mountRiffProductContext,
   type ProductContextSaveOutcome,
@@ -55,6 +55,8 @@ export type RiffHomeActions = {
     dna: Extract<NonNullable<CreatorJobView['result']>, { kind: 'scan' }>['dna'];
   }) => Promise<RiffActionResult>;
   makeMine?: (context: RiffDiscoverySelection) => Promise<RiffActionResult>;
+  proposeCatalogReference?: (context:RiffCatalogProposal)=>Promise<RiffActionResult>;
+  retryCatalog?:()=>void;
   setVariantState?: (context: {
     job: CreatorJobView;
     scripts: ScriptResult['scripts'];
@@ -247,7 +249,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   setBusy(message: string): void;
   showJob(job: CreatorJobView, presentation?:{status?:CreatorJobStatusView;sourceUrl?:string}): void;
   acknowledgeStart(source:string):void;
-  setCatalog(page:RiffVideoCatalogPage|undefined):void;
+  setCatalogState(state:RiffVideoCatalogState):void;
   showCatalog(library?:RiffDiscoveryLibrary):void;
   setWorkflowNotice(message:string):void;
   clearPrivate():void;
@@ -352,6 +354,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     displayMode:'fullscreen',sendPrompt:actions.send,embeddedChrome:false,
     requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
     startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
+    proposeCatalogReference:actions.proposeCatalogReference,onCatalogRetry:actions.retryCatalog,
     setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,
     });
   };
@@ -497,7 +500,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       workflow.scrollIntoView({ block: 'start' });
     },
     acknowledgeStart(source){if(!disposed&&input.value===source)input.value='';},
-    setCatalog(page){pipeline?.setCatalog(page);},
+    setCatalogState(state){pipeline?.setCatalogState(state);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
     clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},

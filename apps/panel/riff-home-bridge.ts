@@ -5,6 +5,7 @@ import {
 import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
+import { riffCatalogProposalHandoff } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput } from './creator-pipeline-controller.ts';
 import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
@@ -264,7 +265,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   const catalogLoader=createRiffVideoCatalogLoader(async args=>{
     const outcome=await callTool('list_riff_videos',args);
     return outcome.status==='response'?outcome.value:undefined;
-  },page=>view.setCatalog(page));
+  },state=>view.setCatalogState(state));
   view = mountRiffHome(root, {
     inputChanged(rawSource) {
       if (creatorRequest && creatorRequest.key !== creatorIntent(rawSource).key) {
@@ -465,6 +466,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return send(`${intent} Create two or three evidence-grounded filming variants with timed hook, main-content, and CTA sections, concrete filming directions, a platform caption, and hashtags. Save them in Studio only if Riff confirms the write; otherwise show them in chat and say they are not saved.`);
     },
     onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
+    proposeCatalogReference:proposal=>send(riffCatalogProposalHandoff(proposal)),
+    retryCatalog:()=>void catalogLoader.retry(),
   });
   const render = (state: RiffHomeState) => { const finish = localPerformance.start('panel_render'); view.render(state); finish('ok'); };
   render(homeState);

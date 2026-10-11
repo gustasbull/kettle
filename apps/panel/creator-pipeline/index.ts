@@ -1,6 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../../packages/contracts/creator-pipeline.ts';
 import type { CreatorDnaView } from '../../../packages/contracts/creator-operations.ts';
-import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import type { RiffVideoCard } from '../../../packages/contracts/riff-videos.ts';
+import type { RiffVideoCatalogState } from '../riff-video-catalog-loader.ts';
 import { mountRiffMenu, type RiffMenuAccount, type RiffMenuRecent } from '../riff-shell/menu.ts';
 import { riffSymbol } from '../riff-ui/brand.ts';
 import { safeHttpUrl, type RiffActionResult, type RiffPanelAction } from '../riff-ui/dom.ts';
@@ -20,12 +21,58 @@ export type RiffDiscoverySelection = {
   filter: string;
   intent: string;
 };
+export type RiffStudioExploreIntent = {
+  source: 'studio';
+  part: 'full' | 'hook' | 'main_content' | 'cta';
+  library: RiffDiscoveryLibrary;
+  prompt: string;
+  currentScriptUnchanged: true;
+};
+export type RiffCatalogProposal = {
+  card: RiffVideoCard;
+  library: RiffDiscoveryLibrary;
+  filter: string;
+  intent: string;
+  studioExplore?: RiffStudioExploreIntent;
+};
+
+export function riffCatalogProposalHandoff(proposal:RiffCatalogProposal):string {
+  const context=proposal.studioExplore;
+  if(!context)return proposal.intent;
+  const expected:Record<RiffStudioExploreIntent['part'],RiffDiscoveryLibrary>={full:'videos',hook:'hooks',main_content:'showcases',cta:'ctas'};
+  if(context.source!=='studio'||context.currentScriptUnchanged!==true||expected[context.part]!==context.library
+    ||context.library!==proposal.library||!context.prompt.trim()||context.prompt.length>1_000)return proposal.intent;
+  const part={full:'full video',hook:'hook',main_content:'main content',cta:'CTA'}[context.part];
+  return `${proposal.intent}\n\nStudio context (${part} → ${context.library}): ${context.prompt} Treat this as an unsaved proposal; do not claim the reference was selected or written.`;
+}
+
+const discoveryLibraries = [['videos', 'Videos'], ['hooks', 'Hooks'], ['showcases', 'Product showcases'], ['ctas', 'CTAs']] as const;
+const discoveryLibraryViews = {
+  videos: {
+    title: 'Find your next breakout idea.', copy: 'Explore viral formats picked for you. Find your angle. Make it yours.',
+    filters: ['For you', 'Quick demos', 'Before / after', 'How-to', 'Reactions', 'Challenges'], action: 'Make it mine', quote: false,
+  },
+  hooks: {
+    title: 'Stop the scroll.', copy: 'Find a hook that grabs attention. Make it sound like you.',
+    filters: ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling'], action: 'Use this hook', quote: true,
+  },
+  showcases: {
+    title: 'Make your product stand out.', copy: 'Turn your product’s best benefit into a video worth watching.',
+    filters: ['For you', 'Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings'], action: 'Use this showcase', quote: false,
+  },
+  ctas: {
+    title: 'Turn views into action.', copy: 'Give viewers a reason to save, share, follow, or try your product.',
+    filters: ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it'], action: 'Use this CTA', quote: true,
+  },
+} as const;
 export type CreatorPipelineOptions = {
   displayMode?: RiffCreatorDisplayMode;
   sendPrompt?: RiffPanelAction;
   requestFullscreen?: () => Promise<RiffActionResult>;
   startRecommendations?: (context: { job: CreatorJobView; dna: CreatorDnaView }) => Promise<RiffActionResult>;
   makeMine?: (context: RiffDiscoverySelection) => Promise<RiffActionResult>;
+  proposeCatalogReference?: (context: RiffCatalogProposal) => Promise<RiffActionResult>;
+  onCatalogRetry?: () => void;
   setVariantState?: (context: {
     job: CreatorJobView;
     scripts: ScriptResult['scripts'];
@@ -64,8 +111,8 @@ const unavailable: RiffPanelAction = async () => ({
 /** Pure presentation plus explicit host handoffs. It never fetches, saves, retries, or starts provider work. */
 export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipelineOptions = {}): {
   render(job: CreatorJobView, presentation?:CreatorPipelinePresentation): void;
-  setCatalog(page:RiffVideoCatalogPage|undefined):void;
-  showCatalog(library?:RiffDiscoveryLibrary,scope?:{accountWide?:boolean;projectId?:string}):void;
+  setCatalogState(state:RiffVideoCatalogState):void;
+  showCatalog(library?:RiffDiscoveryLibrary,scope?:{accountWide?:boolean;projectId?:string},studioExplore?:RiffStudioExploreIntent):void;
   setNotice(message:string):void;
   setDisplayMode(mode: RiffCreatorDisplayMode): void;
   dispose(): void;
@@ -186,7 +233,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let mode: RiffCreatorDisplayMode = options.displayMode ?? 'inline';
   let current: CreatorJobView | undefined;
   let currentStatus:CreatorJobStatusView|undefined;
-  let catalog:RiffVideoCatalogPage|undefined;
+  let catalogState:RiffVideoCatalogState={status:'loading'};
   let sourceUrl:string|undefined;
   let showingCatalog=false;
   let screenKind='';
@@ -196,7 +243,9 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let discoveryFilter = 'For you';
   let studioTab = 0;
   let catalogIndex=0;
+  let catalogActiveId:string|undefined;
   let catalogScopeKey:string|undefined;
+  let studioExplore:RiffStudioExploreIntent|undefined;
 
   const enterDiscovery=(loadCatalog=false,projectId?:string,explicit=false)=>{
     screenKind='discovery';
@@ -205,7 +254,9 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const scopeChanged=catalogScopeKey!==nextScope;
     if(scopeChanged){
       const changingKnownScope=catalogScopeKey!==undefined;
-      catalogScopeKey=nextScope;if(changingKnownScope)catalog=undefined;catalogIndex=0;
+      catalogScopeKey=nextScope;if(changingKnownScope)catalogState={status:'loading'};
+      catalogIndex=0;catalogActiveId=undefined;studioExplore=undefined;
+      if(changingKnownScope){discoveryLibrary='videos';discoveryFilter='For you';}
     }
     if(scopeChanged||explicit)options.onDiscoveryOpen?.(projectId?{projectId}:{});
   };
@@ -213,7 +264,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     account:options.menu?.account,recents:options.menu?.recents??[],activeRoute:'analysis',
     onNavigate(route){
       if(route==='discover'){
-        discoveryLibrary='videos';discoveryFilter='For you';catalogIndex=0;
+        discoveryLibrary='videos';discoveryFilter='For you';catalogIndex=0;catalogActiveId=undefined;studioExplore=undefined;
         enterDiscovery(true,current?.project_id,true);renderCatalogDiscovery();return;
       }
       if(options.menu?.onHome)options.menu.onHome();
@@ -290,6 +341,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       return `Use ${selection} as inspiration for the product showcase in my current Riff video. Draft only the main-content demonstration adapted to the “${filter}” preference, preserve the existing hook and CTA, and show the proposal in chat without claiming it was saved.`;
     }
     return `Use ${selection} as inspiration for the CTA of my current Riff video. Draft only the ending adapted to the “${filter}” preference, preserve the existing hook and main content, and show the proposal in chat without claiming it was saved.`;
+  };
+  const catalogProposalIntent = (card:RiffVideoCard,library:RiffDiscoveryLibrary,filter:string) => {
+    const source=`the saved Riff reference at ${card.canonical_url}`;
+    if(library==='videos')return `Use ${source} to propose a complete video direction adapted to the “${filter}” lens. Keep this as a ChatGPT proposal only; do not claim it was selected or saved in Riff.`;
+    if(library==='hooks')return `Use ${source} to propose only a hook adapted to the “${filter}” lens. Preserve the current main content and CTA, and do not claim the proposal was selected or saved in Riff.`;
+    if(library==='showcases')return `Use ${source} to propose only a main-content product showcase adapted to the “${filter}” lens. Preserve the current hook and CTA, and do not claim the proposal was selected or saved in Riff.`;
+    return `Use ${source} to propose only a CTA adapted to the “${filter}” lens. Preserve the current hook and main content, and do not claim the proposal was selected or saved in Riff.`;
   };
 
   function renderPending(job: CreatorJobView,statusView?:CreatorJobStatusView) {
@@ -561,42 +619,23 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       setStatus('Discovery ready.'); return heading;
     }
     screen('discovery');
-    const libraryData = [['videos', 'Videos'], ['hooks', 'Hooks'], ['showcases', 'Product showcases'], ['ctas', 'CTAs']] as const;
-    const libraryViews = {
-      videos: {
-        title: 'Find your next breakout idea.', copy: 'Explore viral formats picked for you. Find your angle. Make it yours.',
-        filters: ['For you', 'Quick demos', 'Before / after', 'How-to', 'Reactions', 'Challenges'], action: 'Make it mine', quote: false,
-      },
-      hooks: {
-        title: 'Stop the scroll.', copy: 'Find a hook that grabs attention. Make it sound like you.',
-        filters: ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling'], action: 'Use this hook', quote: true,
-      },
-      showcases: {
-        title: 'Make your product stand out.', copy: 'Turn your product’s best benefit into a video worth watching.',
-        filters: ['Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings'], action: 'Use this showcase', quote: false,
-      },
-      ctas: {
-        title: 'Turn views into action.', copy: 'Give viewers a reason to save, share, follow, or try your product.',
-        filters: ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it'], action: 'Use this CTA', quote: true,
-      },
-    } as const;
-    const libraryView = libraryViews[discoveryLibrary];
+    const libraryView = discoveryLibraryViews[discoveryLibrary];
     if (!(libraryView.filters as readonly string[]).includes(discoveryFilter)) discoveryFilter = libraryView.filters[0];
     const header = el('header', undefined, 'riff-discovery-header');
     const { group, heading } = title(libraryView.title, 'riff-discovery-title'); header.append(group);
     const libraries = el('div', undefined, 'riff-libraries'); libraries.setAttribute('aria-label', 'Discovery libraries'); libraries.setAttribute('role', 'tablist');
     const libraryControls: HTMLButtonElement[] = [];
-    libraryData.forEach(([kind, label], index) => {
+    discoveryLibraries.forEach(([kind, label], index) => {
       const selected = kind === discoveryLibrary;
       const control = button(label, `riff-library${selected ? ' riff-library--active' : ''}`, () => {
-        discoveryLibrary = kind; discoveryFilter = libraryViews[kind].filters[0]; render(job);
+        discoveryLibrary = kind; discoveryFilter = discoveryLibraryViews[kind].filters[0]; render(job);
       }, `library-${kind}`);
       control.setAttribute('role', 'tab'); control.setAttribute('aria-selected', String(selected)); control.tabIndex = selected ? 0 : -1;
       control.addEventListener('keydown', event => {
         if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
-        const target = event.key === 'Home' ? 0 : event.key === 'End' ? libraryData.length - 1
-          : (index + (event.key === 'ArrowRight' ? 1 : -1) + libraryData.length) % libraryData.length;
+        const target = event.key === 'Home' ? 0 : event.key === 'End' ? discoveryLibraries.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + discoveryLibraries.length) % discoveryLibraries.length;
         libraryControls[target]?.focus();
       });
       libraryControls.push(control); libraries.append(control);
@@ -610,7 +649,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       control.setAttribute('aria-pressed', String(active)); filters.append(control);
     });
     content.append(filters);
-    const visible=discoveryLibrary==='videos'&&discoveryFilter==='For you'?valid:[];
+    const visible=valid;
     if (!visible.length) { setStatus('No videos are available.'); return heading; }
 
     ideaIndex = Math.min(ideaIndex, visible.length - 1);
@@ -625,6 +664,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       let delta = index - ideaIndex;
       if (delta > Math.floor(visible.length / 2)) delta -= visible.length;
       if (delta < -Math.floor(visible.length / 2)) delta += visible.length;
+      if (Math.abs(delta) > 2) return;
       const position = delta === 0 ? 'active' : delta === -1 ? 'left-one' : delta === 1 ? 'right-one' : delta < 0 ? 'left-two' : 'right-two';
       const card = el('article', undefined, `riff-idea-card riff-idea-card--${position}`); card.dataset.ideaCard = idea.id;
       if (delta === 0) card.dataset.activeIdea = idea.id;
@@ -679,34 +719,48 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   function renderCatalogDiscovery(){
     if(disposed||mode!=='fullscreen')return;
+    const active=doc.activeElement as HTMLElement|null;const hadFocus=!!active&&content.contains(active);const focusKey=hadFocus?active.dataset.focus:undefined;
     location.textContent='Discover videos';menu?.render({activeRoute:'discover'});showingCatalog=true;content.replaceChildren();screen('discovery');
-    const views={videos:{title:'Find your next breakout idea.',copy:'Explore viral formats picked for you. Find your angle. Make it yours.',filters:['For you','Quick demos','Before / after','How-to','Reactions','Challenges']},
-      hooks:{title:'Stop the scroll.',copy:'Find a hook that grabs attention. Make it sound like you.',filters:['For you','Questions','Bold claims','Visual hooks','Problems','Storytelling']},
-      showcases:{title:'Make your product stand out.',copy:'Turn your product’s best benefit into a video worth watching.',filters:['Quick demos','Before / after','Unboxing','Tutorials','Screen recordings']},
-      ctas:{title:'Turn views into action.',copy:'Give viewers a reason to save, share, follow, or try your product.',filters:['For you','Save','Comment','Follow','Share','Try it']}} as const;
-    const libraries=[['videos','Videos'],['hooks','Hooks'],['showcases','Product showcases'],['ctas','CTAs']] as const;
-    const view=views[discoveryLibrary];if(!(view.filters as readonly string[]).includes(discoveryFilter))discoveryFilter=view.filters[0];
+    const view=discoveryLibraryViews[discoveryLibrary];if(!(view.filters as readonly string[]).includes(discoveryFilter))discoveryFilter=view.filters[0];
     const header=el('header',undefined,'riff-discovery-header');const headingGroup=title(view.title,'riff-discovery-title');header.append(headingGroup.group);
     const tabs=el('div',undefined,'riff-libraries');tabs.setAttribute('aria-label','Discovery libraries');tabs.setAttribute('role','tablist');
-    libraries.forEach(([kind,label])=>{const selected=kind===discoveryLibrary;const control=button(label,`riff-library${selected?' riff-library--active':''}`,()=>{
-      discoveryLibrary=kind;discoveryFilter=views[kind].filters[0];catalogIndex=0;renderCatalogDiscovery();
-    },`library-${kind}`);control.setAttribute('role','tab');control.setAttribute('aria-selected',String(selected));control.tabIndex=selected?0:-1;tabs.append(control);});
+    const tabControls:HTMLButtonElement[]=[];
+    discoveryLibraries.forEach(([kind,label],index)=>{const selected=kind===discoveryLibrary;const control=button(label,`riff-library${selected?' riff-library--active':''}`,()=>{
+      discoveryLibrary=kind;discoveryFilter=discoveryLibraryViews[kind].filters[0];if(studioExplore?.library!==kind)studioExplore=undefined;renderCatalogDiscovery();
+    },`library-${kind}`);control.setAttribute('role','tab');control.setAttribute('aria-selected',String(selected));control.tabIndex=selected?0:-1;
+      control.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;event.preventDefault();
+        const target=event.key==='Home'?0:event.key==='End'?discoveryLibraries.length-1:
+          (index+(event.key==='ArrowRight'?1:-1)+discoveryLibraries.length)%discoveryLibraries.length;tabControls[target]?.focus();});
+      tabControls.push(control);tabs.append(control);});
     header.append(tabs);content.append(header,el('p',view.copy,'riff-discovery-copy'));
     const filters=el('div',undefined,'riff-discovery-filters');filters.setAttribute('role','group');filters.setAttribute('aria-label','Video filters');
     view.filters.forEach(label=>{const selected=label===discoveryFilter;const control=button(label,`riff-filter${selected?' riff-filter--active':''}`,()=>{
-      discoveryFilter=label;catalogIndex=0;renderCatalogDiscovery();
+      discoveryFilter=label;renderCatalogDiscovery();
     },`filter-${label}`);control.setAttribute('aria-pressed',String(selected));filters.append(control);});content.append(filters);
-    const cards=discoveryLibrary==='videos'&&discoveryFilter==='For you'?(catalog?.cards.slice(0,8)??[]):[];
-    if(!cards.length){setStatus('No videos are available.');return;}
-    catalogIndex=Math.min(catalogIndex,cards.length-1);
-    const move=(direction:1|-1)=>{catalogIndex=(catalogIndex+direction+cards.length)%cards.length;renderCatalogDiscovery();};
-    const select=(index:number)=>{catalogIndex=index;renderCatalogDiscovery();};
+
+    const page=catalogState.page;
+    const catalogNotice=(message:string,retryable=false)=>{const notice=el('div',undefined,'riff-catalog-state');notice.setAttribute('role',catalogState.status==='error'?'alert':'status');
+      notice.append(el('p',message));if(retryable){const retry=button('Retry','riff-button',()=>options.onCatalogRetry?.(),'retry-catalog');notice.append(retry);}content.append(notice);return notice;};
+    if(catalogState.status==='loading'&&!page){content.setAttribute('aria-busy','true');catalogNotice('Loading saved reference videos…');setStatus('Loading saved reference videos…');return;}
+    content.removeAttribute('aria-busy');
+    if(catalogState.status==='loading'&&page)catalogNotice('Refreshing saved reference videos…');
+    if(catalogState.status==='empty'){catalogNotice('No saved permitted reference videos are available for this scope.');setStatus('No saved reference videos are available.');return;}
+    if(catalogState.status==='error')catalogNotice(catalogState.message,catalogState.retryable);
+    if(!page){setStatus('Saved reference videos are unavailable.');return;}
+    const cards=page.cards.slice(0,8);
+    if(!cards.length){catalogNotice('No saved permitted reference videos are available for this scope.');setStatus('No saved reference videos are available.');return;}
+    const caveats=el('p',`${page.coverage} ${page.freshness}`,'riff-catalog-provenance');caveats.dataset.catalogCaveats='';content.append(caveats);
+    const retainedIndex=catalogActiveId?cards.findIndex(card=>card.id===catalogActiveId):-1;
+    catalogIndex=retainedIndex>=0?retainedIndex:Math.max(0,Math.min(catalogIndex,cards.length-1));catalogActiveId=cards[catalogIndex]?.id;
+    const move=(direction:1|-1)=>{catalogIndex=(catalogIndex+direction+cards.length)%cards.length;catalogActiveId=cards[catalogIndex]?.id;renderCatalogDiscovery();};
+    const select=(index:number)=>{catalogIndex=index;catalogActiveId=cards[index]?.id;renderCatalogDiscovery();};
     const carousel=el('section',undefined,'riff-discovery-carousel');carousel.dataset.discoveryCarousel='';carousel.tabIndex=0;
     carousel.dataset.focus='discovery-carousel';carousel.setAttribute('aria-label',`Video ${catalogIndex+1} of ${cards.length}`);
     carousel.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft'].includes(event.key))return;event.preventDefault();
       move(event.key==='ArrowRight'?1:-1);});
     const stage=el('div',undefined,'riff-discovery-stage');cards.forEach((card,index)=>{
       let delta=index-catalogIndex;if(delta>Math.floor(cards.length/2))delta-=cards.length;if(delta< -Math.floor(cards.length/2))delta+=(cards.length);
+      if(Math.abs(delta)>2)return;
       const position=delta===0?'active':delta===-1?'left-one':delta===1?'right-one':delta<0?'left-two':'right-two';
       const article=el('article',undefined,`riff-idea-card riff-idea-card--${position}`);article.dataset.catalogCard=card.id;if(delta===0)article.dataset.activeCatalog=card.id;
       const media=safeLink(card.canonical_url,'Open saved video','riff-idea-media');const preview=mediaImage(card.thumbnail_url??undefined,'Saved video preview','riff-media-image');if(preview)media.append(preview);
@@ -715,13 +769,19 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       const stats=el('span',undefined,'riff-idea-stats');let hasStats=false;
       for(const [label,value,icon] of observed){if(value===null)continue;hasStats=true;const stat=el('span',undefined,'riff-idea-stat');stat.setAttribute('aria-label',`${formatMetric(value)} ${label}`);stat.append(icon,el('strong',formatMetric(value)));stats.append(stat);}
       if(hasStats)media.append(stats);
-      article.append(media);if(delta===0&&card.caption)article.append(el('p',card.caption,'riff-idea-title'));stage.append(article);
+      article.append(media);if(delta===0){if(card.caption)article.append(el('p',card.caption,'riff-idea-title'));
+        const sourceDate=card.source_observed_at??card.observed_at;const provenance=el('p',`${card.origin==='fixture'?'Fixture reference':'Saved reference'} · observed ${new Date(sourceDate).toLocaleDateString('en',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'})}`,'riff-catalog-provenance');article.append(provenance);
+        const intent=catalogProposalIntent(card,discoveryLibrary,discoveryFilter);const action=button(view.action,'riff-button riff-button--primary',()=>void run(()=>options.proposeCatalogReference
+          ? options.proposeCatalogReference({card:structuredClone(card),library:discoveryLibrary,filter:discoveryFilter,intent,...(studioExplore?.library===discoveryLibrary?{studioExplore:structuredClone(studioExplore)}:{})})
+          : sendPrompt(intent)),'catalog-proposal');article.append(el('div',undefined,'riff-idea-actions'));article.lastElementChild!.append(action);}
+      stage.append(article);
     });
     carousel.append(stage);const navigation=el('div',undefined,'riff-carousel-navigation');
     const previous=button('','riff-carousel-arrow',()=>move(-1),'previous-video');previous.setAttribute('aria-label','Previous video');previous.append(arrowIcon('previous'));
     const dots=el('div',undefined,'riff-discovery-dots');dots.setAttribute('role','group');dots.setAttribute('aria-label','Video position');cards.forEach((_card,index)=>{const dot=button('','riff-discovery-dot',()=>select(index),`catalog-dot-${index}`);dot.setAttribute('aria-label',`Go to video ${index+1}`);dot.setAttribute('aria-current',String(index===catalogIndex));dots.append(dot);});
     const next=button('','riff-carousel-arrow',()=>move(1),'next-video');next.setAttribute('aria-label','Next video');next.append(arrowIcon('next'));
-    navigation.append(previous,dots,next);carousel.append(navigation,el('p','Use the left and right arrow keys','riff-carousel-hint'));content.append(carousel);setStatus(`${cards.length} videos shown.`);
+    navigation.append(previous,dots,next);carousel.append(navigation,el('p','Use the left and right arrow keys','riff-carousel-hint'));content.append(carousel);setStatus(`${cards.length} saved reference videos shown.`);
+    if(hadFocus)([...content.querySelectorAll<HTMLElement>('[data-focus]')].find(node=>node.dataset.focus===focusKey)??headingGroup.heading).focus({preventScroll:true});
   }
 
   function scriptPart(label: string, copy: string, tip?: string) {
@@ -788,12 +848,15 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const panel = el('section', undefined, 'riff-studio-panel'); panel.id = 'riff-studio-panel'; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `riff-studio-tab-${studioTab}`);
     const panelHeader = el('div', undefined, 'riff-studio-panel__header');
     const panelTitles = ['Your complete video', 'Your hook', 'Your main content', 'Your CTA']; panelHeader.append(el('h2', panelTitles[studioTab]!));
-    if (studioTab === 0 || studioTab === 1) {
-      const subject = scripts.idea?.title ? `“${scripts.idea.title}”` : 'my current Riff video';
-      panelHeader.append(button(studioTab === 0 ? 'Explore videos' : 'Explore hooks', 'riff-button', () => void run(() => sendPrompt(
-        `Use Riff to explore ${studioTab === 0 ? 'videos' : 'hooks'} for ${subject}. Keep the current script unchanged until I explicitly choose an adaptation.`,
-      )), `explore-${studioTab}`));
-    }
+    const exploreLibraries:readonly RiffDiscoveryLibrary[]=['videos','hooks','showcases','ctas'];
+    const exploreParts:readonly RiffStudioExploreIntent['part'][]=['full','hook','main_content','cta'];
+    const exploreLabels=['Explore videos','Explore hooks','Explore showcases','Explore CTAs'] as const;
+    const subject = scripts.idea?.title ? `“${scripts.idea.title}”` : 'my current Riff video';
+    panelHeader.append(button(exploreLabels[studioTab]!, 'riff-button', () => {
+      const library=exploreLibraries[studioTab]!;const prompt=`Explore ${library==='showcases'?'product showcases':library} for ${subject}. Keep the current script unchanged until I explicitly choose an adaptation.`;
+      enterDiscovery(true,job.project_id,true);studioExplore={source:'studio',part:exploreParts[studioTab]!,library,prompt,currentScriptUnchanged:true};
+      discoveryLibrary=library;discoveryFilter=discoveryLibraryViews[library].filters[0];renderCatalogDiscovery();
+    }, `explore-${studioTab}`));
     panel.append(panelHeader);
     const mainTip = [...variant.shots, ...variant.b_roll, ...variant.on_screen_text, variant.showcase_timing, variant.pacing].join(' · ');
     const partOrder = ['hook', 'main_content', 'cta'] as const;
@@ -835,14 +898,15 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   function render(job: CreatorJobView,presentation:CreatorPipelinePresentation={}) {
     if (disposed) return;
+    studioExplore=undefined;
     const nextIdentity = `${job.project_id}:${job.id}`;
     const same = identity === nextIdentity;
     const active = doc.activeElement as HTMLElement | null;
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
     if (!same) {
-      ideaIndex = 0; catalogIndex=0;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;
-      if(current?.project_id!==job.project_id){catalog=undefined;catalogScopeKey=undefined;}
+      ideaIndex = 0; catalogIndex=0;catalogActiveId=undefined;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;studioExplore=undefined;
+      if(current?.project_id!==job.project_id){catalogState={status:'loading'};catalogScopeKey=undefined;}
     }
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
@@ -863,11 +927,18 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   return {
     render,
-    setCatalog(page){catalog=page?structuredClone(page):undefined;if(showingCatalog)renderCatalogDiscovery();},
-    showCatalog(library='videos',scope={}){if(disposed)return;discoveryLibrary=library;discoveryFilter=library==='showcases'?'Quick demos':'For you';catalogIndex=0;
-      const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(library==='videos',projectId,true);renderCatalogDiscovery();},
+    setCatalogState(state){
+      const priorPage=catalogState.page;const next=structuredClone(state);
+      if(next.page&&(next.page.cards.length>8||next.page.cards.some(card=>card.role!=='discovered_reference'))){
+        catalogState={status:'error',message:'Saved reference videos could not be loaded.',retryable:true,...(priorPage?{page:structuredClone(priorPage)}:{})};
+      }else catalogState=next;
+      if(showingCatalog)renderCatalogDiscovery();
+    },
+    showCatalog(library='videos',scope={},explore){if(disposed)return;
+      const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(true,projectId,true);
+      discoveryLibrary=library;discoveryFilter=discoveryLibraryViews[library].filters[0];studioExplore=explore?.library===library?structuredClone(explore):undefined;renderCatalogDiscovery();},
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
-    dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;root.replaceChildren(); },
+    dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalogState={status:'loading'};sourceUrl=undefined;catalogScopeKey=undefined;catalogActiveId=undefined;studioExplore=undefined;root.replaceChildren(); },
   };
 }

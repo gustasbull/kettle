@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
-import { pipelineFixture, scenarioNames } from '../../apps/panel/creator-pipeline/fixtures.ts';
+import { discoveryCatalogFixture, pipelineFixture, scenarioNames } from '../../apps/panel/creator-pipeline/fixtures.ts';
 test('pipeline previews use valid shared fictional contracts', () => {
   for (const name of scenarioNames) assert.equal(CreatorJobView.safeParse(pipelineFixture(name)).success, true, name);
+});
+test('Discovery catalog fixture is a bounded role-filtered authored page', () => {
+  const page=discoveryCatalogFixture(20);
+  assert.equal(page.cards.length,8);
+  assert.equal(page.cards.every(card=>card.origin==='fixture'&&card.role==='discovered_reference'),true);
+  assert.equal(page.cards[0]?.metrics.views,0);
+  assert.equal(page.cards[0]?.metrics.likes,null);
 });
 test('analysis preview scenarios cover every truthful terminal route', () => {
   const video=pipelineFixture('video-analysis');

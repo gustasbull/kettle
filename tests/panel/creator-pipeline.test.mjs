@@ -10,7 +10,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountCreatorPipeline, creatorLoadingVariants } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
-    window.actions=[]; window.fullscreen=[]; window.connectedActions=[]; window.discoveryLoads=[];
+    window.actions=[]; window.fullscreen=[]; window.connectedActions=[]; window.catalogProposals=[]; window.discoveryLoads=[];
     window.creatorLoadingVariants=creatorLoadingVariants;
     window.boot=(scenario='scan',mode='fullscreen')=>{
       window.view?.dispose();
@@ -19,7 +19,8 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
         requestFullscreen:async()=>{window.fullscreen.push(true);window.view.setDisplayMode('fullscreen');return {status:'sent',message:'Opened fullscreen.'}},
         onDiscoveryOpen:scope=>window.discoveryLoads.push({kind:'open',scope}),
-        onCatalogNextPage:request=>window.discoveryLoads.push({kind:'next',request}),
+        onCatalogRetry:()=>window.discoveryLoads.push({kind:'retry'}),
+        proposeCatalogReference:async proposal=>{window.catalogProposals.push(proposal);return {status:'sent',message:'Proposal sent.'}},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
     };
@@ -31,6 +32,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
         startRecommendations:async ({job,dna})=>{window.connectedActions.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id,version:dna.version});return {status:'sent',message:'Discovery started.'}},
         makeMine:async ({job,batch,idea,library,filter,intent})=>{window.connectedActions.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id,library,filter,intent});return {status:'sent',message:'Drafting in ChatGPT.'}},
+        proposeCatalogReference:async proposal=>{window.catalogProposals.push(proposal);return {status:'sent',message:'Proposal sent.'}},
         setVariantState:async ({job,scripts,variant,state})=>{window.connectedActions.push({kind:'variant-state',jobId:job.id,scriptsId:scripts.id,variantId:variant.id,state});return {status:'sent',message:state==='saved'?'Saved for later.':'Marked as filmed.'}},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
@@ -426,10 +428,14 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await filters.getByRole('button', { name: 'For you' }).getAttribute('aria-pressed'), 'true');
     await filters.getByRole('button', { name: 'Quick demos' }).click();
     assert.equal(await filters.getByRole('button', { name: 'Quick demos' }).getAttribute('aria-pressed'), 'true');
-    assert.equal(await root.locator('[data-idea-card]').count(), 0,
-      'an unsupported filter stays empty instead of reusing recommendations');
-    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
-    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 0);
+    assert.equal(await root.locator('[data-idea-card]').count(), 3,
+      'creative lenses preserve the validated recommendation order');
+    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 1);
+    assert.deepEqual(await root.locator('[data-active-idea] .riff-idea-actions').evaluate(node=>{
+      const row=node.getBoundingClientRect(),primary=node.querySelector('.riff-button').getBoundingClientRect(),bookmark=node.querySelector('.riff-bookmark').getBoundingClientRect();
+      return {row:{width:Math.round(row.width),height:Math.round(row.height),gap:getComputedStyle(node).gap},primary:{width:Math.round(primary.width),height:Math.round(primary.height)},bookmark:{width:Math.round(bookmark.width),height:Math.round(bookmark.height)}};
+    }),{row:{width:216,height:44,gap:'6px'},primary:{width:166,height:44},bookmark:{width:44,height:44}});
     await filters.getByRole('button', { name: 'For you' }).click();
     const carousel = root.locator('[data-discovery-carousel]');
     assert.equal(await root.locator('[data-idea-card]').count(), 3);
@@ -459,6 +465,19 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(bookmarkMessage, /bookmark.*Fictional desk idea 3/i);
     assert.doesNotMatch(bookmarkMessage, internalUuid);
     assert.doesNotMatch(bookmarkMessage, internalWorkflowLanguage);
+    await page.evaluate(() => {
+      show('three-ideas');
+      const first=window.job.result.batch.ideas[0];
+      window.job.result.batch.ideas=Array.from({length:8},(_,index)=>({...structuredClone(first),
+        id:`00000000-0000-4000-8000-0000000007${String(index).padStart(2,'0')}`,title:`Eight-card fixture idea ${index+1}`}));
+      window.view.render(window.job);
+    });
+    assert.equal(await root.locator('[data-idea-card]').count(),5,
+      'eight validated recommendations occupy only the active and four Paper peek positions');
+    assert.equal(await root.getByRole('group',{name:'Video position'}).getByRole('button').count(),8,
+      'all eight validated recommendations retain real navigation dots');
+    for(const position of ['active','left-one','right-one','left-two','right-two'])
+      assert.equal(await root.locator(`.riff-idea-card--${position}`).count(),1,`${position} is not shared by stacked cards`);
     await page.evaluate(() => boot('ideas', 'fullscreen'));
     assert.match(await root.locator('[data-discovery-carousel]').textContent(), /120/,
       'persisted views remain visible when the reference includes them');
@@ -478,33 +497,29 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('[data-active-idea]').textContent(), /3\.1×/);
   });
 
-  await t.test('unsupported Paper Discovery libraries remain approved empty states without false reuse', async () => {
-    await page.evaluate(() => boot('ideas', 'fullscreen'));
-    const actionCount = await page.evaluate(() => window.actions.length);
+  await t.test('all four recommendation libraries reuse validated lineage with exact part-specific actions', async () => {
+    await page.evaluate(() => bootConnected('ideas'));
     const libraries = root.getByRole('tablist', { name: 'Discovery libraries' });
-    const unsupported = [
-      ['Hooks', 'Stop the scroll.', 'Find a hook that grabs attention. Make it sound like you.', ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling']],
-      ['Product showcases', 'Make your product stand out.', 'Turn your product’s best benefit into a video worth watching.', ['Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings']],
-      ['CTAs', 'Turn views into action.', 'Give viewers a reason to save, share, follow, or try your product.', ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it']],
+    const variants = [
+      ['Videos', 'Find your next breakout idea.', 'Explore viral formats picked for you. Find your angle. Make it yours.', ['For you', 'Quick demos', 'Before / after', 'How-to', 'Reactions', 'Challenges'], 'Make it mine', 'videos'],
+      ['Hooks', 'Stop the scroll.', 'Find a hook that grabs attention. Make it sound like you.', ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling'], 'Use this hook', 'hooks'],
+      ['Product showcases', 'Make your product stand out.', 'Turn your product’s best benefit into a video worth watching.', ['For you', 'Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings'], 'Use this showcase', 'showcases'],
+      ['CTAs', 'Turn views into action.', 'Give viewers a reason to save, share, follow, or try your product.', ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it'], 'Use this CTA', 'ctas'],
     ];
-    for (const [library, heading, copy, filters] of unsupported) {
+    for (const [library, heading, copy, filters, action, kind] of variants) {
       await libraries.getByRole('tab', { name: library, exact: true }).click();
       assert.equal(await libraries.getByRole('tab', { name: library, exact: true }).getAttribute('aria-selected'), 'true');
       assert.equal(await root.getByRole('heading', { name: heading }).count(), 1);
       assert.match(await root.textContent(), new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       for (const filter of filters) assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
-      assert.equal(await root.locator('[data-idea-card]').count(), 0);
-      assert.equal(await root.getByRole('button', { name: /Use this (?:hook|showcase|CTA)/i }).count(), 0);
-      assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
+      assert.equal(await root.locator('[data-idea-card]').count(), 1);
+      await root.getByRole('button', { name: action, exact: true }).click();
+      const sent = await page.evaluate(() => window.connectedActions.at(-1));
+      assert.equal(sent.kind, 'make-mine');
+      assert.equal(sent.library, kind);
+      if (kind !== 'videos') assert.match(sent.intent, /without claiming it was saved/);
+      assert.doesNotMatch(sent.intent, /ranked|classified/i);
     }
-    assert.equal(await page.evaluate(() => window.actions.length), actionCount,
-      'local library and filter controls never call ChatGPT');
-    await libraries.getByRole('tab', { name: 'Videos', exact: true }).click();
-    await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
-    assert.equal(await root.locator('[data-idea-card]').count(), 0);
-    await root.getByRole('button', { name: 'For you', exact: true }).click();
-    assert.equal(await root.locator('[data-idea-card]').count(), 1);
-    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 1);
     assert.doesNotMatch(await root.textContent(), /timestamped|saved reference captions|Batch limitations/i);
     await page.evaluate(() => show('empty'));
     assert.equal(await root.locator('[data-idea-card]').count(), 0);
@@ -528,15 +543,43 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         permission_basis: 'Authored browser fixture for safe rendering.', limitations: [],
       }));
       window.catalogCards=cards;
-      window.view.setCatalog({ cards, next_cursor: 'page-2', coverage: 'Saved observations only.', freshness: 'As last observed.' });
-      window.view.showCatalog();
+      window.view.setCatalogState({ status:'ready', page:{ cards, next_cursor: 'page-2', coverage: 'Saved observations only.', freshness: 'As last observed.' } });
+      window.view.showCatalog('hooks');
     });
-    assert.equal(await root.locator('[data-catalog-card]').count(), 8, 'the first Paper catalog page is capped at eight cards');
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5, 'Paper renders the active card and four depth peeks from the bounded page');
+    assert.equal(await root.getByRole('group',{name:'Video position'}).getByRole('button').count(),8,
+      'all eight real positions remain available without rendering eight full cards');
+    assert.equal(await root.locator('[data-catalog-caveats]').textContent(),'Saved observations only. As last observed.');
+    assert.deepEqual(await root.locator('[data-discovery-carousel]').evaluate(node=>{
+      const style=getComputedStyle(node),stage=node.querySelector('.riff-discovery-stage'),active=node.querySelector('.riff-idea-card--active'),media=active.querySelector('.riff-idea-media');
+      const middle=node.querySelector('.riff-idea-card--left-one'),outer=node.querySelector('.riff-idea-card--left-two'),arrow=node.querySelector('.riff-carousel-arrow'),navigation=node.querySelector('.riff-carousel-navigation');
+      const dimensions=item=>{const box=item.getBoundingClientRect(),css=getComputedStyle(item);return {width:Math.round(box.width),height:Math.round(box.height),radius:css.borderRadius};};
+      return {overflow:style.overflow,stage:dimensions(stage),active:dimensions(active),activeMedia:dimensions(media),middle:dimensions(middle),middleMedia:dimensions(middle.querySelector('.riff-idea-media')),outer:dimensions(outer),outerMedia:dimensions(outer.querySelector('.riff-idea-media')),arrow:dimensions(arrow),navigation:{...dimensions(navigation),gap:getComputedStyle(navigation).gap}};
+    }),{
+      overflow:'visible',stage:{width:999,height:566,radius:'0px'},active:{width:232,height:454,radius:'24px'},activeMedia:{width:214,height:354,radius:'18px'},
+      middle:{width:196,height:348,radius:'24px'},middleMedia:{width:178,height:330,radius:'18px'},outer:{width:160,height:284,radius:'24px'},outerMedia:{width:142,height:266,radius:'18px'},arrow:{width:36,height:36,radius:'999px'},navigation:{width:340,height:36,radius:'0px',gap:'10px'},
+    });
+    assert.equal(await root.locator('.riff-libraries').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 240, 242)');
+    assert.equal(await root.getByRole('tab',{name:'Hooks',exact:true}).evaluate(node=>getComputedStyle(node).color),'rgb(105, 51, 161)');
+    await root.getByRole('tab',{name:'Hooks',exact:true}).focus();await page.keyboard.press('End');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'CTAs');
+    assert.equal(await root.getByRole('tab',{name:'Hooks',exact:true}).getAttribute('aria-selected'),'true','roving focus does not select a library');
+    await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Videos');
+    await page.emulateMedia({forcedColors:'active'});
+    assert.equal(await root.getByRole('tab',{name:'Hooks',exact:true}).evaluate(node=>getComputedStyle(node).borderTopWidth),'2px');
+    await page.emulateMedia({forcedColors:'none'});
     assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsAtStart + 1,
       'fullscreen Videos requests one catalog page');
     assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
     assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 0);
     assert.equal(await root.locator('[data-idea-card]').count(), 0, 'catalog observations are never recommendation ideas');
+    assert.equal(await root.getByRole('button', { name: 'Use this hook' }).count(), 1);
+    await root.getByRole('button', { name: 'Use this hook' }).click();
+    assert.equal(await page.evaluate(() => window.catalogProposals.length), 1);
+    assert.deepEqual(await page.evaluate(() => {
+      const proposal=window.catalogProposals[0];return {library:proposal.library,filter:proposal.filter,source:proposal.card.canonical_url,
+        hasJob:'job' in proposal,hasBatch:'batch' in proposal,hasIdea:'idea' in proposal};
+    }), {library:'hooks',filter:'For you',source:'https://www.tiktok.com/@fictional_catalog/video/900000000000000080',hasJob:false,hasBatch:false,hasIdea:false});
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/);
     assert.equal(await root.locator('[data-active-catalog] a').getAttribute('href'),
       'https://www.tiktok.com/@fictional_catalog/video/900000000000000080');
@@ -563,8 +606,8 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 8/);
     assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsAtStart + 1,
       'the retained next cursor is not consumed at the eighth card');
-    assert.equal(await root.locator('[data-catalog-card]').count(), 8,
-      'the Paper carousel never renders more than its approved page size');
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5,
+      'the Paper carousel renders only the active card and four peeks');
     await root.getByRole('button', { name: 'Next video' }).click();
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/,
       'the bounded carousel wraps locally after the eighth card');
@@ -585,10 +628,10 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
           permission_basis: 'Authored browser fixture for safe rendering.', limitations: [],
         };
       });
-      window.view.setCatalog({cards:[...window.catalogCards,...cards],next_cursor:null,
-        coverage:'Saved observations only.',freshness:'As last observed.'});
+      window.view.setCatalogState({status:'ready',page:{cards:[...window.catalogCards,...cards].slice(0,8),next_cursor:null,
+        coverage:'Saved observations only.',freshness:'As last observed.'}});
     });
-    assert.equal(await root.locator('[data-catalog-card]').count(), 8);
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5);
     await root.getByRole('button', { name: 'Next video' }).click();
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/,
       'even an oversized retained payload is defensively bounded to its first approved page');
@@ -596,16 +639,32 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 8/,
       'the retained first page remains locally navigable');
     const loadsBeforeLocalControls = await page.evaluate(() => window.discoveryLoads.length);
-    await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
-    assert.equal(await root.locator('[data-catalog-card]').count(), 0, 'an unbacked filter remains empty');
-    await root.getByRole('tab', { name: 'Hooks', exact: true }).click();
-    assert.equal(await root.locator('[data-catalog-card]').count(), 0, 'an unbacked library remains empty');
     await root.getByRole('tab', { name: 'Videos', exact: true }).click();
-    assert.equal(await root.locator('[data-catalog-card]').count(), 8);
+    await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5, 'a creative lens keeps the same validated catalog order');
+    await root.getByRole('tab', { name: 'Hooks', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5, 'every library uses the same bounded catalog');
+    await root.getByRole('tab', { name: 'Videos', exact: true }).click();
+    assert.equal(await root.locator('[data-catalog-card]').count(), 5);
     assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsBeforeLocalControls,
       'arrows, tabs and loaded filters never make another tool call');
     assert.doesNotMatch(await root.locator('[data-catalog-card]').allTextContents().then(values => values.join(' ')),
-      /recommended|viral|Make it mine|Why it fits|Batch limitations/i);
+      /recommended|viral|Why it fits|Batch limitations/i);
+
+    for(const width of [320,375,768]){
+      await page.setViewportSize({width,height:900});
+      const layout=await root.locator('[data-discovery-carousel]').evaluate(node=>{
+        const carousel=node.getBoundingClientRect(),active=node.querySelector('[data-active-catalog]').getBoundingClientRect();
+        const action=node.querySelector('[data-focus="catalog-proposal"]').getBoundingClientRect(),navigation=node.querySelector('.riff-carousel-navigation').getBoundingClientRect();
+        return {overflow:getComputedStyle(node).overflow,centerDelta:Math.abs((active.left+active.width/2)-(carousel.left+carousel.width/2)),
+          actionVisible:action.left>=carousel.left&&action.right<=carousel.right,navigationVisible:navigation.left>=carousel.left&&navigation.right<=carousel.right,
+          documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth};
+      });
+      assert.equal(layout.overflow,'hidden');assert.ok(layout.centerDelta<=1,`${width}px active card stays centered`);
+      assert.equal(layout.actionVisible,true);assert.equal(layout.navigationVisible,true);assert.ok(layout.documentOverflow<=0,`${width}px contains the carousel`);
+    }
+    await page.setViewportSize({width:1200,height:900});
+    assert.equal(await root.locator('[data-discovery-carousel]').evaluate(node=>getComputedStyle(node).overflow),'visible');
 
     const loadsBeforeProjectChange = await page.evaluate(() => window.discoveryLoads.length);
     await page.evaluate(() => {
@@ -636,6 +695,62 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     });
     assert.equal(await page.evaluate(() => window.discoveryLoads.length), 2,
       'each explicit re-entry reaches the loader, which deduplicates cached and in-flight reads');
+  });
+
+  await t.test('catalog lifecycle, active identity, focus, retry, and Studio explore context stay truthful', async () => {
+    await page.evaluate(() => {
+      boot('scan','fullscreen');
+      window.catalogCards=Array.from({length:3},(_,index)=>({
+        id:`00000000-0000-4000-8000-0000000009${String(index).padStart(2,'0')}`,platform:'tiktok',native_id:`90000000000000009${index}`,
+        canonical_url:`https://www.tiktok.com/@fictional_catalog/video/90000000000000009${index}`,caption:`Lifecycle reference ${index+1}`,
+        thumbnail_url:null,published_at:null,duration_seconds:null,metrics:{views:index===0?0:null,likes:null,comments:null,shares:null,saves:null},
+        retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',role:'discovered_reference',
+        permission_basis:'Authored browser fixture for safe rendering.',limitations:[],
+      }));
+      window.view.showCatalog('ctas');
+    });
+    assert.equal(await root.locator('.riff-catalog-state').filter({hasText:'Loading saved reference videos…'}).count(),1);
+    await page.evaluate(()=>window.view.setCatalogState({status:'empty',page:{cards:[],next_cursor:null,coverage:'None saved.',freshness:'No observations.'}}));
+    assert.match(await root.textContent(),/No saved permitted reference videos/);
+    await page.evaluate(()=>window.view.setCatalogState({status:'error',message:'Saved reference videos could not be loaded.',retryable:true}));
+    await root.getByRole('button',{name:'Retry'}).click();
+    assert.equal((await page.evaluate(()=>window.discoveryLoads.at(-1))).kind,'retry');
+    await page.evaluate(()=>window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}));
+    await page.evaluate(()=>window.view.setCatalogState({status:'loading',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}));
+    assert.equal(await root.locator('[data-catalog-card]').count(),3,'same-scope loading retains the trusted page');
+    assert.equal(await root.locator('.riff-catalog-state').filter({hasText:'Refreshing saved reference videos…'}).count(),1);
+    await page.evaluate(()=>window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}));
+    await root.getByRole('button',{name:'Next video'}).click();
+    await root.getByRole('button',{name:'Use this CTA'}).focus();
+    const preserved=await page.evaluate(()=>{
+      const active=document.querySelector('[data-active-catalog]')?.dataset.activeCatalog;
+      window.view.setCatalogState({status:'ready',page:{cards:[window.catalogCards[2],window.catalogCards[1],window.catalogCards[0]],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});
+      return {before:active,after:document.querySelector('[data-active-catalog]')?.dataset.activeCatalog,focus:document.activeElement?.dataset.focus};
+    });
+    assert.deepEqual(preserved,{before:'00000000-0000-4000-8000-000000000901',after:'00000000-0000-4000-8000-000000000901',focus:'catalog-proposal'});
+
+    await page.evaluate(()=>show('scripts'));
+    const mappings=[
+      ['Full video','Explore videos','Videos','Make it mine','full','videos'],
+      ['Hook','Explore hooks','Hooks','Use this hook','hook','hooks'],
+      ['Main content','Explore showcases','Product showcases','Use this showcase','main_content','showcases'],
+      ['CTA','Explore CTAs','CTAs','Use this CTA','cta','ctas'],
+    ];
+    for(const [studioTab,explore,library,action,part,libraryKey] of mappings){
+      await page.evaluate(()=>{window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
+      await root.getByRole('tab',{name:studioTab,exact:true}).click();
+      await root.getByRole('button',{name:explore,exact:true}).click();
+      assert.equal(await root.getByRole('tab',{name:library,exact:true}).getAttribute('aria-selected'),'true');
+      await root.getByRole('button',{name:action,exact:true}).click();
+      const proposal=await page.evaluate(()=>window.catalogProposals.at(-1));
+      assert.deepEqual({part:proposal.studioExplore?.part,library:proposal.studioExplore?.library,unchanged:proposal.studioExplore?.currentScriptUnchanged},
+        {part,library:libraryKey,unchanged:true});
+      assert.equal('job' in proposal||'batch' in proposal||'idea' in proposal,false);
+    }
+    await page.evaluate(()=>{window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
+    await root.getByRole('tab',{name:'Hook',exact:true}).click();await root.getByRole('button',{name:'Explore hooks'}).click();
+    await root.getByRole('tab',{name:'CTAs',exact:true}).click();await root.getByRole('button',{name:'Use this CTA'}).click();
+    assert.equal((await page.evaluate(()=>window.catalogProposals.at(-1))).studioExplore,undefined,'switching libraries clears an unrelated Studio intent');
   });
 
   await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {
@@ -706,10 +821,8 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.doesNotMatch(filmedMessage, internalUuid);
     assert.doesNotMatch(filmedMessage, internalWorkflowLanguage);
     await root.getByRole('button', { name: 'Explore videos' }).click();
-    const exploreMessage = await page.evaluate(() => window.actions.at(-1));
-    assert.match(exploreMessage, /explore videos.*The one-question study reset/i);
-    assert.doesNotMatch(exploreMessage, internalUuid);
-    assert.doesNotMatch(exploreMessage, internalWorkflowLanguage);
+    assert.equal(await root.getByRole('heading',{name:'Find your next breakout idea.'}).count(),1);
+    assert.equal(await root.getByRole('tab',{name:'Videos',exact:true}).getAttribute('aria-selected'),'true');
 
     await page.evaluate(() => {
       const variant = window.job.result.scripts.variants[0];

@@ -85,8 +85,8 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
     assert.equal(await page.locator('button[data-library="hooks"]').getAttribute('aria-pressed'), 'true');
     assert.equal(await page.getByRole('heading', { name: 'Stop the scroll.' }).count(), 1);
     assert.equal(await page.locator('[data-idea-card], [data-catalog-card]').count(), 0);
-    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'catalog-open').length), 1,
-      'an unsupported local library does not read the catalog or start provider work');
+    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'catalog-open').length), 2,
+      'the supported Hooks shortcut requests the same bounded saved-reference page without starting provider work');
     assert.equal(await page.evaluate(() => window.events.filter(event => event.kind !== 'catalog-open').length), actionCount,
       'shortcut navigation stays inside Riff instead of starting a tool or model turn');
     await page.evaluate(() => window.view.showHome());

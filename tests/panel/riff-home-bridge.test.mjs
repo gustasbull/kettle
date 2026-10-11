@@ -574,13 +574,13 @@ test('Riff Home defers a catalog shortcut until the first account is ready', asy
   assert.equal(await frame.evaluate(() => window.catalogCalls.length),0,'no account-scoped read starts before the host connection and identity are ready');
   await page.evaluate(() => window.finishConnect());
   await frame.waitForFunction(() => window.catalogCalls.length === 1);
-  assert.deepEqual(await frame.evaluate(() => window.catalogCalls[0]),{sort:'observed_at_desc',limit:8});
-  await frame.waitForFunction(()=>document.querySelectorAll('[data-catalog-card]').length===8);
+  assert.deepEqual(await frame.evaluate(() => window.catalogCalls[0]),{role:'discovered_reference',sort:'observed_at_desc',limit:8});
+  await frame.waitForFunction(()=>document.querySelectorAll('[data-catalog-card]').length===5);
   for(let index=0;index<6;index+=1)await frame.getByRole('button',{name:'Next video'}).click();
   assert.equal(await frame.evaluate(()=>window.catalogCalls.length),1,'positions before the eighth card stay local');
   await frame.getByRole('button',{name:'Next video'}).click();
   assert.equal(await frame.evaluate(()=>window.catalogCalls.length),1,'the eighth card does not consume the retained cursor');
-  assert.equal(await frame.locator('[data-catalog-card]').count(),8,'only one Paper page is rendered');
+  assert.equal(await frame.locator('[data-catalog-card]').count(),5,'only the five-card Paper stage is rendered');
   await frame.getByRole('button',{name:'Next video'}).click();
   assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 1/,
     'the one-page carousel wraps locally');

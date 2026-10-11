@@ -1,4 +1,6 @@
 import { CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
+import type { RiffVideoCard } from '../../../packages/contracts/riff-videos.ts';
+import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
 import { creatorJobFixture } from '../../../evals/creator-loop/pipeline-fixtures.ts';
 export const scenarioNames = ['ideas', 'empty', 'three-ideas', 'scripts', 'three-variants', 'scan', 'video-analysis', 'video-analysis-incomplete', 'partial-video-analysis', 'instagram-profile', 'queued', 'running', 'failed', 'needs_reconciliation', 'long', 'long-scripts', 'hostile'] as const;
 export type Scenario = typeof scenarioNames[number];
@@ -67,4 +69,17 @@ export function pipelineFixture(scenario: Scenario): CreatorJobView {
     };
   }
   return CreatorJobView.parse(job);
+}
+
+export function discoveryCatalogFixture(count=8):RiffVideoCatalogPage {
+  const cards:Array<RiffVideoCard>=Array.from({length:Math.min(8,Math.max(0,count))},(_,index)=>({
+    id:`00000000-0000-4000-8000-0000000008${String(index).padStart(2,'0')}`,
+    platform:'tiktok',native_id:`90000000000000008${index}`,
+    canonical_url:`https://www.tiktok.com/@fictional_catalog/video/90000000000000008${index}`,
+    caption:`Observed catalog caption ${index+1}`,thumbnail_url:null,published_at:null,duration_seconds:null,
+    metrics:{views:index===0?0:index*100,likes:null,comments:null,shares:null,saves:null},
+    retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',
+    origin:'fixture',role:'discovered_reference',permission_basis:'Authored browser fixture for safe rendering.',limitations:[],
+  }));
+  return {cards,next_cursor:'page-2',coverage:'Saved observations only.',freshness:'As last observed.'};
 }
