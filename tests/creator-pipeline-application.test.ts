@@ -183,10 +183,11 @@ test('repository failure and rejection are sanitized',async()=>{
 });
 
 function guarded(reserve:unknown,complete:unknown={ok:true,data:{status:'completed',receipt:{allowed:'saved'}}},telemetry?:any) {
-  const events:string[]=[],calls:{op:string;raw:any}[]=[];
-  const repository:PipelineRepository={async call(op,owner,raw){assert.equal(owner,account);calls.push({op,raw});events.push(op);if(op==='reserve_creator_attempt')return reserve;
+  const events:string[]=[],calls:{op:string;raw:any}[]=[];let attempt:{provider:string;operation:string}|undefined;
+  const repository:PipelineRepository={async call(op,owner,raw){assert.equal(owner,account);calls.push({op,raw});events.push(op);if(op==='reserve_creator_attempt'){
+      attempt=raw as {provider:string;operation:string};return reserve;}
     if(op==='record_creator_attempt_outcome'){const value=raw as CreatorAttemptOutcomeInput;return {ok:true,data:{status:'recorded',outcome:{terminal_state:value.terminal_state,failure_code:value.failure_code,http_status:value.http_status,
-      provider:'scrapecreators',operation:'feed',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'}}};}
+      provider:attempt?.provider,operation:attempt?.operation,observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'}}};}
     if(complete instanceof Error)throw complete;return complete;}};
   return {events,calls,context:createGuardedProviderContext(repository,stored(),ceilings,step,telemetry)};
 }
@@ -268,6 +269,55 @@ test('receipt persistence response loss replays the authoritative committed rece
     }),{allowed:'receipt'});
     assert.equal(executions,1);assert.equal(reservations,2);assert.equal(completions,1);
   }
+});
+
+test('outcome persistence uncertainty replays an exact committed outcome without provider reexecution',async()=>{
+  for(const descriptor of [outcome('failed','http_5xx',503),outcome('needs_reconciliation','network')] as const){
+    for(const mode of ['lost','malformed'] as const){
+      let committed:ReturnType<typeof outcome>|undefined,executions=0,reservations=0,writes=0;
+      const storedOutcome={...descriptor,provider:'scrapecreators' as const,operation:'profile' as const,
+        observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'};
+      const repository:PipelineRepository={async call(op,_owner){
+        if(op==='reserve_creator_attempt'){
+          reservations++;
+          return committed===undefined?reservation('acquired'):{ok:true,data:{status:descriptor.terminal_state==='failed'?'definite_failure':'needs_reconciliation',outcome:storedOutcome}};
+        }
+        if(op==='record_creator_attempt_outcome'){
+          writes++;committed=descriptor;
+          if(mode==='lost')throw new Error('synthetic committed outcome response loss');
+          return {ok:true,data:{status:'unexpected',outcome:storedOutcome}};
+        }
+        assert.fail(`unexpected ${op}`);
+      }};
+      const context=createGuardedProviderContext(repository,stored('scan','running'),ceilings,step);
+
+      await assert.rejects(context.call('profile','scrapecreators','profile',async()=>{
+        executions++;throw new CreatorAttemptError(descriptor);
+      }),error=>error instanceof PipelineRunError&&error.state===descriptor.terminal_state&&
+        error.failureCode===descriptor.failure_code&&error.httpStatus===descriptor.http_status);
+      assert.equal(executions,1);assert.equal(reservations,2);assert.equal(writes,1);
+    }
+  }
+});
+
+test('outcome persistence recovery rejects a different authoritative outcome without provider reexecution',async()=>{
+  const expected=outcome('failed','http_5xx',503);
+  const conflicting={...outcome('failed','http_5xx',502),provider:'scrapecreators' as const,operation:'profile' as const,
+    observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'};
+  let executions=0,reservations=0;
+  const repository:PipelineRepository={async call(op){
+    if(op==='reserve_creator_attempt'){
+      reservations++;return reservations===1?reservation('acquired'):{ok:true,data:{status:'definite_failure',outcome:conflicting}};
+    }
+    if(op==='record_creator_attempt_outcome')throw new Error('synthetic conflicting outcome response loss');
+    assert.fail(`unexpected ${op}`);
+  }};
+  const context=createGuardedProviderContext(repository,stored('scan','running'),ceilings,step);
+
+  await assert.rejects(context.call('profile','scrapecreators','profile',async()=>{
+    executions++;throw new CreatorAttemptError(expected);
+  }),error=>error instanceof PipelineRunError&&error.state==='needs_reconciliation'&&error.failureCode===undefined);
+  assert.equal(executions,1);assert.equal(reservations,2);
 });
 
 test('guard reserves ceiling before I/O, saves allowlisted receipt and returns durable receipt',async()=>{

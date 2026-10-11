@@ -123,17 +123,52 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
   ceilings:AttemptCeilings, durableStep:DurableStep, telemetry?:CreatorLatencyObserver,
   catalogRepository?:RiffVideoRepository):CreatorProviderContext {
   let revision=job.revision;
+  type ReservationRequest={job_id:string;key:string;provider:'scrapecreators'|'lightreel'|'openai';
+    operation:'profile'|'feed'|'research'|'poll'|'video'|'generate';ceiling_microusd:number};
+  const reservationSchema=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
+    z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
+    z.object({status:z.literal('ambiguous')}),z.object({status:z.literal('definite_failure'),outcome:CreatorAttemptOutcome}),
+    z.object({status:z.literal('needs_reconciliation'),outcome:CreatorAttemptOutcome}),
+  ])});
+  const attemptRequests=new Map<string,ReservationRequest>();
+  const reserveAttempt=(request:ReservationRequest)=>observed(telemetry,
+    {stage:'provider_reservation',clock:'monotonic',provider:request.provider,operation:'reserve'},
+    ()=>repository.call('reserve_creator_attempt',job.account_id,request));
+  const inspectAuthoritativeAttempt=async(request:ReservationRequest)=>{
+    try {
+      const authoritative=reservationSchema.safeParse(await reserveAttempt(request));
+      if(authoritative.success){
+        if(authoritative.data.data.status==='replay')return {kind:'receipt',receipt:authoritative.data.data.receipt} as const;
+        if(authoritative.data.data.status==='definite_failure'||authoritative.data.data.status==='needs_reconciliation')
+          return {kind:'stored_outcome',outcome:authoritative.data.data.outcome} as const;
+      }
+    }catch{/* The caller retains the conservative post-dispatch fallback. */}
+  };
+  const exactOutcome=(candidate:z.infer<typeof CreatorAttemptOutcome>,expected:z.infer<typeof CreatorAttemptOutcomeInput>,
+    request:ReservationRequest|undefined)=>candidate.terminal_state===expected.terminal_state&&
+      candidate.failure_code===expected.failure_code&&candidate.http_status===expected.http_status&&
+      (!request||(candidate.provider===request.provider&&candidate.operation===request.operation));
+  const recoverOutcome=async(key:string,outcome:z.infer<typeof CreatorAttemptOutcomeInput>)=>{
+    const request=attemptRequests.get(key);if(!request)return undefined;
+    const authoritative=await inspectAuthoritativeAttempt(request);
+    return authoritative?.kind==='stored_outcome'&&exactOutcome(authoritative.outcome,outcome,request)
+      ?authoritative.outcome:undefined;
+  };
   const persistOutcome=async(key:string,raw:unknown):Promise<never>=>{
     const outcome=CreatorAttemptOutcomeInput.parse(raw);
     let saved:unknown;
     try{saved=await durableStep(`attempt:outcome:${key}`,()=>observed(telemetry,
       {stage:'attempt_outcome_persistence',clock:'monotonic',operation:'persist'},
       ()=>repository.call('record_creator_attempt_outcome',job.account_id,{job_id:job.id,key,...outcome})));}
-    catch{throw new PipelineRunError('needs_reconciliation');}
+    catch{const authoritative=await recoverOutcome(key,outcome);
+      if(authoritative)throw new PipelineRunError(authoritative.terminal_state,authoritative);
+      throw new PipelineRunError('needs_reconciliation');}
     const parsed=z.strictObject({ok:z.literal(true),data:z.strictObject({status:z.enum(['recorded','replay']),outcome:CreatorAttemptOutcome})}).safeParse(saved);
-    if(!parsed.success||parsed.data.data.outcome.terminal_state!==outcome.terminal_state||
-      parsed.data.data.outcome.failure_code!==outcome.failure_code||parsed.data.data.outcome.http_status!==outcome.http_status)
+    if(!parsed.success||!exactOutcome(parsed.data.data.outcome,outcome,attemptRequests.get(key))){
+      const authoritative=await recoverOutcome(key,outcome);
+      if(authoritative)throw new PipelineRunError(authoritative.terminal_state,authoritative);
       throw new PipelineRunError('needs_reconciliation');
+    }
     throw new PipelineRunError(outcome.terminal_state,outcome);
   };
   return {now:()=>new Date().toISOString(),newId:()=>crypto.randomUUID(),
@@ -174,26 +209,13 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
       // One provider request per step. Database reservation is authoritative even if
       // Workflow persistence fails, retries overlap, or the process dies after dispatch.
       const reservationRequest={job_id:job.id,key,provider,operation,ceiling_microusd:ceilings[provider]};
-      const reservationSchema=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
-        z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
-        z.object({status:z.literal('ambiguous')}),z.object({status:z.literal('definite_failure'),outcome:CreatorAttemptOutcome}),
-        z.object({status:z.literal('needs_reconciliation'),outcome:CreatorAttemptOutcome}),
-      ])});
-      const reserveAttempt=()=>observed(telemetry,{stage:'provider_reservation',clock:'monotonic',provider,operation:'reserve'},
-        ()=>repository.call('reserve_creator_attempt',job.account_id,reservationRequest));
-      const inspectAuthoritativeAttempt=async()=>{
-        try {
-          const authoritative=reservationSchema.safeParse(await reserveAttempt());
-          if(authoritative.success){
-            if(authoritative.data.data.status==='replay')return {kind:'receipt',receipt:authoritative.data.data.receipt} as const;
-            if(authoritative.data.data.status==='definite_failure'||authoritative.data.data.status==='needs_reconciliation')
-              return {kind:'stored_outcome',outcome:authoritative.data.data.outcome} as const;
-          }
-        }catch{/* The caller retains the conservative post-dispatch fallback. */}
-      };
+      const priorRequest=attemptRequests.get(key);
+      if(priorRequest&&(priorRequest.provider!==provider||priorRequest.operation!==operation||
+        priorRequest.ceiling_microusd!==ceilings[provider]))throw new PipelineRunError('failed');
+      attemptRequests.set(key,reservationRequest);
       let dispatched=false;
       const envelope=await durableStep(`provider:${key}`,async()=>{
-        const reservation=reservationSchema.safeParse(await reserveAttempt());
+        const reservation=reservationSchema.safeParse(await reserveAttempt(reservationRequest));
         if(!reservation.success)return {kind:'local_failure'} as const;
         if(reservation.data.data.status==='replay')return {kind:'receipt',receipt:reservation.data.data.receipt} as const;
         if(reservation.data.data.status==='ambiguous')return {kind:'unresolved'} as const;
@@ -210,13 +232,13 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
             .safeParse(await observed(telemetry,{stage:'receipt_persistence',clock:'monotonic',provider,operation:'persist',response_bytes:bytes},
               ()=>repository.call('complete_creator_attempt',job.account_id,{job_id:job.id,key,receipt})).catch(()=>undefined));
           if(saved.success)return {kind:'receipt',receipt:saved.data.data.receipt} as const;
-          return await inspectAuthoritativeAttempt()??
+          return await inspectAuthoritativeAttempt(reservationRequest)??
             {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'receipt_persistence_failed',http_status:null}} as const;
         }catch(error){return {kind:'outcome',outcome:error instanceof CreatorAttemptError?error.outcome:
           {terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;}
       }).catch(async error=>{
         if(!dispatched)throw error;
-        const authoritative=await inspectAuthoritativeAttempt();
+        const authoritative=await inspectAuthoritativeAttempt(reservationRequest);
         if(authoritative)return authoritative;
         // The durable wrapper lost a result after external I/O began. Persist the
         // uncertainty outside the zero-retry provider step before ending the job.
