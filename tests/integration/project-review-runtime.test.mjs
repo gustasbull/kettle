@@ -48,7 +48,8 @@ test('workerd serves the real bundle; browser exercises the MCP Apps parent brid
     const anonymous = await rpc('tools/call', { name: 'show_project_brief', arguments: { project_id: projectId } });
     assert.equal(anonymous.result.isError, true);
     assert.equal(anonymous.result.structuredContent.error.code, 'UNAUTHENTICATED');
-    assert.equal(anonymous.result.content[0].text, 'Connect or reauthorize your Riff account.');
+    assert.equal(anonymous.result.content[0].text,
+      'Riff request failed (UNAUTHENTICATED). Connect or reauthorize your Riff account.');
     assert.ok(anonymous.result._meta['mcp/www_authenticate']);
 
     browser = await chromium.launch({ headless: true });
