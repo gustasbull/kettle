@@ -87,7 +87,7 @@ test('nearest-rank aggregation enforces independent p50 p95 and p99 sample floor
     sample_ordinal: `sample-${String(index + 1).padStart(3, '0')}`,
     sample_class: 'fixture', proof_surface: 'local-process', scenario: 'cold_scan', operation: 'shell',
     metric: 'shell', value_ms: index + 1, clock_basis: 'monotonic', outcome: 'success', cache_state: 'none',
-    fingerprint: 'home', counters: { request_bytes: 0, response_bytes: 0, provider_calls: 0,
+    fingerprint: 'home', bundle_version: bundle('b'), counters: { request_bytes: 0, response_bytes: 0, provider_calls: 0,
       provider_cache_hits: 0, credits: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 },
   }));
   const at4 = aggregateBenchmarkSamples(samples(4))[0]!;
@@ -113,7 +113,7 @@ test('aggregation keeps every evidence boundary separate and excludes failures f
   const base = {
     sample_class: 'fixture', proof_surface: 'local-process', scenario: 'cold_scan', operation: 'shell',
     metric: 'shell', value_ms: 10, clock_basis: 'monotonic', outcome: 'success', cache_state: 'none',
-    fingerprint: 'home', counters: { request_bytes: 0, response_bytes: 0, provider_calls: 0,
+    fingerprint: 'home', bundle_version: bundle('b'), counters: { request_bytes: 0, response_bytes: 0, provider_calls: 0,
       provider_cache_hits: 0, credits: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 },
   } as const;
   const dimensions = [
@@ -126,6 +126,23 @@ test('aggregation keeps every evidence boundary separate and excludes failures f
   })) as BenchmarkSample[]);
   assert.equal(aggregates.length, dimensions.length);
   assert.equal(aggregates.find(value => value.outcome === 'failure')?.n, 0);
+});
+
+test('aggregation keeps different builds of the same resource separate', () => {
+  const base = {
+    sample_class: 'fixture', proof_surface: 'local-process', scenario: 'cold_scan', operation: 'shell',
+    metric: 'shell', value_ms: 10, clock_basis: 'monotonic', outcome: 'success', cache_state: 'none',
+    fingerprint: 'home', counters: { request_bytes: 0, response_bytes: 0, provider_calls: 0,
+      provider_cache_hits: 0, credits: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 },
+  } as const;
+  const samples = [bundle('a'), bundle('b')].map((bundleVersion, index) => ({
+    ...base, sample_ordinal: `sample-${String(index + 1).padStart(3, '0')}`, bundle_version: bundleVersion,
+  })) as BenchmarkSample[];
+
+  const aggregates = aggregateBenchmarkSamples(samples);
+
+  assert.equal(aggregates.length, 2);
+  assert.deepEqual(aggregates.map(value => value.bundle_version), [bundle('a'), bundle('b')]);
 });
 
 test('fixture main emits one strict local report without selecting network or credentials', async () => {
@@ -161,6 +178,26 @@ test('missing generated manifest fails closed with the local build instruction',
   assert.deepEqual(deps.summary, ['benchmark_error:panel_manifest_unavailable; run npm run build:panel']);
 });
 
+test('manifest evidence requires one coherent in-budget fingerprint for every panel', async () => {
+  const duplicatePanel = structuredClone(manifest);
+  duplicatePanel.panels[1] = structuredClone(duplicatePanel.panels[0]!);
+  const mismatchedResource = structuredClone(manifest);
+  mismatchedResource.panels[0]!.resource_version = 'riff-home-v3';
+  const mismatchedBundle = structuredClone(manifest);
+  mismatchedBundle.panels[0]!.bundle_version = bundle('d');
+  const rawOverBudget = structuredClone(manifest);
+  rawOverBudget.panels[0]!.raw_bytes = rawOverBudget.panels[0]!.budget.raw_bytes + 1;
+  const gzipOverBudget = structuredClone(manifest);
+  gzipOverBudget.panels[0]!.gzip_bytes = gzipOverBudget.panels[0]!.budget.gzip_bytes + 1;
+
+  for (const candidate of [duplicatePanel, mismatchedResource, mismatchedBundle, rawOverBudget, gzipOverBudget]) {
+    const deps = dependencies({ manifest: candidate });
+    assert.equal(await main(['--fixture'], deps), 2);
+    assert.equal(deps.json.length, 0);
+    assert.deepEqual(deps.summary, ['benchmark_error:panel_manifest_unavailable; run npm run build:panel']);
+  }
+});
+
 test('fixture report proves exact zero durable deltas for every provider-free read', async () => {
   const deps = dependencies();
   assert.equal(await main(['--fixture'], deps), 0);
@@ -172,6 +209,12 @@ test('fixture report proves exact zero durable deltas for every provider-free re
     request_bytes: 0, response_bytes: 0, provider_calls: 0, provider_cache_hits: 0, credits: 0,
     attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0,
   });
+  assert.deepEqual(report.guard_result.read_deltas, reads.reduce((total: Record<string, number>, sample: any) => ({
+    provider_calls: total.provider_calls + sample.counters.provider_calls,
+    attempt_delta: total.attempt_delta + sample.counters.attempt_delta,
+    trial_units_delta: total.trial_units_delta + sample.counters.trial_units_delta,
+    cash_reservation_delta: total.cash_reservation_delta + sample.counters.cash_reservation_delta,
+  }), { provider_calls: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 }));
 
   const tampered = structuredClone(reads[0]);
   tampered.counters.provider_calls = 1;
@@ -179,6 +222,16 @@ test('fixture report proves exact zero durable deltas for every provider-free re
   assert.equal(await main(['--fixture'], rejected), 2);
   assert.equal(rejected.json.length, 0);
   assert.deepEqual(rejected.summary, ['benchmark_error:unsafe_report']);
+
+  const duplicateScenario = reads.map((_: unknown, index: number) => ({
+    ...structuredClone(reads[0]), sample_ordinal: `sample-${String(index + 1).padStart(3, '0')}`,
+  }));
+  for (const invalidReads of [duplicateScenario, reads.slice(0, -1)]) {
+    const invalid = dependencies({ fixtureSamples: invalidReads });
+    assert.equal(await main(['--fixture'], invalid), 2);
+    assert.equal(invalid.json.length, 0);
+    assert.deepEqual(invalid.summary, ['benchmark_error:unsafe_report']);
+  }
 });
 
 test('report validation and recursive safety reject unknown fields, identifiers, URLs and secrets', async () => {
@@ -195,6 +248,9 @@ test('report validation and recursive safety reject unknown fields, identifiers,
     candidate => { candidate.limitations[0] = 'Bearer abc.def.ghi'; },
     candidate => { candidate.limitations[0] = 'Error: failure\n    at private.ts:1:1'; },
     candidate => { candidate.fingerprint[0].raw_bytes = -1; },
+    candidate => { candidate.fingerprint[2] = structuredClone(candidate.fingerprint[0]); },
+    candidate => { candidate.fingerprint[2].resource_version = 'riff-home-v3'; },
+    candidate => { candidate.samples[0].bundle_version = bundle('d'); },
   ];
   for (const mutate of attacks) {
     const candidate = structuredClone(valid);

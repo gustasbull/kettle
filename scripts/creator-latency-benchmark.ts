@@ -34,9 +34,10 @@ const clocks = z.enum(['monotonic', 'wall_clock']);
 const outcomes = z.enum(['success', 'failure', 'ambiguous']);
 const cacheStates = z.enum(['none', 'miss', 'hit', 'replay', 'unknown']);
 const fingerprintNames = z.enum(['pipeline', 'home', 'onboarding']);
-const readScenarios = new Set([
+const requiredReadScenarios = [
   'catalog_first_page', 'catalog_repeat', 'reopen', 'status_read', 'result_read', 'render_only',
-]);
+] as const;
+const readScenarios = new Set<string>(requiredReadScenarios);
 
 const countersSchema = z.strictObject({
   request_bytes: integer,
@@ -61,6 +62,7 @@ const sampleSchema = z.strictObject({
   outcome: outcomes,
   cache_state: cacheStates,
   fingerprint: fingerprintNames,
+  bundle_version: z.string().regex(sha256),
   counters: countersSchema,
 }).superRefine((sample, context) => {
   if ((sample.metric === 'queue_delay') !== (sample.clock_basis === 'wall_clock')) {
@@ -92,11 +94,18 @@ const aggregateSchema = z.strictObject({
   outcome: outcomes,
   clock_basis: clocks,
   fingerprint: fingerprintNames,
+  bundle_version: z.string().regex(sha256),
   n: integer,
   outcome_count: integer,
   raw_values_ms: z.array(integer).max(1_000),
   percentiles: z.strictObject({ p50: percentileSchema, p95: percentileSchema, p99: percentileSchema }),
 });
+
+const fingerprintResourceVersions = {
+  pipeline: 'creator-pipeline-v3',
+  home: 'riff-home-v3',
+  onboarding: 'riff-onboarding-v1',
+} as const;
 
 const fingerprintSchema = z.strictObject({
   resource: fingerprintNames,
@@ -104,6 +113,16 @@ const fingerprintSchema = z.strictObject({
   bundle_version: z.string().regex(sha256),
   raw_bytes: integer.max(10_000_000),
   gzip_bytes: integer.max(10_000_000),
+}).superRefine((fingerprint, context) => {
+  if (fingerprint.resource_version !== fingerprintResourceVersions[fingerprint.resource]) {
+    context.addIssue({ code: 'custom', message: 'invalid_resource_version' });
+  }
+});
+
+const fingerprintListSchema = z.array(fingerprintSchema).length(3).superRefine((fingerprints, context) => {
+  if (new Set(fingerprints.map(fingerprint => fingerprint.resource)).size !== 3) {
+    context.addIssue({ code: 'custom', message: 'duplicate_or_missing_fingerprint' });
+  }
 });
 
 const maxCallsSchema = z.strictObject({
@@ -151,20 +170,27 @@ const reportSchema = z.strictObject({
   mode: z.enum(['fixture', 'live']),
   sample_class: sampleClasses,
   proof_surface: proofSurfaces,
-  fingerprint: z.array(fingerprintSchema).length(3),
+  fingerprint: fingerprintListSchema,
   plan: planSchema,
   samples: z.array(sampleSchema).min(1).max(1_000),
   aggregates: z.array(aggregateSchema).min(1).max(1_000),
   guard_result: guardSchema,
   limitations: z.array(limitations).min(1).max(20),
 }).superRefine((report, context) => {
+  const bundleVersions = new Map(report.fingerprint.map(value => [value.resource, value.bundle_version]));
   if (report.samples.some(sample => sample.sample_class !== report.sample_class
       || sample.proof_surface !== report.proof_surface)) {
     context.addIssue({ code: 'custom', message: 'mixed_evidence' });
   }
+  if (report.samples.some(sample => bundleVersions.get(sample.fingerprint) !== sample.bundle_version)) {
+    context.addIssue({ code: 'custom', message: 'sample_fingerprint_mismatch' });
+  }
   if (report.aggregates.some(aggregate => aggregate.sample_class !== report.sample_class
       || aggregate.proof_surface !== report.proof_surface)) {
     context.addIssue({ code: 'custom', message: 'mixed_aggregates' });
+  }
+  if (report.aggregates.some(aggregate => bundleVersions.get(aggregate.fingerprint) !== aggregate.bundle_version)) {
+    context.addIssue({ code: 'custom', message: 'aggregate_fingerprint_mismatch' });
   }
 });
 
@@ -267,7 +293,7 @@ export function aggregateBenchmarkSamples(samples: readonly BenchmarkSample[]): 
   const groups = new Map<string, BenchmarkSample[]>();
   for (const sample of parsed) {
     const key = [sample.sample_class, sample.proof_surface, sample.scenario, sample.operation, sample.metric,
-      sample.cache_state, sample.outcome, sample.clock_basis, sample.fingerprint].join('|');
+      sample.cache_state, sample.outcome, sample.clock_basis, sample.fingerprint, sample.bundle_version].join('|');
     const group = groups.get(key) ?? [];
     group.push(sample);
     groups.set(key, group);
@@ -285,6 +311,7 @@ export function aggregateBenchmarkSamples(samples: readonly BenchmarkSample[]): 
       outcome: first.outcome,
       clock_basis: first.clock_basis,
       fingerprint: first.fingerprint,
+      bundle_version: first.bundle_version,
       n: values.length,
       outcome_count: group.length,
       raw_values_ms: values,
@@ -322,7 +349,7 @@ const zeroCounters = Object.freeze({
   credits: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0,
 });
 
-function fixtureSamples(): BenchmarkSample[] {
+function fixtureSamples(bundleVersions: Readonly<Record<z.infer<typeof fingerprintNames>, string>>): BenchmarkSample[] {
   const definitions = [
     ['shell', 'shell', 'cold_scan', 'home', [12, 9, 11, 10, 8]],
     ['durable_acknowledgement', 'start', 'cold_scan', 'home', [42, 38, 41, 39, 40]],
@@ -345,7 +372,7 @@ function fixtureSamples(): BenchmarkSample[] {
         sample_class: 'fixture', proof_surface: 'local-process', scenario, operation, metric, value_ms: value,
         clock_basis: metric === 'queue_delay' ? 'wall_clock' : 'monotonic', outcome: 'success',
         cache_state: scenario === 'cold_scan' || scenario === 'cold_recommendation' ? 'miss' : 'none',
-        fingerprint,
+        fingerprint, bundle_version: bundleVersions[fingerprint],
         counters: metric === 'profile_feed'
           ? { ...zeroCounters, request_bytes: 64, response_bytes: 2_048, provider_calls: 1, credits: 1,
             attempt_delta: 1, trial_units_delta: 1 }
@@ -361,7 +388,8 @@ function fixtureSamples(): BenchmarkSample[] {
     sample_ordinal: `sample-${String(ordinal).padStart(3, '0')}`,
     sample_class: 'fixture', proof_surface: 'local-process', scenario: 'telemetry_failure', operation: 'research',
     metric: 'research', value_ms: 25, clock_basis: 'monotonic', outcome: 'ambiguous', cache_state: 'unknown',
-    fingerprint: 'pipeline', counters: { ...zeroCounters, provider_calls: 1, credits: 1, attempt_delta: 1,
+    fingerprint: 'pipeline', bundle_version: bundleVersions.pipeline,
+    counters: { ...zeroCounters, provider_calls: 1, credits: 1, attempt_delta: 1,
       trial_units_delta: 1 },
   }));
   const reads = [
@@ -377,23 +405,46 @@ function fixtureSamples(): BenchmarkSample[] {
     result.push(sampleSchema.parse({
       sample_ordinal: `sample-${String(ordinal).padStart(3, '0')}`,
       sample_class: 'fixture', proof_surface: 'local-process', scenario, operation, metric, value_ms: value,
-      clock_basis: 'monotonic', outcome: 'success', cache_state: cacheState, fingerprint, counters: zeroCounters,
+      clock_basis: 'monotonic', outcome: 'success', cache_state: cacheState, fingerprint,
+      bundle_version: bundleVersions[fingerprint], counters: zeroCounters,
     }));
   }
   return result;
 }
 
+const panelResourceVersions = {
+  'creator-pipeline': 'creator-pipeline-v3',
+  'riff-home': 'riff-home-v3',
+  'riff-onboarding': 'riff-onboarding-v1',
+} as const;
+
+const manifestPanelSchema = z.strictObject({
+  panel: z.enum(['creator-pipeline', 'riff-home', 'riff-onboarding']),
+  resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v1']),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  raw_bytes: integer.max(10_000_000),
+  gzip_bytes: integer.max(10_000_000),
+  budget: z.strictObject({ raw_bytes: integer, gzip_bytes: integer }),
+  bundle_version: z.string().regex(sha256),
+}).superRefine((panel, context) => {
+  if (panel.resource_version !== panelResourceVersions[panel.panel]) {
+    context.addIssue({ code: 'custom', message: 'invalid_resource_version' });
+  }
+  if (panel.bundle_version !== `sha256:${panel.sha256}`) {
+    context.addIssue({ code: 'custom', message: 'invalid_bundle_version' });
+  }
+  if (panel.raw_bytes > panel.budget.raw_bytes || panel.gzip_bytes > panel.budget.gzip_bytes) {
+    context.addIssue({ code: 'custom', message: 'bundle_budget_exceeded' });
+  }
+});
+
 const manifestSchema = z.strictObject({
   schema_version: z.literal(1),
-  panels: z.array(z.strictObject({
-    panel: z.enum(['creator-pipeline', 'riff-home', 'riff-onboarding']),
-    resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v1']),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    raw_bytes: integer.max(10_000_000),
-    gzip_bytes: integer.max(10_000_000),
-    budget: z.strictObject({ raw_bytes: integer, gzip_bytes: integer }),
-    bundle_version: z.string().regex(sha256),
-  })).length(3),
+  panels: z.array(manifestPanelSchema).length(3).superRefine((panels, context) => {
+    if (new Set(panels.map(panel => panel.panel)).size !== 3) {
+      context.addIssue({ code: 'custom', message: 'duplicate_or_missing_panel' });
+    }
+  }),
 });
 
 function fingerprints(manifest: unknown): EvidenceReport['fingerprint'] {
@@ -407,8 +458,25 @@ function fingerprints(manifest: unknown): EvidenceReport['fingerprint'] {
 }
 
 function fixtureReport(dependencies: BenchmarkDependencies, fingerprint: EvidenceReport['fingerprint']): EvidenceReport {
-  const samples = [...(dependencies.fixtureSamples ?? fixtureSamples())];
-  const readCount = samples.filter(sample => readScenarios.has(sample.scenario)).length;
+  const bundleVersions = Object.fromEntries(fingerprint.map(value => [value.resource, value.bundle_version])) as
+    Record<z.infer<typeof fingerprintNames>, string>;
+  const samples = z.array(sampleSchema).min(1).max(1_000)
+    .parse([...(dependencies.fixtureSamples ?? fixtureSamples(bundleVersions))]);
+  const reads = samples.filter(sample => readScenarios.has(sample.scenario));
+  const readScenarioCounts = new Map<string, number>();
+  for (const sample of reads) {
+    readScenarioCounts.set(sample.scenario, (readScenarioCounts.get(sample.scenario) ?? 0) + 1);
+  }
+  const readDeltas = reads.reduce((total, sample) => ({
+    provider_calls: total.provider_calls + sample.counters.provider_calls,
+    attempt_delta: total.attempt_delta + sample.counters.attempt_delta,
+    trial_units_delta: total.trial_units_delta + sample.counters.trial_units_delta,
+    cash_reservation_delta: total.cash_reservation_delta + sample.counters.cash_reservation_delta,
+  }), { provider_calls: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 });
+  const readsVerified = reads.length === requiredReadScenarios.length
+    && requiredReadScenarios.every(scenario => readScenarioCounts.get(scenario) === 1)
+    && Object.values(readDeltas).every(value => value === 0);
+  if (!readsVerified) throw new BenchmarkError('unsafe_report');
   const report = validateEvidenceReport({
     schema_version: 1,
     generated_at: dependencies.now().toISOString(),
@@ -420,9 +488,8 @@ function fixtureReport(dependencies: BenchmarkDependencies, fingerprint: Evidenc
     samples,
     aggregates: aggregateBenchmarkSamples(samples),
     guard_result: {
-      status: 'fixture_only', network_selected: false, provider_free_reads_verified: readCount === 6,
-      provider_free_read_samples: readCount,
-      read_deltas: { provider_calls: 0, attempt_delta: 0, trial_units_delta: 0, cash_reservation_delta: 0 },
+      status: 'fixture_only', network_selected: false, provider_free_reads_verified: readsVerified,
+      provider_free_read_samples: reads.length, read_deltas: readDeltas,
     },
     limitations: [
       'fixture_only', 'no_network', 'no_provider_calls', 'no_hosted_supabase', 'no_deployment',
@@ -430,7 +497,6 @@ function fixtureReport(dependencies: BenchmarkDependencies, fingerprint: Evidenc
       'persisted_result_to_paint_unverified', 'terminal_observed_to_render_only', 'local_controller_schedule_only',
     ],
   });
-  if (readCount !== 6) throw new BenchmarkError('unsafe_report');
   assertSafeEvidenceReport(report);
   return report;
 }
