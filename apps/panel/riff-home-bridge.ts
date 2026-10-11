@@ -6,7 +6,7 @@ import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
 import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput } from './creator-pipeline-controller.ts';
-import { riffVideosStructuredOutput, type RiffVideoCatalogPage } from './creator-pipeline-validation.ts';
+import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
@@ -120,9 +120,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   let actionEpoch = 0;
   const terminalWorkRefreshes = new Set<string>();
   const sourceByJob=new Map<string,string>();
-  let catalogAttempted=false,catalogLoading=false,catalogDeferred=false;
-  let catalogEpoch=0;
-  let catalogPage:RiffVideoCatalogPage|undefined;
+  let catalogDeferred:{projectId?:string;cursor?:string}|undefined;
   let controller!:ReturnType<typeof createCreatorPipelineController>;
 
   type DeadlineResult<T> = { status: 'resolved'; value: T } | { status: 'rejected'; reason: unknown } | { status: 'timeout' };
@@ -236,7 +234,12 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     return { status: 'ambiguous' };
   };
 
-  const view = mountRiffHome(root, {
+  let view!:ReturnType<typeof mountRiffHome>;
+  const catalogLoader=createRiffVideoCatalogLoader(async args=>{
+    const outcome=await callTool('list_riff_videos',args);
+    return outcome.status==='response'?outcome.value:undefined;
+  },page=>view.setCatalog(page));
+  view = mountRiffHome(root, {
     inputChanged(rawSource) {
       if (creatorRequest && creatorRequest.key !== creatorIntent(rawSource).key) {
         actionEpoch++;
@@ -360,7 +363,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (library !== 'videos') return send(intent);
       return send(`${intent} Create two or three evidence-grounded filming variants with timed hook, main-content, and CTA sections, concrete filming directions, a platform caption, and hashtags. Save them in Studio only if Riff confirms the write; otherwise show them in chat and say they are not saved.`);
     },
-    onDiscoveryOpen:()=>void loadCatalog(),
+    onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
+    onCatalogNextPage:({cursor,projectId})=>void loadCatalog(projectId,cursor),
   });
   const render = (state: RiffHomeState) => { const finish = localPerformance.start('panel_render'); view.render(state); finish('ok'); };
   render(homeState);
@@ -396,20 +400,14 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     controller.receiveInput({job_id:job.id});controller.receiveResult({ok:true,data:{job}});
   }
 
-  async function loadCatalog(){
+  async function loadCatalog(projectId?:string,cursor?:string){
     if(disposed)return;
-    if(!connected){catalogDeferred=true;return;}
-    if(catalogPage){view.setCatalog(catalogPage);return;}
+    const deferred={...(projectId?{projectId}:{}),...(cursor?{cursor}:{})};
+    if(!connected){catalogDeferred=deferred;return;}
     const accountId=activeAccountId;
-    if(!accountId){catalogDeferred=true;return;}
-    if(catalogAttempted||catalogLoading)return;catalogDeferred=false;catalogAttempted=true;catalogLoading=true;
-    const epoch=catalogEpoch;
-    try{
-      const outcome=await callTool('list_riff_videos',{sort:'observed_at_desc',limit:8});
-      if(epoch===catalogEpoch&&activeAccountId===accountId&&outcome.status==='response'){
-        const result=riffVideosStructuredOutput(outcome.value);if(result?.ok){catalogPage=result.data;view.setCatalog(catalogPage);}
-      }
-    }finally{if(epoch===catalogEpoch)catalogLoading=false;}
+    if(!accountId){catalogDeferred=deferred;return;}
+    catalogDeferred=undefined;
+    await catalogLoader.load({ownerKey:accountId,...(projectId?{projectId}:{})},cursor);
   }
 
   function refreshTerminalWork(job: CreatorJobView,state=job.state,revision=job.revision) {
@@ -469,8 +467,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     creatorRequest = undefined;
     recommendationRequest = undefined;
     workLoadEpoch++;
-    catalogEpoch++;
-    controller.reset();sourceByJob.clear();catalogAttempted=false;catalogLoading=false;catalogDeferred=false;catalogPage=undefined;view.setCatalog(undefined);
+    controller.reset();sourceByJob.clear();catalogDeferred=undefined;catalogLoader.reset();
     terminalWorkRefreshes.clear();
     initialWorkLoadStarted = false;
     view.clearPrivate();
@@ -507,7 +504,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     }
     activeAccountId = nextAccountId;
     homeState = nextState; render(homeState);
-    if (catalogDeferred && activeAccountId) void loadCatalog();
+    if (catalogDeferred && activeAccountId) void loadCatalog(catalogDeferred.projectId,catalogDeferred.cursor);
     ensureInitialWork();
   };
   app.ontoolcancelled = () => render({ status: 'error', message: 'Riff Home was cancelled. Reopen it from ChatGPT.' });
@@ -530,7 +527,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (disposed) return;
       connected = true; clearTimeout(timer); applyContext(app.getHostContext());
       controller.connected(!!app.getHostCapabilities()?.serverTools||!!window.openai?.callTool);
-      if (catalogDeferred && activeAccountId) void loadCatalog();
+      if (catalogDeferred && activeAccountId) void loadCatalog(catalogDeferred.projectId,catalogDeferred.cursor);
       ensureInitialWork();
     }).catch(() => { if (!disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' }); });
   }

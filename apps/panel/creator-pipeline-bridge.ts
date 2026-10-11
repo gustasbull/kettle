@@ -6,7 +6,8 @@ import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
-import { parseStartRiffCreatorInput, riffVideosStructuredOutput } from './creator-pipeline-validation.ts';
+import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
+import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 
 const WAIT_MS = 10_000;
 
@@ -28,7 +29,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const card = doc.createElement('div');
   host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
-  let currentProjectId:string|undefined,catalogAttemptedFor:string|undefined,catalogLoadingFor:string|undefined;
+  let currentProjectId:string|undefined;
   const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
@@ -77,25 +78,26 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
       return { status: 'failed' as const, message: 'Fullscreen could not open. Continue from the inline summary.' };
     }
   };
-  const loadCatalog=async()=>{
-    const projectId=currentProjectId;
-    if(!projectId||catalogAttemptedFor===projectId||catalogLoadingFor===projectId||!bridgeReady)return;
-    catalogAttemptedFor=projectId;catalogLoadingFor=projectId;
-    try{
-      const result=riffVideosStructuredOutput(await app.callServerTool({name:'list_riff_videos',arguments:{project_id:projectId,sort:'observed_at_desc',limit:8}},
-        {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}));
-      if(result?.ok&&currentProjectId===projectId)view?.setCatalog(result.data);
-    }catch{/* Discovery keeps the approved empty state. */}finally{if(catalogLoadingFor===projectId)catalogLoadingFor=undefined;}
+  const catalogLoader=createRiffVideoCatalogLoader(
+    args=>app.callServerTool({name:'list_riff_videos',arguments:args},
+      {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}),
+    page=>view?.setCatalog(page),
+  );
+  const loadCatalog=(projectId=currentProjectId,cursor?:string)=>{
+    if(!projectId||projectId!==currentProjectId||!bridgeReady)return;
+    return catalogLoader.load({ownerKey:projectId,projectId},cursor);
   };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
     job(snapshot, status) {
       view ??= mountCreatorPipeline(card, {
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
-        sendPrompt, requestFullscreen,onDiscoveryOpen:()=>void loadCatalog(),
+        sendPrompt, requestFullscreen,
+        onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
+        onCatalogNextPage:({cursor,projectId})=>void loadCatalog(projectId,cursor),
       });
       if(currentProjectId!==snapshot.job.project_id){
-        currentProjectId=snapshot.job.project_id;catalogAttemptedFor=undefined;catalogLoadingFor=undefined;view.setCatalog(undefined);
+        currentProjectId=snapshot.job.project_id;catalogLoader.reset();
       }
       view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{})});
       if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length)sourceByJob.delete(snapshot.job.id);

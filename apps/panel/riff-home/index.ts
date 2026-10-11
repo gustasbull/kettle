@@ -48,7 +48,8 @@ export type RiffHomeActions = {
     variant: ScriptResult['scripts']['variants'][number];
     state: 'saved' | 'filmed';
   }) => Promise<RiffActionResult>;
-  onDiscoveryOpen?:()=>void;
+  onDiscoveryOpen?:(scope:{projectId?:string})=>void;
+  onCatalogNextPage?:(request:{cursor:string;projectId?:string})=>void;
 };
 
 export function riffHomeStructuredOutput(value: unknown): RiffHomeState {
@@ -328,12 +329,12 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     displayMode:'fullscreen',sendPrompt:actions.send,embeddedChrome:false,
     requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
     startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
-    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,
+    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,onCatalogNextPage:actions.onCatalogNextPage,
   });
   const showCatalog=(library:RiffDiscoveryLibrary='videos')=>{
     if(disposed)return;
     invocationEpoch++;location.textContent='Discover videos';home.hidden=true;workflow.hidden=false;
-    ensurePipeline().showCatalog(library);workflow.scrollIntoView({block:'start'});
+    ensurePipeline().showCatalog(library,{accountWide:true});workflow.scrollIntoView({block:'start'});
   };
 
   form.addEventListener('submit', event => {

@@ -486,10 +486,20 @@ test('Riff Home ignores a catalog response from the previous account', async (t)
 test('Riff Home defers a catalog shortcut until the first account is ready', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
-    window.catalogCalls=[];
+    window.catalogCalls=[];window.toolNames=[];
+    const card=index=>({
+      id:\`00000000-0000-4000-8000-0000000009\${String(index).padStart(2,'0')}\`,platform:'tiktok',native_id:\`90000000000000009\${index}\`,
+      canonical_url:\`https://www.tiktok.com/@fictional_catalog/video/90000000000000009\${index}\`,caption:\`Home catalog caption \${index+1}\`,
+      thumbnail_url:null,published_at:null,duration_seconds:null,metrics:{views:index,likes:null,comments:null,shares:null,saves:null},
+      retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',
+      role:'discovered_reference',permission_basis:'Authored browser fixture for safe rendering.',limitations:[],
+    });
     window.openai={callTool:async(name,args)=>{
+      window.toolNames.push(name);
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
-      if(name==='list_riff_videos'){window.catalogCalls.push(args);return {structuredContent:{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}};}
+      if(name==='list_riff_videos'){window.catalogCalls.push(args);const second=args.cursor==='page-2';return {structuredContent:{ok:true,data:{
+        cards:Array.from({length:8},(_,offset)=>card(offset+(second?8:0))),next_cursor:second?null:'page-2',
+        coverage:'Saved observations only.',freshness:'As last observed.'}}};}
     }};
     window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
   ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
@@ -518,6 +528,23 @@ test('Riff Home defers a catalog shortcut until the first account is ready', asy
   await page.evaluate(() => window.finishConnect());
   await frame.waitForFunction(() => window.catalogCalls.length === 1);
   assert.deepEqual(await frame.evaluate(() => window.catalogCalls[0]),{sort:'observed_at_desc',limit:8});
+  await frame.waitForFunction(()=>document.querySelectorAll('[data-catalog-card]').length===8);
+  for(let index=0;index<6;index+=1)await frame.getByRole('button',{name:'Next video'}).click();
+  assert.equal(await frame.evaluate(()=>window.catalogCalls.length),1,'positions before the eighth card stay local');
+  await frame.getByRole('button',{name:'Next video'}).click();
+  await frame.waitForFunction(()=>window.catalogCalls.length===2);
+  assert.deepEqual(await frame.evaluate(()=>window.catalogCalls[1]),{sort:'observed_at_desc',limit:8,cursor:'page-2'});
+  assert.equal(await frame.locator('[data-catalog-card]').count(),8,'only one Paper page is rendered');
+  await frame.getByRole('button',{name:'Next video'}).click();
+  assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 9/);
+  await frame.getByRole('button',{name:'Previous video'}).click();
+  assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 8/);
+  const callsAfterPagination=await frame.evaluate(()=>window.catalogCalls.length);
+  await frame.getByRole('button',{name:'Quick demos',exact:true}).click();
+  await frame.getByRole('button',{name:'For you',exact:true}).click();
+  assert.equal(await frame.evaluate(()=>window.catalogCalls.length),callsAfterPagination,'loaded filters stay local');
+  assert.equal(await frame.evaluate(()=>window.toolNames.some(name=>/^start_|refresh|discover|generate/.test(name))),false,
+    'catalog browsing never invokes a provider-start tool');
 });
 
 test('Riff Home ignores an older start response after a newer creator intent wins', async (t) => {
