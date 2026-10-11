@@ -288,8 +288,8 @@ test('full and status parsers enforce the complete MCP result envelope for succe
     const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
     const symbol:any={structuredContent:inner};symbol[Symbol('secret')]=true;
     const custom=Object.assign(Object.create({spoof:true}),{structuredContent:inner});
-    const topProxy=new Proxy({structuredContent:inner},{});
-    const nestedProxy={structuredContent:new Proxy(innerObject,{})};
+    const topProxy=new Proxy({structuredContent:inner},{getPrototypeOf(){throw new Error('hostile outer proxy');}});
+    const nestedProxy={structuredContent:new Proxy(innerObject,{getPrototypeOf(){throw new Error('hostile inner proxy');}})};
     const topNull=Object.assign(Object.create(null),{structuredContent:inner});
     const nestedNull={structuredContent:Object.assign(Object.create(null),innerObject)};
     return [
@@ -322,6 +322,20 @@ test('full and status parsers enforce the complete MCP result envelope for succe
     assert.deepEqual(parse(failureEnvelope),denied,`${name}: valid failure envelope`);
     for(const [index,raw] of [...malformed(success),...malformed(denied)].entries())
       assert.equal(parse(raw),undefined,`${name}: malformed success/failure envelope ${index}`);
+    let getterReads=0;
+    const mutating:any={structuredContent:success,content:[],isError:true,_meta:{}};
+    mutating._meta.mutator=new Proxy({}, {getPrototypeOf(){
+      Object.defineProperty(mutating,'structuredContent',{configurable:true,enumerable:true,get(){
+        getterReads++;
+        Object.defineProperty(mutating,'structuredContent',{
+          configurable:true,enumerable:true,writable:true,value:success,
+        });
+        return denied;
+      }});
+      return Object.prototype;
+    }});
+    assert.equal(parse(mutating),undefined,`${name}: nested proxy cannot inject a failure`);
+    assert.equal(getterReads,0,`${name}: restoring getter is never read`);
   }
 });
 

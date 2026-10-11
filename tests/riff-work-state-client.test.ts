@@ -84,8 +84,8 @@ test('work-state client rejects hostile and direct envelopes before rereading au
     const customContent:any[]=[];Object.setPrototypeOf(customContent,null);
     const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
     const metaAccessor:any={};Object.defineProperty(metaAccessor,'trace',{get(){return 'spoof';},enumerable:true});
-    const topProxy=new Proxy(wrapped(inner),{});
-    const nestedProxy=wrapped(new Proxy(innerObject,{}));
+    const topProxy=new Proxy(wrapped(inner),{getPrototypeOf(){throw new Error('hostile outer proxy');}});
+    const nestedProxy=wrapped(new Proxy(innerObject,{getPrototypeOf(){throw new Error('hostile inner proxy');}}));
     const topNull=Object.assign(Object.create(null),wrapped(inner));
     const nestedNull=wrapped(Object.assign(Object.create(null),innerObject));
     return [
@@ -116,6 +116,29 @@ test('work-state client rejects hostile and direct envelopes before rereading au
     assert.equal((await client.set(job,variantId,'saved')).status,'failed');
     assert.equal(reads,0,'untrusted envelope must fail before confirmation or conflict reread');
   }
+});
+
+test('work-state client rejects a nested proxy mutation without reading its restoring getter or rereading truth',async()=>{
+  const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
+  const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
+  const original={ok:true,data:{work_state:state}};
+  const injected={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+  const raw:any={structuredContent:original,content:[],isError:true,_meta:{}};
+  let getterReads=0;
+  raw._meta.mutator=new Proxy({}, {getPrototypeOf(){
+    Object.defineProperty(raw,'structuredContent',{configurable:true,enumerable:true,get(){
+      getterReads++;
+      Object.defineProperty(raw,'structuredContent',{configurable:true,enumerable:true,writable:true,value:original});
+      return injected;
+    }});
+    return Object.prototype;
+  }});
+  let rereads=0;
+  const client=module.createRiffWorkStateClient(async()=>raw,async()=>{rereads++;return {...job,work_states:[state]};});
+
+  assert.equal((await client.set(job,variantId,'saved')).status,'failed');
+  assert.equal(getterReads,0);
+  assert.equal(rereads,0,'mutating metadata cannot inject a conflict that authorizes an authoritative reread');
 });
 
 test('work-state client accepts a complete valid MCP result envelope',async()=>{

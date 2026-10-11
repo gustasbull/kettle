@@ -613,7 +613,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   }
 
   const ensureInitialWork = () => {
-    if (!connected || disposed || initialWorkLoadStarted) return;
+    if (!connected || disposed || !activeAccountId || initialWorkLoadStarted) return;
     initialWorkLoadStarted = true; void loadWork();
   };
 
@@ -655,8 +655,11 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     void app.close();
   }
   app.ontoolresult = (params) => {
-    const nextState = riffHomeStructuredOutput(params.structuredContent);
-    const nextAccountId = nextState.status === 'ready' ? nextState.account.id : undefined;
+    const result = parseStrictCallToolResult(params);
+    if (!result || !isBusinessResultFlagCoherent(result, true)) return;
+    const nextState = riffHomeStructuredOutput(result.structuredContent);
+    if (nextState.status !== 'ready') return;
+    const nextAccountId = nextState.account.id;
     const pendingAccountChanged = (creatorRequest !== undefined && creatorRequest.accountId !== nextAccountId)
       || (productSaveRequest !== undefined && productSaveRequest.accountId !== nextAccountId);
     if (pendingAccountChanged || (activeAccountId !== undefined && activeAccountId !== nextAccountId)) {

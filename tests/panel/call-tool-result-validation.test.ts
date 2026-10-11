@@ -26,6 +26,15 @@ test('strict CallToolResult parsing preserves valid content and returns a detach
   assert.equal(Object.getPrototypeOf(parsed?.structuredContent),Object.prototype);
 });
 
+test('strict CallToolResult parsing neutralizes stable transparent proxies into detached ordinary JSON',()=>{
+  const raw=envelope();
+  const proxiedContent=new Proxy(raw.structuredContent,{});
+  const parsed=parseStrictCallToolResult(new Proxy({...raw,structuredContent:proxiedContent},{}));
+  assert.deepEqual(parsed,{structuredContent:raw.structuredContent,isError:false});
+  assert.notEqual(parsed?.structuredContent,proxiedContent);
+  assert.equal(Object.getPrototypeOf(parsed?.structuredContent),Object.prototype);
+});
+
 test('strict CallToolResult parsing preserves isError presence without interpreting arbitrary structured content',()=>{
   const absent=parseStrictCallToolResult({structuredContent:{ok:true},content:[]});
   const explicitFalse=parseStrictCallToolResult({structuredContent:{ok:false},content:[],isError:false});
@@ -35,7 +44,7 @@ test('strict CallToolResult parsing preserves isError presence without interpret
   assert.deepEqual(explicitTrue,{structuredContent:{ok:true},isError:true});
 });
 
-test('strict CallToolResult parsing rejects proxy and non-ordinary JSON before cloning without invoking getters',()=>{
+test('strict CallToolResult parsing rejects hostile proxy and non-ordinary JSON without invoking getters',()=>{
   let getterReads=0;
   const accessor=Object.defineProperty({},'value',{enumerable:true,get(){getterReads++;return 'unsafe';}});
   const hidden=Object.defineProperty({},'value',{enumerable:false,value:'hidden'});
@@ -46,8 +55,8 @@ test('strict CallToolResult parsing rejects proxy and non-ordinary JSON before c
   const accessorArray:unknown[]=[];
   Object.defineProperty(accessorArray,'0',{enumerable:true,get(){getterReads++;return 'unsafe';}});
   const customArray=['unsafe'];Object.setPrototypeOf(customArray,Object.create(Array.prototype));
-  const proxyObject=new Proxy({value:'unsafe'},{});
-  const proxyArray=new Proxy(['unsafe'],{});
+  const proxyObject=new Proxy({value:'unsafe'},{getPrototypeOf(){throw new Error('hostile object proxy');}});
+  const proxyArray=new Proxy(['unsafe'],{getPrototypeOf(){throw new Error('hostile array proxy');}});
   const throwingPrototype=new Proxy(envelope(),{getPrototypeOf(){throw new Error('hostile prototype trap');}});
   const throwingKeys=new Proxy(envelope(),{ownKeys(){throw new Error('hostile ownKeys trap');}});
   const throwingDescriptor=new Proxy(envelope(),{
@@ -56,12 +65,14 @@ test('strict CallToolResult parsing rejects proxy and non-ordinary JSON before c
   const nestedThrowingProxy=new Proxy({ok:true},{ownKeys(){throw new Error('hostile nested trap');}});
   const valid=envelope();
   const cases:Array<[string,unknown]>=[
-    ['top-level proxy',new Proxy(valid,{})],
+    ['top-level proxy',new Proxy(valid,{getPrototypeOf(){throw new Error('hostile top-level proxy');}})],
     ['throwing prototype proxy',throwingPrototype],
     ['throwing keys proxy',throwingKeys],
     ['throwing descriptor proxy',throwingDescriptor],
     ['top-level null prototype',nullRecord(valid)],
-    ['structured-content proxy',{...valid,structuredContent:new Proxy(valid.structuredContent,{})}],
+    ['structured-content proxy',{...valid,structuredContent:new Proxy(valid.structuredContent,{
+      getPrototypeOf(){throw new Error('hostile structured-content proxy');},
+    })}],
     ['nested throwing proxy',{...valid,structuredContent:nestedThrowingProxy}],
     ['structured-content null prototype',{...valid,structuredContent:nullRecord(valid.structuredContent)}],
     ...([accessor,hidden,symbol,custom,nullPrototype,sparse,accessorArray,customArray,proxyObject,proxyArray]
@@ -70,6 +81,48 @@ test('strict CallToolResult parsing rejects proxy and non-ordinary JSON before c
   for(const [label,raw] of cases)
     assert.equal(parseStrictCallToolResult(raw),undefined,label);
   assert.equal(getterReads,0,'descriptor validation must never execute object or array getters');
+});
+
+test('strict CallToolResult parsing rejects nested proxy mutation without reading a restoring getter',()=>{
+  let getterReads=0;
+  const original={ok:true,data:{value:'captured success'}};
+  const injected={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+  const raw:{structuredContent:unknown;content:unknown[];isError:boolean;_meta:Record<string,unknown>}={
+    structuredContent:original,content:[],isError:true,_meta:{},
+  };
+  raw._meta.mutator=new Proxy({}, {
+    getPrototypeOf(){
+      Object.defineProperty(raw,'structuredContent',{configurable:true,enumerable:true,get(){
+        getterReads++;
+        Object.defineProperty(raw,'structuredContent',{
+          configurable:true,enumerable:true,writable:true,value:original,
+        });
+        return injected;
+      }});
+      return Object.prototype;
+    },
+  });
+
+  assert.equal(parseStrictCallToolResult(raw),undefined);
+  assert.equal(getterReads,0,'canonicalization must not native-clone or read the mutated live graph');
+});
+
+test('strict CallToolResult parsing enforces graph and string resource budgets',()=>{
+  let tooDeep:Record<string,unknown>={value:true};
+  for(let depth=0;depth<101;depth+=1)tooDeep={next:tooDeep};
+  const tooManyNodes=Array.from({length:10_001},()=>({}));
+  const tooManyKeys=Object.fromEntries(Array.from({length:20_001},(_,index)=>[`key_${index}`,index]));
+  const tooLongString='x'.repeat(1_048_577);
+  const tooManyBytes=Array.from({length:5},()=>'é'.repeat(450_000));
+  const cases=[
+    {structuredContent:{ok:true,data:{tooDeep}}},
+    {structuredContent:{ok:true,data:{tooManyNodes}}},
+    {structuredContent:{ok:true,data:{tooManyKeys}}},
+    {structuredContent:{ok:true,data:{tooLongString}}},
+    {structuredContent:{ok:true,data:{tooManyBytes}}},
+  ];
+  for(const [index,raw] of cases.entries())
+    assert.equal(parseStrictCallToolResult(raw),undefined,`over-budget graph ${index}`);
 });
 
 test('content-block details match the installed MCP CallToolResult schema',()=>{

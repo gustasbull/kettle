@@ -133,6 +133,97 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   await frame.waitForFunction(() => document.querySelector('#mount').textContent === '');
 });
 
+test('Riff Home accepts only a coherent complete initial result and preserves the current account on malformed notifications',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.calls=[];window.getterReads=0;
+    const addWindowListener=window.addEventListener.bind(window);
+    window.addEventListener=(type,listener,options)=>{
+      if(type==='message')window.receiveHostMessage=listener;
+      return addWindowListener(type,listener,options);
+    };
+    window.openai={callTool:async(name,args)=>{window.calls.push({name,args});return {structuredContent:{ok:true,data:{work:[]}}};}};
+    window.emitResult=params=>window.receiveHostMessage({source:window.parent,data:{
+      jsonrpc:'2.0',method:'ui/notifications/tool-result',params,
+    }});
+    window.accountResult=(id,name='Fixture')=>({structuredContent:{ok:true,data:{account:{
+      id,display_name:name,onboarding_seen_at:null,
+    }}},content:[],isError:false,_meta:{}});
+    window.mutatingResult=(id)=>{
+      const original={ok:true,data:{account:{id,display_name:'Injected account',onboarding_seen_at:null}}};
+      const injected={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+      const result={structuredContent:original,content:[],isError:true,_meta:{}};
+      result._meta.mutator=new Proxy({}, {getPrototypeOf(){
+        Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,get(){
+          window.getterReads++;
+          Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,writable:true,value:original});
+          return injected;
+        }});
+        return Object.prototype;
+      }});
+      return result;
+    };
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,
+          hostInfo:{name:'strict-initial-result',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(message.method==='ui/notifications/initialized')window.ready=true;
+      });</script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  const account1='00000000-0000-4000-8000-000000000001';
+  const account2='00000000-0000-4000-8000-000000000002';
+  await frame.evaluate(([first,second])=>{
+    const valid=window.accountResult(first,'First account');
+    const malformed=[
+      {...valid,isError:true},
+      {...valid,content:{}},
+      {...valid,_meta:1},
+      Object.assign(Object.create(null),valid),
+      window.mutatingResult(second),
+    ];
+    for(const result of malformed)window.emitResult(result);
+  },[account1,account2]);
+  await frame.waitForTimeout(50);
+  assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length),0,
+    'malformed initial notifications cannot start an account-scoped list');
+  assert.equal(await frame.evaluate(()=>document.querySelector('.riff-menu__account-trigger')?.getAttribute('aria-label')),'Riff account menu',
+    'malformed initial notifications cannot establish an account');
+  assert.equal(await frame.evaluate(()=>window.getterReads),0,'the restoring getter is never read');
+
+  await frame.evaluate(id=>window.emitResult(window.accountResult(id,'First account')),account1);
+  await frame.waitForFunction(()=>document.querySelector('.riff-menu__account-trigger')?.getAttribute('aria-label')==='First account account menu');
+  await frame.waitForFunction(()=>window.calls.filter(call=>call.name==='list_riff_work').length===1);
+  assert.equal(await frame.getByRole('region',{name:'Welcome to Riff'}).count(),0,
+    'a valid first-use account still keeps the welcome in chat');
+  const listCount=await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length);
+
+  await frame.evaluate(id=>{
+    const valid=window.accountResult(id,'Second account');
+    for(const result of [
+      {...valid,isError:true},
+      {...valid,content:{}},
+      {...valid,_meta:1},
+      Object.assign(Object.create(null),valid),
+      window.mutatingResult(id),
+    ])window.emitResult(result);
+  },account2);
+  await frame.waitForTimeout(50);
+  assert.equal(await frame.evaluate(()=>document.querySelector('.riff-menu__account-trigger')?.getAttribute('aria-label')),'First account account menu',
+    'malformed replacement notifications do not invalidate the prior account');
+  assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length),listCount,
+    'malformed replacements do not refresh account-scoped work');
+  assert.equal(await frame.evaluate(()=>window.getterReads),0);
+});
+
 test('Riff Home uses the ChatGPT compatibility tool bridge when MCP Apps serverTools is absent', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
@@ -455,8 +546,8 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
   const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   const submit = frame.getByRole('button', { name: 'Find my next idea' });
   await frame.getByRole('button', { name: 'Open Riff menu' }).click();
-  await frame.getByRole('button', { name: 'Open First account work — Analysis ready' }).waitFor();
   const drawer = frame.getByRole('dialog', { name: 'Riff menu' });
+  await drawer.getByRole('button', { name: 'Open First account work — Analysis ready' }).waitFor();
   await frame.getByRole('button', { name: 'Close Riff menu' }).last().click();
   const source = 'https://vm.tiktok.com/ZN8kT85EE/';
   await input.fill(source); await submit.click();
@@ -769,7 +860,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.job=pipelineFixture('scripts');window.variant=window.job.result.scripts.variants[1];
     window.job.work_states=[{job_id:window.job.id,variant_id:window.variant.id,state:'active',version:1,updated_at:'2026-10-11T12:00:01Z'}];
-    window.calls=[];window.listFailNext=false;window.workStateSpoof='none';
+    window.calls=[];window.listFailNext=false;window.workStateSpoof='none';window.getterReads=0;
     const wrapped=value=>({structuredContent:value,content:[]});
     const failure=()=>wrapped({ok:false,error:{code:'UNAVAILABLE',message:'Fixture list failure.',retryable:true,recovery:'retry_same_request'}});
     const recent=()=>({project_id:window.job.project_id,project_name:'Saved Studio',job_id:window.job.id,kind:'scripts',state:'succeeded',
@@ -787,8 +878,20 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
         const conflict={ok:false,error:{code:'VERSION_CONFLICT',message:'Spoofed failure.',retryable:false,recovery:'reload'}};
         const spoofReceipt={ok:true,data:{work_state:{job_id:window.job.id.toLowerCase(),variant_id:args.variant_id.toLowerCase(),state:args.state,
           version:(previous?.version??0)+1,updated_at:'2026-10-11T12:00:02Z'}}};
-        if(window.workStateSpoof==='proxy-outer')return new Proxy(wrapped(conflict),{});
-        if(window.workStateSpoof==='proxy-inner')return wrapped(new Proxy(conflict,{}));
+        if(window.workStateSpoof==='proxy-outer')return new Proxy(wrapped(conflict),{getPrototypeOf(){throw new Error('hostile outer proxy');}});
+        if(window.workStateSpoof==='proxy-inner')return wrapped(new Proxy(conflict,{getPrototypeOf(){throw new Error('hostile inner proxy');}}));
+        if(window.workStateSpoof==='mutating-proxy'){
+          const original=spoofReceipt,result={structuredContent:original,content:[],isError:true,_meta:{}};
+          result._meta.mutator=new Proxy({}, {getPrototypeOf(){
+            Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,get(){
+              window.getterReads++;
+              Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,writable:true,value:original});
+              return conflict;
+            }});
+            return Object.prototype;
+          }});
+          return result;
+        }
         if(window.workStateSpoof==='null-outer')return Object.assign(Object.create(null),wrapped(conflict));
         if(window.workStateSpoof==='null-inner')return wrapped(Object.assign(Object.create(null),conflict));
         if(window.workStateSpoof==='false-failure')return {...wrapped(conflict),isError:false};
@@ -832,7 +935,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
     reads:window.calls.filter(call=>call.name==='get_creator_job').length,
     lists:window.calls.filter(call=>call.name==='list_riff_work').length,
   }));
-  for(const mode of ['proxy-outer','proxy-inner','null-outer','null-inner','false-failure','true-success']){
+  for(const mode of ['proxy-outer','proxy-inner','null-outer','null-inner','false-failure','true-success','mutating-proxy']){
     const writesBefore=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').length);
     await frame.evaluate(mode=>{window.workStateSpoof=mode;},mode);
     await frame.getByRole('button',{name:'Save for later'}).click();
@@ -848,6 +951,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
     assert.deepEqual(await frame.evaluate(()=>window.job.work_states.map(({state,version})=>({state,version}))),
       [{state:'active',version:1}],`${mode} cannot mutate persisted work-state truth`);
   }
+  assert.equal(await frame.evaluate(()=>window.getterReads),0,'work-state validation never reads the restoring getter');
   await frame.evaluate(()=>{window.workStateSpoof='none';});
   await frame.getByRole('button',{name:'Save for later'}).click();await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
   await frame.getByRole('button',{name:'Open vault'}).click();
@@ -867,8 +971,8 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   await frame.getByRole('button',{name:'Open vault'}).click();
   await frame.locator('.riff-home__status').getByText('My videos opened, but saved work could not be refreshed.').waitFor();
   const workStateCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args));
-  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','active','filmed','saved']);
-  for(const retry of workStateCalls.slice(1,7))
+  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','saved','active','filmed','saved']);
+  for(const retry of workStateCalls.slice(1,8))
     assert.deepEqual(retry,workStateCalls[0],'every legitimate or rejected retry preserves the exact ambiguous write intent');
   assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=5,'initial load plus every confirmed mutation');
   await frame.evaluate(()=>window.bridge.dispose());
@@ -1051,7 +1155,7 @@ test('Riff Product save failures preserve drafts and obey retry, rotation, and i
 test('Riff Product context rereads only a receipt-trusted conflict ID and invalidates late private work on account change', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
-    window.calls=[];window.mode='ok';window.pending=[];
+    window.calls=[];window.mode='ok';window.pending=[];window.getterReads=0;
     const make=(args,version=args.expected_version+1)=>{const id=args.project_id??'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';return {id,name:args.name,project_type:'brand',current_version:version,
       created_at:'2026-10-11T10:00:00Z',updated_at:'2026-10-11T11:00:00Z',brief_version:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',project_id:id,version,name:args.name,
       brief:structuredClone(args.brief),created_at:'2026-10-11T11:00:00Z'}}};
@@ -1074,6 +1178,18 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
       if(mode==='constraintsAccessorSuccess'){const project=make(args);project.brief_version.brief.filming_constraints=accessorArray(...args.brief.filming_constraints);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
       if(mode==='constraintsPrototypeSuccess'){const project=make(args);project.brief_version.brief.filming_constraints=customPrototypeArray(...args.brief.filming_constraints);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
       if(mode==='factsPrototypeSuccess'){const project=make(args);project.brief_version.brief.facts=customPrototypeArray(...args.brief.facts);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
+      if(mode==='mutatingProxyConflict'){
+        const original={ok:true,data:{ignored:true}},result={structuredContent:original,content:[],isError:true,_meta:{}};
+        result._meta.mutator=new Proxy({}, {getPrototypeOf(){
+          Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,get(){
+            window.getterReads++;
+            Object.defineProperty(result,'structuredContent',{configurable:true,enumerable:true,writable:true,value:original});
+            return inner;
+          }});
+          return Object.prototype;
+        }});
+        return result;
+      }
     };
     window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
@@ -1101,7 +1217,7 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
     await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');await frame.getByRole('button',{name:'Add filming constraint'}).click();await frame.getByLabel('Filming constraint 1').fill('Home desk');};
   await enter();const confirm=frame.getByRole('button',{name:'Confirm context'});await confirm.click();await frame.getByText('Context saved',{exact:true}).waitFor();
   await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');
-  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound','metaAccessorConflict','contentPrototypeNotFound','constraintsAccessorSuccess','constraintsPrototypeSuccess','factsPrototypeSuccess'];
+  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound','metaAccessorConflict','contentPrototypeNotFound','constraintsAccessorSuccess','constraintsPrototypeSuccess','factsPrototypeSuccess','mutatingProxyConflict'];
   for(const mode of spoofModes){const expected=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length+1);
     await frame.evaluate(value=>{window.mode=value},mode);await confirm.click();
     await frame.waitForFunction(count=>window.calls.filter(call=>call.name==='save_project').length===count,expected);
@@ -1110,6 +1226,8 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
   }
   assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').length),0,
     'malformed Product failures never authorize reconciliation reads');
+  assert.equal(await frame.evaluate(()=>window.getterReads),0,
+    'Product validation never reads a restoring getter that could inject a conflict');
   const spoofIds=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').slice(1).map(call=>call.args.request_id));
   assert.equal(new Set(spoofIds).size,1,'all malformed Product failures retain the exact ambiguous request ID');
 
