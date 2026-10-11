@@ -1,13 +1,15 @@
 import type { createPipelineOperations } from '../../packages/application/creator-pipeline.ts';
+import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import type { createRiffCreatorOperations } from '../../packages/application/riff-creator.ts';
 import type { createRiffVideoOperations } from '../../packages/application/riff-videos.ts';
 import { registerCreatorPipelineResource } from './creator-pipeline-resource.ts';
 import type { createCreatorOperations } from '../../packages/application/creator-operations.ts';
+import type { CreatorDnaView } from '../../packages/contracts/creator-operations.ts';
 import { registerCreatorReviewResource } from './creator-review-resource.ts';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { CONTRACT_VERSION } from '../../packages/contracts/index.ts';
+import { CONTRACT_VERSION, type Account, type Failure, type Project } from '../../packages/contracts/index.ts';
 import { OpenAIProfile } from '../../packages/contracts/openai-profile.ts';
 
 import { registerProjectReviewResource } from './project-review-resource.ts';
@@ -39,6 +41,82 @@ const MCP_INSTRUCTIONS = [
   'When the user explicitly asks to analyze a public TikTok profile or video URL, call `start_riff_creator` directly.',
   'Use `show_riff_welcome` only for first-use onboarding or when the user asks to replay it.',
 ].join(' ');
+
+const RECOVERY_SUMMARIES: Record<Failure['error']['recovery'], string> = {
+  reauthorize: 'Connect or reauthorize your Riff account.',
+  correct_input: 'Check the requested values and try again.',
+  reload: 'Reload the latest saved state before trying again.',
+  retry_same_request: 'Retry using the same request ID.',
+  contact_support: 'This action is not permitted for this account.',
+};
+
+function summarizeFailure(result: Failure): string {
+  return `Riff request failed (${result.error.code}). ${RECOVERY_SUMMARIES[result.error.recovery]}`;
+}
+
+function count(value: number, singular: string, plural = `${singular}s`): string {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+type ProductSummaryData =
+  | { account: Pick<Account, 'state' | 'onboarding_seen_at'>; entitlements: { status: string }; usage: { status: string } }
+  | { onboarding_seen_at: string }
+  | { project: Pick<Project, 'current_version'>; request_id?: string };
+
+function summarizeProductSuccess(operation: string, data: ProductSummaryData): string {
+  if ('account' in data) {
+    const onboarding = data.account.onboarding_seen_at === null ? 'not complete' : 'complete';
+    return `Riff account is ${data.account.state}; onboarding is ${onboarding}. Entitlements: ${data.entitlements.status.replaceAll('_', ' ')}. Usage: ${data.usage.status.replaceAll('_', ' ')}.`;
+  }
+  if ('onboarding_seen_at' in data) return 'Riff onboarding is complete.';
+  return `${operation === 'save_project' ? 'Saved' : 'Opened'} Riff project at version ${data.project.current_version}.`;
+}
+
+type CreatorDnaSummaryData = { dna: CreatorDnaView; request_id?: string };
+
+function summarizeCreatorDna(operation: string, data: CreatorDnaSummaryData): string {
+  const { dna } = data;
+  const action = operation === 'correct_creator_dna' ? 'Saved' : 'Loaded';
+  return `${action} Creator DNA version ${dna.version} with ${count(dna.claims.length, 'claim')}, ${count(dna.evidence.length, 'evidence item')}, and ${count(dna.limitations.length, 'limitation')}.`;
+}
+
+function summarizeCreatorJob(data: { job: CreatorJobView } | { status: CreatorJobStatusView }): string {
+  const job = 'job' in data ? data.job : data.status;
+  let detail: string;
+  if ('result' in job && job.result) {
+    if (job.result.kind === 'scan') {
+      detail = `DNA version: ${job.result.dna.version}; claims: ${job.result.dna.claims.length}; evidence items: ${job.result.dna.evidence.length}`;
+    } else if (job.result.kind === 'recommendations') {
+      detail = `DNA version: ${job.result.batch.dna_version}; ideas: ${job.result.batch.ideas.length}; references: ${job.result.batch.references.length}`;
+    } else {
+      detail = `script version: ${job.result.scripts.version}; variants: ${job.result.scripts.variants.length}`;
+    }
+  } else if (job.progress.kind === 'scan') {
+    detail = `videos: ${job.progress.videos.length}`;
+  } else if (job.progress.kind === 'recommendations') {
+    detail = `identified references: ${job.progress.identities.length}; enriched references: ${job.progress.references.length}`;
+  } else {
+    detail = `limitations: ${job.progress.limitations.length}`;
+  }
+  return `Creator ${job.kind} job — state: ${job.state}; stage: ${job.stage}; revision: ${job.revision}; ${detail}.`;
+}
+
+type RiffCreatorSummaryData =
+  | { project: Pick<Project, 'current_version'>; job: CreatorJobView; source: { kind: 'profile' | 'video' } }
+  | { work: Array<{ state: CreatorJobView['state'] }> };
+
+function summarizeRiffCreator(data: RiffCreatorSummaryData): string {
+  if ('work' in data) {
+    if (data.work.length === 0) return 'Found 0 recent Riff work items.';
+    const states: CreatorJobView['state'][] = ['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'];
+    const counts = states.map(state => [state, data.work.filter(item => item.state === state).length] as const)
+      .filter(([, total]) => total > 0)
+      .map(([state, total]) => `${state.replaceAll('_', ' ')}: ${total}`)
+      .join('; ');
+    return `Found ${count(data.work.length, 'recent Riff work item')} (${counts}).`;
+  }
+  return `Riff creator analysis — source: ${data.source.kind}; project version: ${data.project.current_version}; job state: ${data.job.state}; stage: ${data.job.stage}; revision: ${data.job.revision}.`;
+}
 
 export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: CreatorLatencyObserver): Promise<Response> {
   const token = bearer(request);
@@ -77,9 +155,9 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
       server.registerTool(tool.name,tool.registration,async(input:unknown)=>{
         const result=await auth.pipelineOperations!.execute(tool.operation,token,input);
         const needsAuth=!result.ok&&(result.error.code==='UNAUTHENTICATED'||(result.error.code==='FORBIDDEN'&&token&&!(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
-        if (!result.ok) return {content:[{type:'text' as const,text:JSON.stringify(result)}],structuredContent:result,isError:true,
+        if (!result.ok) return {content:[{type:'text' as const,text:summarizeFailure(result)}],structuredContent:result,isError:true,
           ...(needsAuth?{_meta:{'mcp/www_authenticate':[challenge(auth.config,result.error.code==='FORBIDDEN'?'insufficient_scope':'invalid_token')]}}:{})};
-        return {content:[{type:'text' as const,text:JSON.stringify(result)}],structuredContent:result};
+        return {content:[{type:'text' as const,text:summarizeCreatorJob(result.data)}],structuredContent:result};
       });
     }
   }
@@ -91,11 +169,11 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
         const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
           || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
         if (!result.ok) return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result, isError: true,
+          content: [{ type: 'text' as const, text: summarizeFailure(result) }], structuredContent: result, isError: true,
           ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result };
+        return { content: [{ type: 'text' as const, text: summarizeRiffCreator(result.data) }], structuredContent: result };
       });
     }
   }
@@ -121,11 +199,11 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
         const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
           || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
         if (!result.ok) return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result, isError: true,
+          content: [{ type: 'text' as const, text: summarizeFailure(result) }], structuredContent: result, isError: true,
           ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result };
+        return { content: [{ type: 'text' as const, text: summarizeCreatorDna(tool.operation, result.data) }], structuredContent: result };
       });
     }
   }
@@ -139,11 +217,11 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
         const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
           || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
         if (!result.ok) return {
-          content: [{ type: 'text' as const, text: result.error.message }], structuredContent: result, isError: true,
+          content: [{ type: 'text' as const, text: summarizeFailure(result) }], structuredContent: result, isError: true,
           ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result.data) }], structuredContent: result };
+        return { content: [{ type: 'text' as const, text: summarizeProductSuccess(tool.operation, result.data) }], structuredContent: result };
       });
     }
     server.registerTool('get_riff_profile', PROFILE_REGISTRATION, async () => {
@@ -151,12 +229,12 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
       const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
         || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(ACCOUNT_CONTRACT.scope)));
       if (!result.ok) return {
-        content: [{ type: 'text' as const, text: result.error.message }], isError: true,
+        content: [{ type: 'text' as const, text: summarizeFailure(result) }], isError: true,
         ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
           result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
       };
       const profile = OpenAIProfile.parse({ id: result.data.account.id, name: result.data.account.display_name });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(profile) }], structuredContent: profile };
+      return { content: [{ type: 'text' as const, text: 'Riff profile is connected.' }], structuredContent: profile };
     });
     server.registerTool('open_riff', HOME_REGISTRATION, async () => {
       const result = await auth.operations.execute('get_account_state', token, {});

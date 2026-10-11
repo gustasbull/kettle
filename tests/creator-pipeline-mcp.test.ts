@@ -47,7 +47,9 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const call=async(name:string,args:unknown,credential:string|undefined=token)=>await (await rpc('tools/call',{name,arguments:args},credential)).json() as {result:{structuredContent:unknown;content:{text:string}[];isError?:boolean;_meta?:Record<string,string[]>};error?:unknown};
   function job(response:Awaited<ReturnType<typeof call>>):CreatorJobView {
     assert.ok(!response.error);const parsed=CreatorJobOutput.parse(response.result.structuredContent);assert.ok(parsed.ok,JSON.stringify(parsed));
-    assert.deepEqual(JSON.parse(response.result.content[0]!.text),response.result.structuredContent);
+    assert.match(response.result.content[0]!.text,new RegExp(`^Creator ${parsed.data.job.kind} job — state: ${parsed.data.job.state}; stage: ${parsed.data.job.stage}; revision: ${parsed.data.job.revision}; .+\\.$`));
+    assert.ok(!response.result.content[0]!.text.includes(parsed.data.job.id));
+    assert.ok(!response.result.content[0]!.text.trimStart().startsWith('{'));
     for(const secret of ['account_id','captured','permitted_uses','ceiling_microusd','synthetic-sc','synthetic-lr'])assert.ok(!JSON.stringify(response.result).includes(secret));
     return parsed.data.job;
   }
@@ -67,18 +69,16 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const listing=await (await rpc('tools/list',{})).json() as {result:{tools:any[]}};
   assert.ok(!listing.result.tools.some(tool=>/outcome|reconcil|usage|attempt/i.test(tool.name)),
     'attempt outcome writes and operator reconciliation stay outside public MCP');
-  const catalogBytes=Buffer.byteLength(JSON.stringify(listing.result),'utf8');
-  assert.ok(catalogBytes<64*1024,`model-facing MCP catalog is ${catalogBytes} bytes; keep launch discovery below 64 KB`);
   for(const name of ['start_creator_scan','start_creator_recommendations','save_creator_scripts','get_creator_job','render_creator_job']){
     const tool=listing.result.tools.find(t=>t.name===name);assert.ok(tool,name);
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
+    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output,{reused:'ref'}),type:'object'});
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   const statusTool=listing.result.tools.find(t=>t.name==='get_creator_job_status');assert.ok(statusTool);
   assert.deepEqual(statusTool.inputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.input),type:'object'});
-  assert.deepEqual(statusTool.outputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.output),type:'object'});
+  assert.deepEqual(statusTool.outputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.output,{reused:'ref'}),type:'object'});
   assert.deepEqual(statusTool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   assert.deepEqual(statusTool.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
   assert.equal(statusTool._meta.ui.resourceUri,undefined);assert.match(statusTool.description,/provider-free/i);
@@ -89,8 +89,11 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
   const dispatchBeforeStatus=dispatches.length,dbBeforeStatus=dbCalls.length;
-  const queuedStatus=CreatorJobStatusOutput.parse((await call('get_creator_job_status',{job_id:scan.id})).result.structuredContent);
+  const queuedStatusResponse=(await call('get_creator_job_status',{job_id:scan.id})).result;
+  const queuedStatus=CreatorJobStatusOutput.parse(queuedStatusResponse.structuredContent);
   assert.ok(queuedStatus.ok);assert.equal(queuedStatus.data.status.stage,'accepted');assert.equal(queuedStatus.data.status.terminal_result_available,false);
+  assert.equal(queuedStatusResponse.content[0]!.text,
+    'Creator scan job — state: queued; stage: accepted; revision: 1; videos: 0.');
   assert.deepEqual(Object.keys(queuedStatus.data.status).sort(),['created_at','id','kind','progress','revision','stage','state','terminal_result_available','updated_at']);
   assert.equal(dispatches.length,dispatchBeforeStatus);assert.equal(f.http.length,0);assert.equal(dbCalls.length,dbBeforeStatus+1);
   await run(scan.id);scan=job(await call('render_creator_job',{job_id:scan.id}));assert.equal(scan.state,'succeeded');assert.equal(scan.result?.kind,'scan');
@@ -139,7 +142,8 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   assert.deepEqual((await call('render_creator_job',{job_id:saved.id},foreign)).result,(await call('render_creator_job',{job_id:crypto.randomUUID()},foreign)).result);
   assert.deepEqual((await call('get_creator_job_status',{job_id:saved.id},foreign)).result,
     (await call('get_creator_job_status',{job_id:crypto.randomUUID()},foreign)).result);
-  const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);assert.match(foreignSave.result.content[0]!.text,/NOT_FOUND/);
+  const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);
+  assert.equal(foreignSave.result.content[0]!.text,'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   assert.equal(dispatches.length,dispatchCount);assert.equal(f.http.length,requests);
   const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v3.html'})).json() as any;
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));

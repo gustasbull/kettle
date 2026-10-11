@@ -52,7 +52,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   const tool = list.result.tools.find((item) => item.name === 'show_project_brief')!;
   assert.ok(tool);
   assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(GetProjectInput), type: 'object' });
-  assert.equal(tool.outputSchema, undefined, 'large runtime-validated results stay out of launch discovery');
+  assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(GetProjectOutput, { reused: 'ref' }), type: 'object' });
   const securitySchemes = [{ type: 'oauth2', scopes: [...oauthScopes] }];
   assert.deepEqual(tool.securitySchemes, securitySchemes);
   assert.deepEqual(tool._meta, { securitySchemes, ui: { resourceUri: PROJECT_REVIEW_URI } });
@@ -64,13 +64,16 @@ test('project-review render tool uses signed identity, exact read contract and r
   const input = createInput();
   input.brief.facts = [{ id: crypto.randomUUID(), statement: 'Fictional supplied fact',
     source: { kind: 'url', url: 'https://example.com/lamp', captured_at: '2026-10-06T00:00:00Z' }, user_confirmed: false }];
-  const saved = SaveProjectOutput.parse((await call('save_project', input, token)).result.structuredContent);
+  const savedResponse = (await call('save_project', input, token)).result;
+  const saved = SaveProjectOutput.parse(savedResponse.structuredContent);
   assert.ok(saved.ok);
+  assert.equal(savedResponse.content[0]!.text, 'Saved Riff project at version 1.');
   const args = { project_id: saved.data.project.id };
   const shown = (await call('show_project_brief', args, token)).result;
   assert.notEqual(shown.isError, true);
   assert.deepEqual(GetProjectOutput.parse(shown.structuredContent), { ok: true, data: { project: saved.data.project } });
-  assert.deepEqual(JSON.parse(shown.content[0]!.text), { project: saved.data.project }, 'complete text fallback includes every brief field, fact and version');
+  assert.equal(shown.content[0]!.text, 'Opened Riff project at version 1.');
+  assert.ok(!shown.content[0]!.text.includes(input.brief.product), 'full brief stays in structuredContent only');
   const count = calls;
   const anonymous = (await call('show_project_brief', args)).result;
   assert.equal(anonymous.isError, true);
@@ -94,7 +97,8 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.equal(other.isError, true);
   const denied = GetProjectOutput.parse(other.structuredContent);
   assert.ok(!denied.ok && denied.error.code === 'NOT_FOUND');
-  assert.equal(other.content[0]!.text, 'This project is unavailable.');
+  assert.equal(other.content[0]!.text,
+    'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   assert.ok(!JSON.stringify(other).includes(input.brief.product));
 
   const updated = SaveProjectOutput.parse((await call('save_project', { ...input, ...args,

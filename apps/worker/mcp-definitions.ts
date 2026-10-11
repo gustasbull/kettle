@@ -225,21 +225,15 @@ export const HOME_REGISTRATION = deepFreezePlain({
   annotations: READ_ONLY, _meta: HOME_META,
 });
 
-const publishedOutputSchema = (schema: z.ZodType) => {
-  const output = ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
-  return JSON.stringify(output).length <= 5_000 ? output : undefined;
-};
 const inputSchema = (schema: z.ZodType) =>
   ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
 const outputSchema = (schema: z.ZodType) =>
-  ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
+  ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema, { reused: 'ref' }), type: 'object' });
 const descriptorFor = (tool: typeof PRODUCT_TOOLS[number] | typeof CREATOR_TOOLS[number]
   | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number] | typeof RIFF_VIDEO_TOOLS[number]): AuthTool => {
-  const output = tool.operation==='get_creator_job_status'
-    ? outputSchema(tool.contract.output) : publishedOutputSchema(tool.contract.output);
   return deepFreezePlain({
     name: tool.name, title: tool.title, description: tool.description,
-    inputSchema: inputSchema(tool.contract.input), ...(output ? { outputSchema: output } : {}),
+    inputSchema: inputSchema(tool.contract.input), outputSchema: outputSchema(tool.contract.output),
     annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
   }) as AuthTool;
 };
@@ -248,8 +242,7 @@ const DIAGNOSTIC_DESCRIPTOR = deepFreezePlain({
   name: 'kettle_diagnostic', title: DIAGNOSTIC_REGISTRATION.title,
   description: DIAGNOSTIC_REGISTRATION.description,
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  outputSchema: { type: 'object', properties: { status: { const: 'ok' }, contract_version: { const: CONTRACT_VERSION } },
-    required: ['status', 'contract_version'] },
+  outputSchema: outputSchema(DIAGNOSTIC_REGISTRATION.outputSchema),
   annotations: READ_ONLY, securitySchemes: NOAUTH_SECURITY,
   _meta: { securitySchemes: NOAUTH_SECURITY },
 }) as AuthTool;

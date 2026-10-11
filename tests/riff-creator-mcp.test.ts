@@ -26,9 +26,8 @@ test('Riff creator entry and recents are authenticated MCP tools usable by Home'
   for (const name of ['start_riff_creator', 'get_riff_creator_start', 'list_riff_work'] as const) {
     const tool = listing.result.tools.find(candidate => candidate.name === name); assert.ok(tool, name);
     assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].input), type: 'object' });
-    if (name !== 'list_riff_work') assert.equal(tool.outputSchema, undefined,
-      'the large job result stays out of launch discovery while runtime validation remains authoritative');
-    else assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].output), type: 'object' });
+    assert.deepEqual(tool.outputSchema,
+      { ...z.toJSONSchema(riffCreatorContracts[name].output, { reused: 'ref' }), type: 'object' });
     assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: [...oauthScopes] }]);
     assert.equal(tool.annotations.readOnlyHint, name !== 'start_riff_creator');
     assert.equal(tool.annotations.openWorldHint, name === 'start_riff_creator');
@@ -39,25 +38,30 @@ test('Riff creator entry and recents are authenticated MCP tools usable by Home'
     } else assert.equal(tool._meta.ui?.resourceUri, undefined);
   }
   const response = await (await rpc('tools/call', { name: 'list_riff_work', arguments: { limit: 4 } })).json() as {
-    result: { structuredContent: unknown; isError?: boolean };
+    result: { structuredContent: unknown; content: Array<{ text: string }>; isError?: boolean };
   };
   assert.deepEqual(response.result.structuredContent, { ok: true, data: { work: [] } });
+  assert.equal(response.result.content[0]!.text, 'Found 0 recent Riff work items.');
   assert.equal(response.result.isError, undefined);
   assert.deepEqual(calls, [{ operation: 'list_riff_work', token, input: { limit: 4 } }]);
   const lookupInput = {
     request_id: '00000000-0000-4000-8000-000000000701', source_url: 'https://vm.tiktok.com/ZN8kT85EE/',
   };
   const missing = await (await rpc('tools/call', { name: 'get_riff_creator_start', arguments: lookupInput })).json() as {
-    result: { structuredContent: unknown; isError?: boolean };
+    result: { structuredContent: unknown; content: Array<{ text: string }>; isError?: boolean };
   };
   assert.equal(missing.result.isError, true);
   assert.deepEqual(missing.result.structuredContent, failure('NOT_FOUND'));
+  assert.equal(missing.result.content[0]!.text,
+    'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   const failed = await (await rpc('tools/call', { name: 'start_riff_creator', arguments: {
     request_id: '00000000-0000-4000-8000-000000000700', source_url: 'https://www.tiktok.com/@fixture',
-  } })).json() as { result: { structuredContent: unknown; isError?: boolean } };
+  } })).json() as { result: { structuredContent: unknown; content: Array<{ text: string }>; isError?: boolean } };
   assert.equal(failed.result.isError, true);
   assert.deepEqual(failed.result.structuredContent, failure('UNAVAILABLE'),
     'retry semantics must remain machine-readable to the bound MCP App');
+  assert.equal(failed.result.content[0]!.text,
+    'Riff request failed (UNAVAILABLE). Retry using the same request ID.');
   assert.deepEqual(calls, [
     { operation: 'list_riff_work', token, input: { limit: 4 } },
     { operation: 'get_riff_creator_start', token, input: lookupInput },

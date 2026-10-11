@@ -55,7 +55,7 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
     const tool = listing.result.tools.find(t => t.name === name)!; assert.ok(tool);
     const contract = creatorContracts[name === 'correct_creator_dna' ? name : 'get_creator_dna'];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
+    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output,{reused:'ref'}),type:'object'});
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t => /ingest|scan|generate/.test(String(t.name))));
@@ -63,7 +63,8 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const shown = (await call('render_creator_dna',input,token)).result;
   const view = GetCreatorDnaOutput.parse(shown.structuredContent); assert.ok(view.ok);
   assert.equal(view.data.dna.contains_fixture_data,true);
-  assert.deepEqual(JSON.parse(shown.content[0]!.text),shown.structuredContent);
+  assert.equal(shown.content[0]!.text,`Loaded Creator DNA version ${view.data.dna.version} with 1 claim, 1 evidence item, and 1 limitation.`);
+  assert.ok(!shown.content[0]!.text.includes(view.data.dna.dna_id));
   for (const secret of ['requested_cursor','permitted_uses','provider_endpoint','cost_attempts']) assert.ok(!JSON.stringify(shown).includes(secret));
   const before = calls;
   const denied = (await call('render_creator_dna',input)).result;
@@ -75,8 +76,10 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const foreign = await identity.token({sub:'user-b'});
   assert.deepEqual((await call('render_creator_dna',input,foreign)).result,(await call('render_creator_dna',{dna_id:crypto.randomUUID()},foreign)).result);
   const correction = {...input,expected_version:1,request_id:crypto.randomUUID(),corrections:view.data.dna.claims.map(c=>({claim_id:c.id,statement:'User corrected fictional context'}))};
-  const updated = CorrectCreatorDnaOutput.parse((await call('correct_creator_dna',correction,token)).result.structuredContent); assert.ok(updated.ok);
+  const updatedResponse=(await call('correct_creator_dna',correction,token)).result;
+  const updated = CorrectCreatorDnaOutput.parse(updatedResponse.structuredContent); assert.ok(updated.ok);
   assert.equal(updated.data.dna.version,2);
+  assert.equal(updatedResponse.content[0]!.text,`Saved Creator DNA version ${updated.data.dna.version} with 1 claim, 1 evidence item, and 1 limitation.`);
   assert.equal(updated.data.dna.contains_fixture_data,true,'fictional origin survives corrections');
   assert.deepEqual(updated.data.dna.evidence,view.data.dna.evidence,'correction preserves original evidence lineage');
   const hidden = structuredClone(stored.data);
@@ -87,7 +90,8 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   assert.deepEqual((await call('correct_creator_dna',correction,token)).result.structuredContent,updated);
   const reopened = GetCreatorDnaOutput.parse((await call('render_creator_dna',input,token)).result.structuredContent); assert.ok(reopened.ok); assert.equal(reopened.data.dna.version,2);
   const history = GetCreatorDnaOutput.parse((await call('get_creator_dna',{...input,version:1},token)).result.structuredContent); assert.deepEqual(history,view);
-  const stale = (await call('correct_creator_dna',{...correction,request_id:crypto.randomUUID()},token)).result; assert.equal(stale.isError,true); assert.match(stale.content[0]!.text,/VERSION_CONFLICT/);
+  const stale = (await call('correct_creator_dna',{...correction,request_id:crypto.randomUUID()},token)).result; assert.equal(stale.isError,true);
+  assert.equal(stale.content[0]!.text,'Riff request failed (VERSION_CONFLICT). Reload the latest saved state before trying again.');
   const resource = await (await rpc('resources/read',{uri:'ui://kettle/creator-review-v2.html'})).json() as {result:{contents:{text:string;_meta:Record<string,unknown>}[]}};
   assert.match(resource.result.contents[0]!.text,/ui\/initialize/);
   assert.ok(!resource.result.contents[0]!.text.includes(stored.data.dna_id));
