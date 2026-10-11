@@ -173,6 +173,7 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
       if(!/^[\w:-]{1,200}$/.test(key)||!Number.isSafeInteger(ceilings[provider])||ceilings[provider]<0)throw new PipelineRunError('failed');
       // One provider request per step. Database reservation is authoritative even if
       // Workflow persistence fails, retries overlap, or the process dies after dispatch.
+      let dispatched=false;
       const envelope=await durableStep(`provider:${key}`,async()=>{
         const reservation=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
           z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
@@ -187,6 +188,7 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
         if(reservation.data.data.status==='definite_failure'||reservation.data.data.status==='needs_reconciliation')
           return {kind:'stored_outcome',outcome:reservation.data.data.outcome} as const;
         try {
+          dispatched=true;
           const receipt=await execute();
           let bytes:number;try{bytes=new TextEncoder().encode(JSON.stringify(receipt)).length;}catch{
             return {kind:'outcome',outcome:{terminal_state:'failed',failure_code:'schema_invalid',http_status:null}} as const;
@@ -199,6 +201,11 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
             {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'receipt_persistence_failed',http_status:null}} as const;
         }catch(error){return {kind:'outcome',outcome:error instanceof CreatorAttemptError?error.outcome:
           {terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;}
+      }).catch(error=>{
+        if(!dispatched)throw error;
+        // The durable wrapper lost a result after external I/O began. Persist the
+        // uncertainty outside the zero-retry provider step before ending the job.
+        return {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;
       });
       if(envelope.kind==='receipt')return envelope.receipt;
       if(envelope.kind==='stored_outcome')throw new PipelineRunError(envelope.outcome.terminal_state,envelope.outcome);

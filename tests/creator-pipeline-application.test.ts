@@ -9,6 +9,8 @@ import { creatorJobFixture, recommendationBatchFixture, creatorScriptsFixture } 
 import type { CreatorPipelineProvider, PipelineOperation } from '../packages/contracts/creator-pipeline.ts';
 import { CreatorAttemptError, type CreatorAttemptOutcomeInput } from '../packages/contracts/creator-pipeline.ts';
 import { TrustedCatalogObservation } from '../packages/contracts/riff-videos.ts';
+import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipeline/provider.ts';
+import { providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}
@@ -381,6 +383,90 @@ test('runner preserves ambiguous outcome, does not retry providers or failed sta
     if(mode==='save-result'){const call=r.repository.call;r.repository.call=async(op,owner,raw)=>{if(op==='finish_creator_job'&&(raw as {state:string}).state==='succeeded'){r.finishes.push(raw);return failure('UNAVAILABLE');}return call(op,owner,raw);};}
     await r.run();assert.equal(r.providerCalls.length,1);assert.equal(r.finishes.at(-1).state,mode==='ambiguous'?'needs_reconciliation':'failed');
     assert.equal(r.steps.filter(s=>s==='save-result').length,mode==='save-result'?1:0);
+  }
+});
+
+test('runner preserves an outer durable provider-step loss after dispatch and never resubmits',async()=>{
+  const r=runner('recommendations'),baseCall=r.repository.call.bind(r.repository);
+  let executions=0,reservations=0,completions=0,outcomeWrites=0,loseProviderStep=true;
+  let storedOutcome:any;
+  r.repository.call=async(op,owner,raw)=>{
+    if(op==='reserve_creator_attempt'){
+      reservations++;
+      return storedOutcome?{ok:true,data:{status:'needs_reconciliation',outcome:storedOutcome}}:reservation('acquired');
+    }
+    if(op==='complete_creator_attempt'){completions++;throw new Error('synthetic receipt persistence loss');}
+    if(op==='record_creator_attempt_outcome'){
+      outcomeWrites++;const value=raw as CreatorAttemptOutcomeInput;
+      storedOutcome={terminal_state:value.terminal_state,failure_code:value.failure_code,http_status:value.http_status,
+        provider:'lightreel',operation:'research',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'};
+      return {ok:true,data:{status:'recorded',outcome:storedOutcome}};
+    }
+    return baseCall(op,owner,raw);
+  };
+  r.provider.recommend=async(_dna,context)=>{
+    r.providerCalls.push('recommend');
+    await context.call('research','lightreel','research',async()=>{executions++;return {allowed:'receipt'};});
+    return r.batch;
+  };
+  const durable:DurableStep=async(name,run)=>{
+    r.steps.push(name);
+    if(name==='provider:research'&&loseProviderStep){loseProviderStep=false;await run();throw new Error('synthetic outer durable-step loss');}
+    return run();
+  };
+  const run=()=>runCreatorPipelineJob(r.repository,r.creatorRepository,account,r.job.id,()=>r.provider,ceilings,durable);
+
+  await run();
+  await run();
+
+  assert.deepEqual(r.finishes.map(value=>[value.state,value.message]),[
+    ['needs_reconciliation','needs_reconciliation:unknown_after_dispatch'],
+    ['needs_reconciliation','needs_reconciliation:unknown_after_dispatch'],
+  ]);
+  assert.equal(executions,1);assert.equal(reservations,2);assert.equal(completions,1);assert.equal(outcomeWrites,1);
+});
+
+test('runner keeps timeout and network recommendation fan-out outcomes typed and never resubmits',async()=>{
+  for(const mode of ['timeout','network'] as const){
+    const r=runner('recommendations'),f=providerHttpFixture(),fallback=f.options.fetch;
+    const receipts=new Map<string,unknown>(),outcomes=new Map<string,any>();let detailCalls=0;
+    f.options.timeouts={...f.options.timeouts,scrapeMs:mode==='timeout'?1:30_000};
+    f.options.fetch=async(url,init)=>{
+      if(new URL(url).pathname==='/v2/tiktok/video'){
+        detailCalls++;
+        if(mode==='network')throw new TypeError('synthetic network loss');
+        return new Promise<Response>(()=>{});
+      }
+      return fallback(url,init);
+    };
+    const provider=createCreatorPipelineProvider(f.options),baseCall=r.repository.call.bind(r.repository);
+    r.provider.recommend=provider.recommend;
+    r.repository.call=async(op,owner,raw)=>{
+      const value=raw as any;
+      if(op==='reserve_creator_attempt'){
+        const savedOutcome=outcomes.get(value.key);if(savedOutcome)return {ok:true,data:{status:'needs_reconciliation',outcome:savedOutcome}};
+        if(receipts.has(value.key))return {ok:true,data:{status:'replay',receipt:receipts.get(value.key)}};
+        return reservation('acquired');
+      }
+      if(op==='complete_creator_attempt'){
+        receipts.set(value.key,value.receipt);return {ok:true,data:{status:'completed',receipt:value.receipt}};
+      }
+      if(op==='record_creator_attempt_outcome'){
+        const saved={terminal_state:value.terminal_state,failure_code:value.failure_code,http_status:value.http_status,
+          provider:'scrapecreators',operation:'video',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'};
+        outcomes.set(value.key,saved);return {ok:true,data:{status:'recorded',outcome:saved}};
+      }
+      return baseCall(op,owner,raw);
+    };
+
+    await r.run();
+    await r.run();
+
+    assert.deepEqual(r.finishes.map(value=>[value.state,value.message]),[
+      ['needs_reconciliation',`needs_reconciliation:${mode}`],
+      ['needs_reconciliation',`needs_reconciliation:${mode}`],
+    ]);
+    assert.equal(detailCalls,1,`${mode} detail request must not be resubmitted`);
   }
 });
 

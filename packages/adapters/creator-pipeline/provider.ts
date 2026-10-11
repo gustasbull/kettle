@@ -347,7 +347,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             trustedCatalogObservation(result.value.observation,result.value.reference.limitations)]);}
         catch(error){checkpointFailure=error;break;}
       }
-      if(firstAmbiguous||isAmbiguousAttempt(checkpointFailure))throw new Error('creator_attempt_needs_reconciliation');
+      if(firstAmbiguous&&firstAmbiguous.status==='rejected')throw firstAmbiguous.reason;
+      if(isAmbiguousAttempt(checkpointFailure))throw checkpointFailure;
       if(firstDefinite&&firstDefinite.status==='rejected'){
         const error=firstDefinite.reason;
         if(error instanceof CreatorProviderError)throw new CreatorProviderError(error.code,error.status,error.failure);

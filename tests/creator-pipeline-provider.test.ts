@@ -328,9 +328,9 @@ test('failed concurrent detail waits for siblings, never retries, and replays su
   catch(error){if(key.startsWith('video:'))throw new PipelineRunError('needs_reconciliation');throw error;}};
  const provider=createCreatorPipelineProvider(f.options),first=provider.recommend(dna,guard.context);
  await waitFor(()=>Object.keys(counts).length===3);for(const gate of Object.values(gates))gate.resolve();
- await assert.rejects(first,error=>error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
+ await assert.rejects(first,error=>error instanceof PipelineRunError&&error.state==='needs_reconciliation');
  assert.deepEqual(counts,{911:1,912:1,913:1});assert.ok(guard.successes.has('video:911'));assert.ok(guard.successes.has('video:913'));
- await assert.rejects(provider.recommend(dna,guard.context),/creator_attempt_needs_reconciliation/);
+ await assert.rejects(provider.recommend(dna,guard.context),error=>error instanceof PipelineRunError&&error.state==='needs_reconciliation');
  assert.deepEqual(counts,{911:1,912:1,913:1},'re-entry replays siblings and never repeats unresolved HTTP');
  assert.deepEqual(guard.checkpoints.filter(entry=>entry.key.startsWith('recommend:detail:')).map(entry=>entry.key),['recommend:detail:911']);
  assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
@@ -353,7 +353,8 @@ test('ambiguous fan-out dominates definite failures; otherwise first definite fa
   };
   await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>{
    assert.deepEqual(started,ids.map(id=>`video:${id}`));
-   assert.equal((error as Error).message,ambiguous?'creator_attempt_needs_reconciliation':'creator_provider_permission');
+   if(ambiguous)assert.ok(error instanceof PipelineRunError&&error.state==='needs_reconciliation');
+   else assert.equal((error as Error).message,'creator_provider_permission');
    assert.doesNotMatch((error as Error).message,/private|secret/);return true;
   });
  }
@@ -398,8 +399,9 @@ test('strict internal ambiguous checkpoint markers dominate a definite detail fa
     :new PipelineRunError('needs_reconciliation',{terminal_state:'needs_reconciliation',failure_code:'network',http_status:null});
    return baseCheckpoint(key,stage,progress);
   };
-  await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>
-   error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
+  await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>wrapped
+   ?error instanceof Error&&error.message==='Workflow step failed: Error: creator_attempt_terminal:needs_reconciliation:network:null\nprivate runtime'
+   :error instanceof PipelineRunError&&error.state==='needs_reconciliation'&&error.failureCode==='network');
   assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
  }
 });
@@ -572,7 +574,8 @@ test('provider failure retains only the truthful pre-call checkpoint',async()=>{
   calls++;if(new URL(url).pathname==='/v2/tiktok/video')throw new Error('detail transport failure');
   return setupResult.f.options.fetch(url,init);
  }});
- await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),/reconciliation/);
+ await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),error=>
+  error instanceof CreatorProviderError&&error.outcome.terminal_state==='needs_reconciliation'&&error.outcome.failure_code==='network');
  assert.deepEqual(recommendations.checkpoints.map(entry=>[entry.key,entry.stage]),[
   ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references']]);
  assert.deepEqual(recommendations.catalogs,[]);

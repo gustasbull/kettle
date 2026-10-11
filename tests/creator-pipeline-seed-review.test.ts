@@ -84,13 +84,15 @@ test('seed parser rejects wrong source, missing identity, invalid enums and boun
 test('seed POST failure neither falls back to SC nor polls/resubmits, and errors contain only bounded diagnostic enums',async()=>{
  const f=setup();
  for(const sample of [
-  {fetch:async()=>new Response('SECRET_RAW_ERROR',{status:429}),error:'creator_provider_transport_http_429'},
-  {fetch:async()=>{throw Error('SECRET_RAW_ERROR');},error:'creator_provider_transport_network'},
-  {fetch:async()=>new Response('SECRET_RAW_ERROR'),error:'creator_provider_transport_malformed_200'},
-  {fetch:async()=>Response.json({conversationId:'known-id'}),error:'creator_provider_malformed_malformed_200'},
+  {fetch:async()=>new Response('SECRET_RAW_ERROR',{status:429}),outcome:{terminal_state:'failed',failure_code:'http_4xx',http_status:429}},
+  {fetch:async()=>{throw Error('SECRET_RAW_ERROR');},outcome:{terminal_state:'needs_reconciliation',failure_code:'network',http_status:null}},
+  {fetch:async()=>new Response('SECRET_RAW_ERROR'),outcome:{terminal_state:'failed',failure_code:'malformed_response',http_status:200}},
+  {fetch:async()=>Response.json({conversationId:'known-id'}),outcome:{terminal_state:'failed',failure_code:'schema_invalid',http_status:200}},
  ]) {
   let calls=0;const guard=fakeGuard();const provider=createCreatorPipelineProvider({...f.options,seedUrl:f.seedUrl,maxHistoryReads:3,fetch:async()=>{calls++;return sample.fetch();}});
-  await assert.rejects(provider.scan(f.input.request,guard.context),(error:unknown)=>error instanceof Error&&error.message===sample.error);
+  await assert.rejects(provider.scan(f.input.request,guard.context),(error:unknown)=>{
+   assert.ok(error instanceof CreatorProviderError);assert.deepEqual(error.outcome,sample.outcome);assert.doesNotMatch(error.message,/SECRET_RAW_ERROR/);return true;
+  });
   await assert.rejects(provider.scan(f.input.request,guard.context),/reconciliation/);
   assert.equal(calls,1);assert.deepEqual(guard.calls.map(c=>c.key),['seed-review']);assert.equal(guard.successes.size,0);
  }
@@ -145,6 +147,7 @@ test('only SC feeds accept a bounded 2MiB raw response; enlarged raw bodies stil
   const result=await fallback(url,init);if(new URL(url).pathname!=='/v3/tiktok/profile/videos')return result;
   const body=await result.json() as {aweme_list:Array<{desc:string}>};body.aweme_list[0]!.desc='é'.repeat(150_000);return Response.json(body);
  }});
- const failedGuard=fakeGuard();await assert.rejects(tooLarge.scan(f.input.request,failedGuard.context),/^Error: creator_provider_malformed_malformed_200$/);
+ const failedGuard=fakeGuard();await assert.rejects(tooLarge.scan(f.input.request,failedGuard.context),error=>
+  error instanceof CreatorProviderError&&error.outcome.terminal_state==='failed'&&error.outcome.failure_code==='schema_invalid'&&error.outcome.http_status===200);
  assert.ok(!failedGuard.successes.has('feed:0'),'sanitized receipts remain capped by UTF-8 bytes, not UTF-16 length');
 });
