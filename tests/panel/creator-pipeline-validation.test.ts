@@ -117,6 +117,22 @@ test('display validator accepts a strict profile analysis projection and rejects
   const extra=structuredClone(valid) as any;
   extra.data.job.result.dna.profile_analysis.performance.observed_views.secret='private';
   assert.equal(parseCreatorJobOutput(extra),undefined);
+
+  const reversed=structuredClone(valid) as any;
+  const dna=reversed.data.job.result.dna;
+  const second=structuredClone(dna.evidence[0]);second.observation_id=id(998);
+  second.url='https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000998';second.metrics.views=300;
+  dna.evidence.push(second);dna.coverage.unique_videos=2;
+  dna.profile_analysis.top_content=[
+    {observation_id:dna.evidence[0].observation_id,rank:1,basis:'observed_views'},
+    {observation_id:second.observation_id,rank:2,basis:'observed_views'},
+  ];
+  assert.equal(parseCreatorJobOutput(reversed),undefined,'lower-view evidence cannot rank first');
+  const reversedTie=structuredClone(reversed) as any;
+  reversedTie.data.job.result.dna.evidence[1].metrics.views=reversedTie.data.job.result.dna.evidence[0].metrics.views;
+  reversedTie.data.job.result.dna.profile_analysis.top_content.reverse();
+  reversedTie.data.job.result.dna.profile_analysis.top_content.forEach((entry:any,index:number)=>entry.rank=index+1);
+  assert.equal(parseCreatorJobOutput(reversedTie),undefined,'view ties use observation ID order');
 });
 
 test('recommendation reference pairing, identity, lineage and fixture disclosure match the server contract',()=>{

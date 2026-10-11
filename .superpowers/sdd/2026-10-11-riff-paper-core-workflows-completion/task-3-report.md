@@ -112,3 +112,63 @@ variants, and truthful omission behavior.
   deployment, publication, or external Paper asset request occurred. Paper CDN URLs
   were not added anywhere. Instagram stays a validated terminal fixture/future
   renderer, not a production provider expansion.
+
+## Fix round 1/5 — terminal truth, unique-video aggregates, rank order, and responsive cards
+
+All six review findings were corrected:
+
+- Pipeline dispatch now uses the effective validated compact-status state for the
+  whole branch. A newer failed or reconciliation status replaces stale active
+  progress with one recovery card; it is never appended below a spinner. A succeeded
+  status over a stale active job shows a non-animated saved-result retrieval state
+  until the authoritative full result arrives.
+- Profile aggregation deduplicates display-permitted observations by
+  `platform:native_id` before totals, engagement samples, and ranking. The newest
+  `source_observed_at` (falling back to `retrieved_at`) wins; equal timestamps use
+  ascending observation ID. A two-row/one-video fixture now projects successfully
+  with one sample and one ranked record.
+- Both the authoritative Zod refinement and the dependency-light panel validator
+  require top-content views to be non-increasing. View ties use ascending observation
+  ID, matching the mapper's ranking comparator.
+- At 700 px and below, the 88 px desktop cards shrink evenly inside the profile
+  card. Browser coverage exercises one, two, and three cards at both 320 px and
+  375 px, proving every card remains within its container and neither the document
+  nor pipeline surface overflows.
+- The reviewed-count element is now appended immediately after the portrait and
+  before Top videos/Reels; the conflicting CSS `order` rule was removed.
+- Computed Paper tokens now match: analysis advice gap 2 px, views icon well
+  `#F0F3F7`, saves well `#FFF3D9`, and analysis/profile primary borders `#A786E9`.
+
+### RED/GREEN evidence
+
+- RED —
+  `npx tsx --test tests/creator-analysis-presentation.test.ts tests/panel/creator-pipeline-validation.test.ts`
+  passed 22/25. Failures proved descending views were not validated at either
+  boundary and duplicate rows made a one-unique-video projection throw because its
+  sample size became two.
+- RED — `node --test tests/panel/creator-pipeline.test.mjs` passed 11/14. A newer
+  failed status still produced two cards, and the profile children were ordered
+  portrait / Top / reviewed instead of portrait / reviewed / Top. The same
+  regression continues into reconciliation, succeeded retrieval, mobile layout,
+  and computed-token assertions once those earlier failures are cleared.
+- GREEN — the focused contract/application/validation command passed 25/25 and the
+  creator-pipeline browser suite passed 14/14.
+- Two adjacent browser fixtures that deliberately remove evidence now also remove
+  the optional projection whose lineage depends on that evidence; the supplied-video
+  fixture declares video source kind and all six explicit unknown dimensions. These
+  are contract-consistent fixture repairs, not weaker production validation. The
+  combined compatibility/pipeline browser command passed 25/25.
+- `npm run typecheck && npm run build:panel` — PASS.
+- `npm run check` — PASS: TypeScript, 526/526 Node tests, Worker dry-run build at
+  3,988.93 KiB / 805.52 KiB gzip, local workerd smoke, and the complete real-browser
+  suite. The browser suite was also run directly to capture its untruncated result:
+  83/83 passed.
+- Creator-pipeline bundle: 141,354 bytes raw / 39,064 bytes gzip,
+  `sha256:1996e4c0a505b3bd171de2bf3ce31a0bf143cd2f0e223064fe38e13a5eca37ee`.
+- `git diff --check` — PASS.
+
+Fix base: `6309956d9c422f23d22c9208af3d2ac82eb0ece6`.
+
+Fix commit: this commit (`fix: harden Paper analysis states`); its final hash is
+returned in the agent handoff. No remaining concern requires expanded provider,
+database, migration, CSP, or deployment scope.

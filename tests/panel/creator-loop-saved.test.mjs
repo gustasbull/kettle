@@ -66,14 +66,14 @@ test('filtered saved DNA accessibility and recovery', async t => {
       assert.match(await review.textContent(),/Fictional fixture/);
       assert.match(await review.textContent(),/Likes0.*SharesUnknown/s);
       assert.match(await review.textContent(),/Retrieved2026-10-09 12:00:00 UTC/);
-      await page.evaluate(()=>{const d=savedTest.fixture();d.evidence[0].metrics=null;d.limitations=[];savedTest.render(d);});
+      await page.evaluate(()=>{const d=savedTest.fixture();d.evidence[0].metrics=null;d.profile_analysis=undefined;d.limitations=[];savedTest.render(d);});
       assert.match(await review.textContent(),/Metrics not supplied/);
       assert.match(await review.textContent(),/bounded sample/i);
-      await page.evaluate(()=>{const d=savedTest.fixture();d.claims=[];d.evidence=[];d.withheld_claim_count=1;savedTest.render(d);});
+      await page.evaluate(()=>{const d=savedTest.fixture();d.claims=[];d.evidence=[];d.profile_analysis=undefined;d.withheld_claim_count=1;savedTest.render(d);});
       assert.match(await review.textContent(),/1 trait withheld/);
       assert.match(await review.textContent(),/Fictional preview/);
       assert.equal(await review.locator('a,summary').count(),0);
-      await page.evaluate(()=>{const d=savedTest.fixture();d.evidence=[];savedTest.render(d);});
+      await page.evaluate(()=>{const d=savedTest.fixture();d.evidence=[];d.profile_analysis=undefined;savedTest.render(d);});
       assert.match(await review.textContent(),/Trait withheld: supporting evidence is unavailable/);
       assert.doesNotMatch(await review.textContent(),/Desk demonstrations appear/);
       assert.doesNotMatch(await review.textContent(),/Biography|Provider|requested_cursor|authored-fixture/);
@@ -84,10 +84,10 @@ test('filtered saved DNA accessibility and recovery', async t => {
         await page.evaluate(variant=> {
           const d=savedTest.fixture();
           d.contains_fixture_data=variant!=='provider' && variant!=='evidence-fallback';
-          if (variant==='withheld') { d.claims=[];d.evidence=[];d.withheld_claim_count=1; }
+          if (variant==='withheld') { d.claims=[];d.evidence=[];d.profile_analysis=undefined;d.withheld_claim_count=1; }
           if (variant==='corrected') {
             d.claims[0]={...d.claims[0],basis:'user_corrected',evidence:[],supersedes_claim_id:d.claims[0].id};
-            d.evidence=[];
+            d.evidence=[];d.profile_analysis=undefined;
           }
           if (variant==='provider') d.evidence.forEach(e=>e.origin='live');
           savedTest.render(d,false);

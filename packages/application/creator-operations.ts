@@ -31,7 +31,16 @@ export function projectCreatorDna(stored: StoredCreatorAnalysis): CreatorDnaView
   }
   // A supplied-video result exposes only its matching seed evidence. Profile-wide
   // aggregates are projected only for a profile analysis, never as a side effect.
-  const measuredVideos=review?[]:scan.video_observations.filter(observation=>allowed.has(observation.id)&&observation.metrics.views!==null);
+  const displayableVideos=review?[]:scan.video_observations.filter(observation=>allowed.has(observation.id));
+  const uniqueVideos=new Map<string,(typeof displayableVideos)[number]>();
+  for(const observation of displayableVideos){
+    const key=`${observation.video.platform}:${observation.video.native_id}`;
+    const current=uniqueVideos.get(key);
+    const observedAt=(value:typeof observation)=>Date.parse(value.provenance.source_observed_at??value.provenance.retrieved_at);
+    if(!current||observedAt(observation)>observedAt(current)
+      ||observedAt(observation)===observedAt(current)&&observation.id.localeCompare(current.id)<0)uniqueVideos.set(key,observation);
+  }
+  const measuredVideos=[...uniqueVideos.values()].filter(observation=>observation.metrics.views!==null);
   const ranked=[...measuredVideos].sort((left,right)=>right.metrics.views!-left.metrics.views!||left.id.localeCompare(right.id)).slice(0,3);
   ranked.forEach(observation=>referenced.add(observation.id));
   const observedViews=measuredVideos.reduce<number|undefined>((total,observation)=>{

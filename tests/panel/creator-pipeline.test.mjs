@@ -157,16 +157,26 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       'one expired image degrades locally');
     assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference').count(), 6,
       'the failed image never removes its Paper slot');
+    await page.evaluate(()=>{window.activeProgressStatus=structuredClone(window.progressStatus);});
+    for (const [state,headingText] of [['failed','This workflow could not finish.'],['needs_reconciliation','This outcome needs review.']]) {
+      await page.evaluate(({state}) => {
+        window.progressStatus = { ...window.activeProgressStatus, state, revision: window.activeProgressStatus.revision+1,
+          updated_at: '2026-10-11T12:00:01Z', terminal_result_available: false };
+        window.view.render(window.job, { status: window.progressStatus });
+      },{state});
+      assert.equal(await root.locator('.riff-loading-card').count(),1);
+      assert.equal(await root.locator('.riff-progress,.riff-loading-spinner,.riff-loading-reference').count(),0,
+        `${state} status replaces active progress instead of appending to it`);
+      assert.equal(await root.getByRole('heading', { name: headingText }).count(), 1);
+      assert.match(await root.getByRole('status').textContent(), /Two safe observations are available/i);
+    }
     await page.evaluate(() => {
-      window.progressStatus = { ...window.progressStatus, state: 'failed', revision: 3,
-        updated_at: '2026-10-11T12:00:01Z', terminal_result_available: false };
-      window.view.render(window.job, { status: window.progressStatus });
+      window.progressStatus = { ...window.activeProgressStatus, state:'succeeded',stage:'saving',revision:window.activeProgressStatus.revision+1,
+        updated_at:'2026-10-11T12:00:02Z',terminal_result_available:true };
+      window.view.render(window.job,{status:window.progressStatus});
     });
-    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference img').count(), 2);
-    assert.equal(await root.getByRole('heading', { name: 'This workflow could not finish.' }).count(), 1);
-    assert.match(await root.getByRole('status').textContent(), /could not finish/i);
-    assert.match(await root.getByRole('status').textContent(), /Two safe observations are available/i,
-      'terminal failure retains the last truthful limitations');
+    assert.equal(await root.getByRole('heading',{name:'Loading the saved result.'}).count(),1);
+    assert.equal(await root.locator('.riff-progress,.riff-loading-spinner').count(),0,'terminal retrieval is non-active');
 
     await page.evaluate(() => {
       boot('scan', 'fullscreen');
@@ -315,6 +325,8 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('heading',{name:'What to improve',exact:true}).count(),1);
     assert.equal(await root.getByRole('heading',{name:'Your next move',exact:true}).count(),1);
     assert.match(await root.locator('.riff-profile-card').textContent(),/Views/);
+    assert.deepEqual(await root.locator('.riff-profile-card').evaluate(card=>[...card.children].map(child=>child.className)),
+      ['riff-profile-portrait','riff-profile-reviewed','riff-profile-top']);
     assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 0);
     assert.equal(await root.getByRole('heading', { name: 'Top videos' }).count(), 1,
       'the approved Paper heading is retained');
@@ -346,8 +358,42 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('heading',{name:'Top Reels'}).count(),1);
     assert.equal(await root.locator('.riff-profile-platform--instagram').count(),1);
 
+    await page.evaluate(()=>{
+      const dna=window.job.result.dna;const first=dna.evidence[0];
+      dna.evidence=[0,1,2].map(index=>({...structuredClone(first),observation_id:`00000000-0000-4000-8000-00000000090${index}`,
+        url:`https://www.tiktok.com/@fictional_kettle_creator/video/90000000000000009${index}`,metrics:{...first.metrics,views:300-index*100}}));
+      dna.coverage.unique_videos=3;dna.profile_analysis.top_content=dna.evidence.map((item,index)=>({observation_id:item.observation_id,rank:index+1,basis:'observed_views'}));
+      window.fullTopContent=structuredClone(dna.profile_analysis.top_content);
+      window.view.render(window.job);
+    });
+    for(const width of [320,375]){
+      await page.setViewportSize({width,height:800});
+      for(const count of [1,2,3]){
+        await page.evaluate(count=>{window.job.result.dna.profile_analysis.top_content=window.fullTopContent.slice(0,count);window.view.render(window.job);},count);
+        const layout=await root.locator('.riff-profile-videos').evaluate(node=>({
+          clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,
+          cards:[...node.children].map(child=>{const card=child.getBoundingClientRect(),container=node.getBoundingClientRect();return {left:card.left-container.left,right:card.right-container.left};}),
+          documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+          surfaceOverflow:document.querySelector('.riff-pipeline__surface').scrollWidth-document.querySelector('.riff-pipeline__surface').clientWidth,
+        }));
+        assert.equal(layout.cards.length,count);assert.ok(layout.cards.every(card=>card.left>=0&&card.right<=layout.clientWidth+1),`${width}px keeps ${count} card(s) accessible`);
+        assert.ok(layout.documentOverflow<=0,`${width}px document does not overflow`);assert.ok(layout.surfaceOverflow<=0,`${width}px surface does not overflow`);
+      }
+    }
+    await page.setViewportSize({width:1200,height:900});
+
+    await page.evaluate(()=>show('video-analysis'));
+    assert.deepEqual(await root.locator('.riff-analysis-row__body').first().evaluate(node=>({gap:getComputedStyle(node).gap})),{gap:'2px'});
+    assert.equal(await root.locator('.riff-metric--views .riff-metric__icon').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 243, 247)');
+    await page.evaluate(()=>{const evidence=window.job.result.dna.evidence[0];evidence.metrics.saves=1;window.view.render(window.job);});
+    assert.equal(await root.locator('.riff-metric--saves .riff-metric__icon').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(255, 243, 217)');
+    assert.equal(await root.getByRole('button',{name:'Rework this video'}).evaluate(node=>getComputedStyle(node).borderColor),'rgb(167, 134, 233)');
+
+    await page.evaluate(()=>show('scan'));
+    assert.equal(await root.getByRole('button',{name:'Find my next breakout idea'}).evaluate(node=>getComputedStyle(node).borderColor),'rgb(167, 134, 233)');
+
     await page.evaluate(()=>{window.job.result.dna.profile_analysis=undefined;window.view.render(window.job);});
-    assert.equal(await root.getByRole('heading',{name:'Top Reels'}).count(),0);
+    assert.equal(await root.getByRole('heading',{name:'Top videos'}).count(),0);
     assert.equal(await root.locator('.riff-profile-insight,.riff-profile-next').count(),0);
     assert.equal(await root.getByText('Views',{exact:true}).count(),0);
   });

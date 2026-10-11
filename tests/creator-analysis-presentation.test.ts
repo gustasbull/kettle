@@ -35,6 +35,24 @@ test('profile analysis projection is optional and strictly tied to public eviden
   const extra = structuredClone(legacy) as any;
   extra.profile_analysis.performance.observed_views.secret = true;
   assert.equal(CreatorDnaView.safeParse(extra).success, false, 'projection remains strict');
+
+  const reversed = structuredClone(legacy) as any;
+  const second = structuredClone(reversed.evidence[0]);
+  second.observation_id = '00000000-0000-4000-8000-000000000099';
+  second.url = 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000099';
+  second.metrics.views = 300;
+  reversed.evidence.push(second); reversed.coverage.unique_videos = 2;
+  reversed.profile_analysis.top_content = [
+    { observation_id: reversed.evidence[0].observation_id, rank: 1, basis: 'observed_views' },
+    { observation_id: second.observation_id, rank: 2, basis: 'observed_views' },
+  ];
+  assert.equal(CreatorDnaView.safeParse(reversed).success, false, 'top content must descend by observed views');
+
+  const reversedTie = structuredClone(reversed);
+  reversedTie.evidence[1].metrics.views = reversedTie.evidence[0].metrics.views;
+  reversedTie.profile_analysis.top_content.reverse();
+  reversedTie.profile_analysis.top_content.forEach((entry:any,index:number)=>entry.rank=index+1);
+  assert.equal(CreatorDnaView.safeParse(reversedTie).success, false, 'view ties use observation ID order');
 });
 
 test('trusted profile aggregates preserve observed zero and require complete engagement inputs', () => {
@@ -56,4 +74,22 @@ test('trusted profile aggregates preserve observed zero and require complete eng
   video.provenance.permission.permitted_uses = ['store', 'model_processing'];
   const restricted = projectCreatorDna({ dna_id: analysis.dna.id, project_id: '00000000-0000-4000-8000-000000000100', analysis });
   assert.equal(restricted.profile_analysis, undefined);
+});
+
+test('trusted profile aggregates count repeated observations of one video once', () => {
+  const analysis=creatorAnalysisFixture();
+  const original=analysis.scan.video_observations[0]!;
+  original.metrics={views:120,likes:12,comments:3,shares:1};
+  original.provenance.retrieved_at='2026-10-09T12:00:00Z';
+  const repeated=structuredClone(original);
+  repeated.id='00000000-0000-4000-8000-000000000099';
+  repeated.metrics={views:300,likes:30,comments:6,shares:3};
+  repeated.provenance.retrieved_at='2026-10-10T12:00:00Z';
+  analysis.scan.video_observations.push(repeated);
+  analysis.scan.coverage.pages[0]!.received_items=2;
+  analysis.scan.coverage.pages[0]!.admitted_observations=2;
+  const view=projectCreatorDna({dna_id:analysis.dna.id,project_id:'00000000-0000-4000-8000-000000000100',analysis});
+  assert.deepEqual(view.profile_analysis?.performance?.observed_views,{value:300,sample_size:1,basis:'sum_observed_post_views'});
+  assert.deepEqual(view.profile_analysis?.performance?.engagement_rate,{percent:13,sample_size:1,basis:'engagements_divided_by_views'});
+  assert.deepEqual(view.profile_analysis?.top_content,[{observation_id:repeated.id,rank:1,basis:'observed_views'}]);
 });

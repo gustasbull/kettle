@@ -194,6 +194,12 @@ function profileAnalysis(value:unknown,coverageCount:number,claims:JsonObject[],
     },1))return false;
     const ranked=item.top_content as JsonObject[];
     if(!unique(ranked,entry=>entry.observation_id)||ranked.some((entry,index)=>entry.rank!==index+1))return false;
+    for(let index=1;index<ranked.length;index+=1){
+      const previous=ranked[index-1]!,current=ranked[index]!;
+      const previousViews=(object(evidenceById.get(previous.observation_id)?.metrics)?.views as number);
+      const currentViews=(object(evidenceById.get(current.observation_id)?.metrics)?.views as number);
+      if(previousViews<currentViews||(previousViews===currentViews&&String(previous.observation_id).localeCompare(String(current.observation_id))>0))return false;
+    }
   }
   if(item.findings!==undefined){
     const findings=shape(item.findings,['working','improvement','next_move']);if(!findings)return false;

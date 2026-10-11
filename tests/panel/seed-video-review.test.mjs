@@ -21,7 +21,7 @@ test('saved DNA keeps Lightreel evidence separate while the Paper scan view avoi
       saved=mountSavedCreatorReview(document.getElementById('saved'),async()=>({ok:true,data:{dna}}));
       saved.receiveInput({dna_id:dna.dna_id});saved.receiveResult({ok:true,data:{dna}});saved.connected(true);
       pipeline=mountCreatorPipeline(document.getElementById('pipeline'),{displayMode:'fullscreen'});
-      pipeline.render(CreatorJobView.parse({...creatorJobFixture('scan'),result:{kind:'scan',dna}}));
+      pipeline.render(CreatorJobView.parse({...creatorJobFixture('scan'),source_kind:seed?'video':'profile',result:{kind:'scan',dna}}));
     };
     window.clearReviews=()=>{
       saved.receiveResult(failure('UNAUTHENTICATED'));
@@ -38,7 +38,7 @@ test('saved DNA keeps Lightreel evidence separate while the Paper scan view avoi
   const browser=await chromium.launch();t.after(()=>browser.close());const page=await browser.newPage({viewport:{width:640,height:1000}});
   const requests=[],errors=[];page.on('request',r=>requests.push(r.url()));page.on('pageerror',e=>errors.push(e.message));
   const base=`http://127.0.0.1:${server.address().port}/`;await page.goto(base);
-  const seed={url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',provider:'lightreel',summary:'Synthetic supplied-video analysis: <img src=x onerror=alert(1)>',access_basis:'video_access_reported',limitations:['Synthetic response; access is not independently proven.'],retrieved_at:'2026-10-09T12:00:00Z',origin:'live'};
+  const seed={url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',provider:'lightreel',summary:'Synthetic supplied-video analysis: <img src=x onerror=alert(1)>',access_basis:'video_access_reported',dimensions:['hook','content','style_pacing','voice_language','script','cta'].map(dimension=>({dimension,status:'unknown',summary:`Synthetic ${dimension} review is limited.`})),limitations:['Synthetic response; access is not independently proven.'],retrieved_at:'2026-10-09T12:00:00Z',origin:'live'};
   const sections=page.getByRole('region',{name:'Lightreel review of supplied video',exact:true});
   await t.test('exact source, inert summary, date and limitations remain in the saved evidence view only',async()=>{
     await page.evaluate(seed=>window.renderReview(seed),seed);assert.equal(await sections.count(),1);

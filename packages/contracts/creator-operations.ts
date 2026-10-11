@@ -69,8 +69,15 @@ export const CreatorDnaView = z.strictObject({
   }
   if (analysis.top_content) {
     const evidence = new Map(view.evidence.map(item => [item.observation_id, item]));
+    const ordered=analysis.top_content.map(item=>({item,evidence:evidence.get(item.observation_id)}));
+    const invalidOrder=ordered.some((entry,index)=>{
+      const previous=ordered[index-1];if(!previous)return false;
+      const previousViews=previous.evidence?.metrics?.views,views=entry.evidence?.metrics?.views;
+      if(previousViews==null||views==null)return false;
+      return previousViews<views||(previousViews===views&&previous.item.observation_id.localeCompare(entry.item.observation_id)>0);
+    });
     if (new Set(analysis.top_content.map(item => item.observation_id)).size !== analysis.top_content.length ||
-      analysis.top_content.some((item, index) => item.rank !== index + 1 || evidence.get(item.observation_id)?.metrics?.views == null)) {
+      ordered.some(({item,evidence},index) => item.rank !== index+1 || evidence?.metrics?.views == null) || invalidOrder) {
       ctx.addIssue({ code: 'custom', message: 'Top content must be contiguous observed public evidence' });
     }
   }

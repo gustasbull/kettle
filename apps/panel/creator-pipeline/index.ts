@@ -355,20 +355,21 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     setStatus(limitations.length?limitations.join(' '):(statusView?.state??job.state) === 'queued' ? 'Queued.' : 'In progress.'); return heading;
   }
 
-  function renderFailure(job: CreatorJobView) {
+  function renderFailure(state:'failed'|'needs_reconciliation',limitations:readonly string[]=[]) {
     screen('failure');
-    const headingText = job.state === 'needs_reconciliation' ? 'This outcome needs review.' : 'This workflow could not finish.';
+    const headingText = state === 'needs_reconciliation' ? 'This outcome needs review.' : 'This workflow could not finish.';
     const card = el('section', undefined, 'riff-loading-card riff-recovery-card');
     const intro = el('div', undefined, 'riff-loading-intro'); const heading = el('h1', headingText); heading.tabIndex = -1;
     intro.append(heading, el('p', 'Continue from the Riff conversation in ChatGPT.')); card.append(intro); content.append(card);
-    setStatus(headingText); return heading;
+    setStatus(limitations.length?`${limitations.join(' ')} ${headingText}`:headingText); return heading;
   }
 
-  function appendFailure(state:'failed'|'needs_reconciliation',limitations:readonly string[]=[]){
-    const headingText=state==='needs_reconciliation'?'This outcome needs review.':'This workflow could not finish.';
+  function renderSavedResultRetrieval(){
+    screen('failure');
     const card=el('section',undefined,'riff-loading-card riff-recovery-card');
-    const intro=el('div',undefined,'riff-loading-intro');intro.append(el('h2',headingText),el('p','Continue from the Riff conversation in ChatGPT.'));
-    card.append(intro);content.append(card);setStatus(limitations.length?`${limitations.join(' ')} ${headingText}`:headingText);
+    const intro=el('div',undefined,'riff-loading-intro');const heading=el('h1','Loading the saved result.');heading.tabIndex=-1;
+    intro.append(heading,el('p','The workflow finished. Riff is retrieving the saved result.'));card.append(intro);content.append(card);
+    setStatus('The workflow finished. Retrieving its saved result.');return heading;
   }
 
   const analysisDimensions: Array<[string, PaperDimension, CreatorDnaView['claims'][number]['dimension'][]]> = [
@@ -488,6 +489,8 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if (summary?.handle) identityBlock.append(el('span', `@${summary.handle.replace(/^@/, '')}`));
     portrait.append(identityBlock);
     profile.append(portrait);
+    const noun=instagram?(dna.coverage.unique_videos===1?'Instagram Reel':'Instagram Reels'):(dna.coverage.unique_videos===1?'TikTok video':'TikTok videos');
+    profile.append(el('p', `${dna.coverage.unique_videos} ${noun} reviewed`, 'riff-profile-reviewed'));
     const evidenceById=new Map(dna.evidence.map(item=>[item.observation_id,item]));
     const top=(profileAnalysis?.top_content??[]).map(item=>evidenceById.get(item.observation_id)).filter((item):item is CreatorDnaView['evidence'][number]=>Boolean(item));
     if (top.length) {
@@ -501,8 +504,6 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       });
       group.append(videos); profile.append(group);
     }
-    const noun=instagram?(dna.coverage.unique_videos===1?'Instagram Reel':'Instagram Reels'):(dna.coverage.unique_videos===1?'TikTok video':'TikTok videos');
-    profile.append(el('p', `${dna.coverage.unique_videos} ${noun} reviewed`, 'riff-profile-reviewed'));
     const analysis = el('section', undefined, 'riff-profile-analysis');
     const findings=profileAnalysis?.findings;
     if(findings){
@@ -850,15 +851,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const observedState=presentation.status?.state??job.state;
     location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
     menu?.render({activeRoute:job.kind==='recommendations'?'discover':job.kind==='scripts'?'studio':'analysis'});
-    if (job.state === 'queued' || job.state === 'running') {
-      screenKind='pending';heading = renderPending(job,presentation.status);
-      if(observedState==='failed'||observedState==='needs_reconciliation')appendFailure(observedState,presentation.status?.progress.limitations??job.progress.limitations);
-    }
-    else if (job.state === 'failed' || job.state === 'needs_reconciliation') {screenKind='failure';heading = renderFailure(job);}
-    else if (job.result?.kind === 'scan') {screenKind='analysis';heading = renderAnalysis(job as CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } });}
+    if (observedState === 'queued' || observedState === 'running') {screenKind='pending';heading = renderPending(job,presentation.status);}
+    else if (observedState === 'failed' || observedState === 'needs_reconciliation') {
+      screenKind='failure';heading=renderFailure(observedState,presentation.status?.progress.limitations??job.progress.limitations);
+    } else if(job.result?.kind === 'scan') {screenKind='analysis';heading = renderAnalysis(job as CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } });}
     else if (job.result?.kind === 'recommendations') heading = renderDiscovery(job as CreatorJobView & { result: { kind: 'recommendations' } });
     else if (job.result?.kind === 'scripts') {screenKind='studio';heading = renderStudio(job as CreatorJobView & { result: { kind: 'scripts' } });}
-    else { const result = title('Saved result unavailable.'); content.append(result.group); heading = result.heading; setStatus('Saved result unavailable.'); }
+    else {screenKind='failure';heading=renderSavedResultRetrieval();}
     if (hadFocus) ([...content.querySelectorAll<HTMLElement>('[data-focus]')].find(node => node.dataset.focus === focusKey) ?? heading).focus({ preventScroll: true });
   }
 
