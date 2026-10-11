@@ -33,17 +33,22 @@ async function runningScan() {
  await allow(); const start=await rpc('start_creator_scan',scanInput()); assert.equal(start.ok,true);
  const r=await rpc('run_creator_job',{job_id:start.data.job.id}); assert.equal(r.ok,true); return r.data.job;
 }
+async function saving(job:any) {
+ const progress=job.progress;
+ const saved=await rpc('checkpoint_creator_job',{job_id:job.id,key:`${job.kind}:test:save`,expected_revision:job.revision,stage:'saving',progress});
+ assert.equal(saved.ok,true);return (await rpc('get_creator_job',{job_id:job.id})).data.job;
+}
 const attempt=(job: string,key='profile',ceiling=10)=>({job_id:job,key,provider:'scrapecreators',operation:'profile',ceiling_microusd:ceiling});
 
 test('zero paid budget and no allowance are seeded; client roles cannot call or inspect internal jobs',async()=>{
  assert.equal((await rpc('start_creator_scan',scanInput())).error?.code,'FORBIDDEN');
  assert.deepEqual((await db.query('select * from public.creator_provider_trials')).rows,[]);
  assert.deepEqual((await db.query('select limit_microusd,reserved_microusd from public.creator_pipeline_budget')).rows,[{limit_microusd:0,reserved_microusd:0}]);
- for(const role of ['anon','authenticated']) for(const sql of ['select * from public.creator_jobs','select * from public.creator_provider_trials',`select public.kettle_list_creator_dispatches('${accountA}','{}')`,`select public.kettle_start_creator_scan('${accountA}','{}')`]) {
+ for(const role of ['anon','authenticated']) for(const sql of ['select * from public.creator_jobs','select * from public.creator_job_checkpoints','select * from public.creator_provider_trials',`select public.kettle_list_creator_dispatches('${accountA}','{}')`,`select public.kettle_start_creator_scan('${accountA}','{}')`,`select public.kettle_checkpoint_creator_job('${accountA}','{}')`,`select public.kettle_get_creator_job_status('${accountA}','{}')`]) {
   await assert.rejects(db.transaction(async tx=>{await tx.exec(`set local role ${role}`);await tx.exec(sql);}),/permission denied/);
  }
- const rows=await db.query<{relrowsecurity:boolean}>("select relrowsecurity from pg_class where relname in ('creator_jobs','creator_job_events','creator_pipeline_budget','creator_pipeline_allowances','creator_provider_trials','creator_attempts','creator_attempt_receipts')");
- assert.equal(rows.rows.length,7); assert.ok(rows.rows.every(r=>r.relrowsecurity));
+ const rows=await db.query<{relrowsecurity:boolean}>("select relrowsecurity from pg_class where relname in ('creator_jobs','creator_job_events','creator_job_checkpoints','creator_pipeline_budget','creator_pipeline_allowances','creator_provider_trials','creator_attempts','creator_attempt_receipts')");
+ assert.equal(rows.rows.length,8); assert.ok(rows.rows.every(r=>r.relrowsecurity));
 });
 test('account ownership, immutable intent, global start request namespace, and replay after allowance withdrawal',async()=>{
  await allow(); const input=scanInput(); const first=await rpc('start_creator_scan',input); assert.equal(first.ok,true);
@@ -70,7 +75,8 @@ test('recommendations capture an exact DNA version; scripts retain that historic
  const stored=await rpc('ingest_creator_analysis',{project_id:projectId,request_id:crypto.randomUUID(),analysis});assert.equal(stored.ok,true);
  const input={dna_id:analysis.dna.id,expected_version:1,request_id:crypto.randomUUID()};
  const rec=await rpc('start_creator_recommendations',input);assert.equal(rec.ok,true);assert.deepEqual(rec.data.job.captured.stored,stored.data);
- await rpc('run_creator_job',{job_id:rec.data.job.id});
+ const running=await rpc('run_creator_job',{job_id:rec.data.job.id});
+ await saving(running.data.job);
  const batch={...recommendationBatchFixture(),id:crypto.randomUUID(),dna_id:analysis.dna.id};
  const finished=await rpc('finish_creator_job',{job_id:rec.data.job.id,state:'succeeded',result:{kind:'recommendations',batch},message:null});assert.equal(finished.ok,true);
  await rpc('correct_creator_dna',{dna_id:analysis.dna.id,expected_version:1,request_id:crypto.randomUUID(),corrections:[{claim_id:analysis.dna.claims[0]!.id,statement:'A corrected topic'}]});
@@ -204,6 +210,7 @@ test('trial debit rolls back with failed intent insert and ambiguous pending att
  assert.equal((await rpc('finish_creator_job',finish)).error?.code,'FORBIDDEN');
  assert.equal((await rpc('get_creator_job',{job_id:job.id})).data.job.state,'running');
  await rpc('complete_creator_attempt',{job_id:job.id,key:request.key,receipt:{synthetic:true}});
+ await saving((await rpc('get_creator_job',{job_id:job.id})).data.job);
  assert.equal((await rpc('finish_creator_job',finish)).ok,true);
  assert.equal((await db.query<{remaining_units:number}>("select remaining_units from public.creator_provider_trials where provider='scrapecreators'")).rows[0]!.remaining_units,0,'completion never refunds an attempted request');
 });
@@ -213,7 +220,7 @@ test('ChatGPT-authored variants are captured immutably with shared script-stage 
  const analysis=creatorAnalysisFixture();analysis.dna.id=crypto.randomUUID();
  const stored=await rpc('ingest_creator_analysis',{project_id:projectId,request_id:crypto.randomUUID(),analysis});assert.equal(stored.ok,true);
  const rec=await rpc('start_creator_recommendations',{dna_id:analysis.dna.id,expected_version:1,request_id:crypto.randomUUID()});assert.equal(rec.ok,true);
- await rpc('run_creator_job',{job_id:rec.data.job.id});
+ const running=await rpc('run_creator_job',{job_id:rec.data.job.id});await saving(running.data.job);
  const batch={...recommendationBatchFixture(),id:crypto.randomUUID(),dna_id:analysis.dna.id};
  assert.equal((await rpc('finish_creator_job',{job_id:rec.data.job.id,state:'succeeded',result:{kind:'recommendations',batch},message:null})).ok,true);
  const variants=creatorScriptsFixture().variants;
@@ -234,4 +241,117 @@ test('ChatGPT-authored variants are captured immutably with shared script-stage 
   await tx.query('select public.kettle_save_creator_scripts($1::uuid,$2::jsonb)',[accountA,JSON.stringify(input)]);
  }),/permission denied/);
  assert.deepEqual((await db.query('select key from public.creator_attempts where job_id=$1',[saved.data.job.id])).rows,[]);
+});
+
+test('creator checkpoints are versioned, append-only, exact-replayable and preserve terminal progress',async()=>{
+ const job=await runningScan();
+ assert.equal(job.stage,'accepted');
+ assert.deepEqual(job.progress,{kind:'scan',profile:null,videos:[],limitations:[]});
+ const progress={kind:'scan',profile:null,videos:[],limitations:[]};
+ const first=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,
+  stage:'reading_profile',progress});
+ assert.equal(first.ok,true);assert.equal(first.data.status,'stored');assert.equal(first.data.revision,job.revision+1);
+ const replay=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,
+  stage:'reading_profile',progress});
+ assert.equal(replay.data.status,'replay');assert.equal(replay.data.revision,job.revision+1);
+ assert.equal((await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision+1,
+  stage:'reading_profile',progress:{...progress,limitations:['changed']}})).error?.code,'IDEMPOTENCY_CONFLICT');
+ assert.equal((await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:analysis',expected_revision:job.revision,
+  stage:'building_analysis',progress})).error?.code,'VERSION_CONFLICT');
+ const save=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:save',expected_revision:job.revision+1,
+  stage:'saving',progress});assert.equal(save.ok,true);
+ const finished=await rpc('finish_creator_job',{job_id:job.id,state:'failed',result:null,message:'fixture'});
+ assert.equal(finished.data.job.stage,'saving');assert.deepEqual(finished.data.job.progress,progress);
+ assert.equal((await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:new',expected_revision:finished.data.job.revision,
+  stage:'saving',progress:{...progress,limitations:['later']}})).error?.code,'FORBIDDEN');
+ assert.equal((await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,
+  stage:'reading_profile',progress})).data.status,'replay');
+ const rows=await db.query('select key,revision from public.creator_job_checkpoints where job_id=$1 order by revision',[job.id]);
+ assert.deepEqual(rows.rows,[{key:'scan:profile:start',revision:job.revision+1},{key:'scan:save',revision:job.revision+2}]);
+});
+
+test('compact creator status is owned, provider-free and exposes only safe fields',async()=>{
+ const job=await runningScan();const status=await rpc('get_creator_job_status',{job_id:job.id});assert.equal(status.ok,true);
+ assert.deepEqual(Object.keys(status.data.status).sort(),['created_at','id','kind','progress','revision','stage','state','terminal_result_available','updated_at']);
+ assert.equal((await rpc('get_creator_job_status',{job_id:job.id},accountB)).error?.code,'NOT_FOUND');
+ assert.equal((await rpc('get_creator_job_status',{job_id:crypto.randomUUID()},accountB)).error?.code,'NOT_FOUND');
+ await db.query("update public.accounts set state='suspended' where id=$1",[accountA]);
+ assert.equal((await rpc('get_creator_job_status',{job_id:job.id})).error?.code,'FORBIDDEN');
+ await db.query("update public.accounts set state='active' where id=$1",[accountA]);
+ for(const role of ['anon','authenticated']) await assert.rejects(db.transaction(async tx=>{
+  await tx.exec(`set local role ${role}`);await tx.query('select public.kettle_get_creator_job_status($1::uuid,$2::jsonb)',[accountA,JSON.stringify({job_id:job.id})]);
+ }),/permission denied/);
+});
+
+test('checkpoint progress is monotonic, strict and cannot mutate profile or prior cards',async()=>{
+ const job=await runningScan(),base={kind:'scan',profile:null,videos:[],limitations:[]};
+ const start=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,stage:'reading_profile',progress:base});
+ const provenance={origin:'live',retrieved_at:'2026-10-11T08:00:00.000Z',source_observed_at:null,permission_basis:'Fixture permission.',limitations:[]};
+ const profileProgress={...base,profile:{platform:'tiktok',native_id:'9000000000000000001',url:profile,handle:'fictional_kettle_creator',
+  display_name:null,bio:null,follower_count:null,provenance}};
+ const profileSaved=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile',expected_revision:start.data.revision,stage:'reading_posts',progress:profileProgress});
+ const card={platform:'tiktok',native_id:'9000000000000000011',url:`${profile}/video/9000000000000000011`,caption:null,published_at:null,
+  duration_seconds:null,metrics:{views:null,likes:null,comments:null,shares:null},provenance};
+ const feed={...profileProgress,videos:[card]};
+ const feedSaved=await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:feed:0',expected_revision:profileSaved.data.revision,stage:'reading_posts',progress:feed});
+ assert.equal(feedSaved.ok,true);
+ for(const [key,stage,progressValue] of [
+  ['scan:duplicate','reading_posts',feed],
+  ['scan:regress','reading_profile',feed],
+  ['scan:shrink','reading_posts',profileProgress],
+  ['scan:change-profile','building_analysis',{...feed,profile:{...profileProgress.profile,handle:'changed'}}],
+  ['scan:private','building_analysis',{...feed,receipt:'secret'}],
+ ] as const){
+  const result=await rpc('checkpoint_creator_job',{job_id:job.id,key,expected_revision:feedSaved.data.revision,stage,progress:progressValue});
+  assert.equal(result.error?.code,'VALIDATION_ERROR',key);
+ }
+ assert.equal((await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:analysis',expected_revision:feedSaved.data.revision,
+  stage:'building_analysis',progress:feed})).ok,true,'forward stage with unchanged truthful snapshot is valid');
+});
+
+test('checkpoint insert failure rolls back revision/event and checkpoint writes together',async()=>{
+ const job=await runningScan();const beforeEvents=(await db.query<{count:number}>('select count(*)::int count from public.creator_job_events where job_id=$1',[job.id])).rows[0]!.count;
+ await db.exec(`create function public.test_checkpoint_failure() returns trigger language plpgsql as $$ begin raise exception 'synthetic checkpoint insert failure'; end; $$;
+  create trigger test_checkpoint_failure before insert on public.creator_job_checkpoints for each row execute function public.test_checkpoint_failure();`);
+ try{await assert.rejects(rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,
+  stage:'reading_profile',progress:job.progress}),/synthetic checkpoint insert failure/);}finally{
+  await db.exec('drop trigger test_checkpoint_failure on public.creator_job_checkpoints; drop function public.test_checkpoint_failure();');
+ }
+ const current=(await rpc('get_creator_job',{job_id:job.id})).data.job;
+ assert.equal(current.revision,job.revision);assert.equal(current.stage,'accepted');
+ assert.equal((await db.query<{count:number}>('select count(*)::int count from public.creator_job_events where job_id=$1',[job.id])).rows[0]!.count,beforeEvents);
+ assert.deepEqual((await db.query('select * from public.creator_job_checkpoints where job_id=$1',[job.id])).rows,[]);
+});
+
+test('checkpoint and status never change attempts, receipts, grants, trials or budget and direct writes stay denied',async()=>{
+ const job=await runningScan();
+ const before={attempts:(await db.query('select * from public.creator_attempts where job_id=$1',[job.id])).rows,
+  receipts:(await db.query('select * from public.creator_attempt_receipts where job_id=$1',[job.id])).rows,
+  budget:(await db.query('select * from public.creator_pipeline_budget')).rows,
+  trials:(await db.query('select * from public.creator_provider_trials order by provider')).rows};
+ await rpc('checkpoint_creator_job',{job_id:job.id,key:'scan:profile:start',expected_revision:job.revision,stage:'reading_profile',progress:job.progress});
+ await rpc('get_creator_job_status',{job_id:job.id});
+ assert.deepEqual((await db.query('select * from public.creator_attempts where job_id=$1',[job.id])).rows,before.attempts);
+ assert.deepEqual((await db.query('select * from public.creator_attempt_receipts where job_id=$1',[job.id])).rows,before.receipts);
+ assert.deepEqual((await db.query('select * from public.creator_pipeline_budget')).rows,before.budget);
+ assert.deepEqual((await db.query('select * from public.creator_provider_trials order by provider')).rows,before.trials);
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
+  await tx.query("update public.creator_jobs set stage='building_analysis',revision=revision+1 where id=$1",[job.id]);}),/immutable creator job/);
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
+  await tx.query('delete from public.creator_job_checkpoints where job_id=$1',[job.id]);}),/permission denied/);
+});
+
+test('progress migration backfills legacy jobs and events without editing applied history',async t=>{
+ const legacy=new PGlite();t.after(()=>legacy.close());
+ await legacy.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+ const files=(await readdir('supabase/migrations')).filter(file=>file.endsWith('.sql')).sort();
+ for(const file of files.filter(file=>file<'20261011091042_creator_job_progress.sql'))await legacy.exec(await readFile(`supabase/migrations/${file}`,'utf8'));
+ await legacy.exec(await readFile('supabase/seed.sql','utf8'));
+ const legacyProject=(await legacy.query<{id:string}>('select id from public.projects limit 1')).rows[0]!.id;
+ await legacy.query(`insert into public.creator_jobs(account_id,project_id,kind,input,captured,request_id)
+  values($1,$2,'scan','{}','{}',$3)`,[accountA,legacyProject,crypto.randomUUID()]);
+ await legacy.exec(await readFile('supabase/migrations/20261011091042_creator_job_progress.sql','utf8'));
+ const rows=(await legacy.query<any>('select stage,progress from public.creator_jobs')).rows;
+ assert.deepEqual(rows,[{stage:'accepted',progress:{kind:'scan',profile:null,videos:[],limitations:[]}}]);
+ assert.deepEqual((await legacy.query<any>('select stage,progress from public.creator_job_events')).rows,rows);
 });

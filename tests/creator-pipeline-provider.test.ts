@@ -317,3 +317,58 @@ test('optional OpenAI does not relax required scan/recommend credentials', () =>
   }
   assert.equal(f.http.length, 0);
 });
+
+test('provider publishes stable truthful checkpoints only after validated boundaries',async()=>{
+ const f=providerHttpFixture();const provider=createCreatorPipelineProvider(f.options);const scan=fakeGuard();
+ const analysis=await provider.scan(f.input.request,scan.context);
+ assert.deepEqual((scan as any).checkpoints.map((entry:any)=>[entry.key,entry.stage]),[
+  ['scan:profile:start','reading_profile'],['scan:profile','reading_posts'],['scan:feed:0','reading_posts'],
+  ['scan:analysis','building_analysis'],['scan:save','saving']]);
+ const profile=(scan as any).checkpoints.find((entry:any)=>entry.key==='scan:profile').progress.profile;
+ assert.equal(profile.handle,'fictional_kettle_creator');assert.equal('provider' in profile.provenance,false);
+ const feed=(scan as any).checkpoints.find((entry:any)=>entry.key==='scan:feed:0').progress;
+ assert.equal(feed.videos.length,1);assert.doesNotMatch(JSON.stringify(feed),/credits_charged|aweme_list|receipt|body/);
+ const dna=projectCreatorDna({dna_id:analysis.dna.id,project_id:'00000000-0000-4000-8000-000000000100',analysis});
+ const recommendations=fakeGuard();await provider.recommend(dna,recommendations.context);
+ assert.deepEqual((recommendations as any).checkpoints.map((entry:any)=>[entry.key,entry.stage]),[
+  ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references'],
+  ['recommend:detail:9000000000000000011','enriching_references'],['recommend:save','saving']]);
+ const identities=(recommendations as any).checkpoints[1].progress;
+ assert.equal(identities.identities.length,1);assert.deepEqual(identities.references,[]);
+ assert.doesNotMatch(JSON.stringify(identities),/conversation/i);
+});
+
+test('supplied-video scan publishes review stage before any provider request',async()=>{
+ const f=providerHttpFixture();f.options.seedUrl=`${f.input.request.supplied_url}/video/9000000000000000011`;
+ const fallback=f.options.fetch;f.options.fetch=async(url,init)=>new URL(url).hostname==='api.lightreel.ai'
+  ? Response.json({conversationId:'seed-fixture',answer:{video_url:f.options.seedUrl,summary:'Reviewed fixture video.',access_basis:'video_access_reported',limitations:[]}})
+  : fallback(url,init);
+ const guard=fakeGuard();await createCreatorPipelineProvider(f.options).scan(f.input.request,guard.context);
+ assert.deepEqual((guard as any).checkpoints.slice(0,2).map((entry:any)=>[entry.key,entry.stage]),[
+  ['scan:seed:start','reviewing_video'],['scan:profile:start','reading_profile']]);
+ assert.equal(guard.calls[0]!.key,'seed-review');
+});
+
+test('provider failure retains only the truthful pre-call checkpoint',async()=>{
+ const f=providerHttpFixture();f.options.fetch=async()=>{throw new Error('offline transport failure');};const scan=fakeGuard();
+ await assert.rejects(createCreatorPipelineProvider(f.options).scan(f.input.request,scan.context),/transport/);
+ assert.deepEqual(scan.checkpoints.map(entry=>[entry.key,entry.stage]),[['scan:profile:start','reading_profile']]);
+
+ const setupResult=await setup(),recommendations=fakeGuard();let calls=0;
+ const failing=createCreatorPipelineProvider({...setupResult.f.options,fetch:async(url,init)=>{
+  calls++;if(new URL(url).pathname==='/v2/tiktok/video')throw new Error('detail transport failure');
+  return setupResult.f.options.fetch(url,init);
+ }});
+ await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),/transport/);
+ assert.deepEqual(recommendations.checkpoints.map(entry=>[entry.key,entry.stage]),[
+  ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references']]);
+ assert.equal(calls,2);
+});
+
+test('duplicate-only feed pages do not publish identical progress revisions',async()=>{
+ const f=providerHttpFixture(),fallback=f.options.fetch;let pages=0;
+ f.options.fetch=async(url,init)=>{const response=await fallback(url,init);if(new URL(url).pathname!=='/v3/tiktok/profile/videos')return response;
+  pages++;const body=await response.json() as any;body.has_more=pages===1;body.max_cursor='42';return Response.json(body);};
+ const guard=fakeGuard();await createCreatorPipelineProvider(f.options).scan(f.input.request,guard.context);
+ assert.equal(pages,2);assert.deepEqual(guard.checkpoints.filter(entry=>entry.key.startsWith('scan:feed:')).map(entry=>entry.key),['scan:feed:0']);
+});

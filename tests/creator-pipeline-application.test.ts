@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCreatorDispatchScheduler, createPipelineOperations, publicCreatorJob, createGuardedProviderContext, canProcessCapturedDna,
+import { createCreatorDispatchScheduler, createPipelineOperations, publicCreatorJob, publicCreatorJobStatus, createGuardedProviderContext, canProcessCapturedDna,
   runCreatorPipelineJob, PipelineRunError, type PipelineRepository, type StoredCreatorJob, type DurableStep } from '../packages/application/creator-pipeline.ts';
 import { failure, type IdentityVerifier } from '../packages/application/operations.ts';
 import { projectCreatorDna, type CreatorRepository } from '../packages/application/creator-operations.ts';
@@ -16,7 +16,9 @@ const identity:IdentityVerifier={async verify(){return {account_id:account,scope
 const wrapped=(job:StoredCreatorJob)=>({ok:true as const,data:{job}});
 function stored(kind:StoredCreatorJob['kind']='recommendations',state:StoredCreatorJob['state']='queued'):StoredCreatorJob {
   const job=creatorJobFixture(kind);
-  return {...job,state,result:state==='succeeded'?job.result:null,account_id:account,request_id:request,
+  return {...job,state,stage:state==='succeeded'?'saving':'accepted',progress:kind==='scan'?{kind,profile:null,videos:[],limitations:[]}:
+    kind==='recommendations'?{kind,identities:[],references:[],limitations:[]}:{kind,limitations:[]},
+    result:state==='succeeded'?job.result:null,account_id:account,request_id:request,
     input:{private_input:'never public'},captured:{private_snapshot:'never public'},message:'private provider diagnostics'};
 }
 function input(kind:PipelineOperation='start_creator_recommendations') {
@@ -244,7 +246,11 @@ function runner(kind:StoredCreatorJob['kind']='recommendations') {
   const saved=approvedStored(),batch=approvedBatch(),scripts=approvedScripts(batch);
   const job=stored(kind,'running');job.captured=kind==='scan'?{scan:saved.analysis.scan.request}:{stored:saved,...(kind==='scripts'?{batch,idea_id:batch.ideas[0]!.id}:{})};
   const finishes:any[]=[],providerCalls:string[]=[],steps:string[]=[],ingests:unknown[]=[];
-  const repository:PipelineRepository={async call(op,_account,raw){if(op==='run_creator_job')return wrapped(job);if(op==='finish_creator_job'){finishes.push(raw);return wrapped({...job,...raw as object});}throw Error(op);}};
+  let revision=job.revision;
+  const repository:PipelineRepository={async call(op,_account,raw){if(op==='run_creator_job')return wrapped(job);
+    if(op==='checkpoint_creator_job'){const input=raw as any;revision++;job.revision=revision;job.stage=input.stage;job.progress=input.progress;
+      return {ok:true,data:{status:'stored',revision,checkpoint:{key:input.key,stage:input.stage,progress:input.progress,revision,created_at:job.updated_at}}};}
+    if(op==='finish_creator_job'){finishes.push(raw);return wrapped({...job,...raw as object});}throw Error(op);}};
   const creatorRepository:CreatorRepository={async call(_op,_account,raw){ingests.push(raw);return {ok:true,data:saved};}};
   const provider:CreatorPipelineProvider={async scan(){providerCalls.push('scan');return saved.analysis;},async recommend(){providerCalls.push('recommend');return batch;},async generate(){providerCalls.push('generate');return scripts;}};
   const run=()=>runCreatorPipelineJob(repository,creatorRepository,account,job.id,()=>provider,ceilings,async(name,fn)=>{steps.push(name);return fn();});
@@ -412,4 +418,55 @@ test('runner does not persist raw provider or Workflow exception details',async(
   const r=runner();r.provider.recommend=async()=>{throw new Error('creator_provider_permission');};await r.run();
   assert.equal(r.finishes[0].message,'failed:creator_provider_permission');
   assert.doesNotMatch(JSON.stringify(publicCreatorJob({...r.job,...r.finishes[0]})),/creator_provider/);
+});
+
+test('compact public status copies only allowlisted safe progress and terminal availability',()=>{
+ const running=stored('scan','running');
+ const status=publicCreatorJobStatus(running);
+ assert.deepEqual(Object.keys(status).sort(),['created_at','id','kind','progress','revision','stage','state','terminal_result_available','updated_at']);
+ assert.equal(status.terminal_result_available,false);
+ assert.equal(publicCreatorJobStatus(stored('scan','succeeded')).terminal_result_available,true);
+ assert.doesNotMatch(JSON.stringify(status),/private_input|private_snapshot|account_id|request_id|project_id/);
+});
+
+test('checkpoint context uses durable versioned writes and content-free telemetry without provider reservation',async()=>{
+ const job=stored('scan','running');job.revision=2;
+ const calls:{op:string;raw:any}[]=[],steps:string[]=[],events:Array<Record<string,unknown>>=[];
+ let revision=2;
+ const repository:PipelineRepository={async call(op,_owner,raw){calls.push({op,raw});const input=raw as any;
+  if(op!=='checkpoint_creator_job')assert.fail(`unexpected ${op}`);
+  revision++;return {ok:true,data:{status:'stored',revision,checkpoint:{key:input.key,stage:input.stage,progress:input.progress,revision,created_at:job.updated_at}}};
+ }};
+ const telemetry:any={record(){},async measure(fields:Record<string,unknown>,run:()=>Promise<unknown>){events.push(fields);return run();}};
+ const context=createGuardedProviderContext(repository,job,ceilings,async(name,run)=>{steps.push(name);return run();},telemetry) as any;
+ const progress={kind:'scan',profile:null,videos:[],limitations:[]};
+ await context.checkpoint('scan:profile:start','reading_profile',progress);
+ await context.checkpoint('scan:profile','reading_posts',progress);
+ assert.deepEqual(steps,['checkpoint:scan:profile:start','checkpoint:scan:profile']);
+ assert.deepEqual(calls.map(call=>({op:call.op,revision:call.raw.expected_revision})),[
+  {op:'checkpoint_creator_job',revision:2},{op:'checkpoint_creator_job',revision:3}]);
+ assert.ok(events.every(event=>event.stage==='checkpoint_persistence'&&event.operation==='persist'));
+ assert.doesNotMatch(JSON.stringify(events),/scan:profile|caption|url|account/i);
+});
+
+test('compact status read works with providers disabled and never schedules or accepts private input',async()=>{
+ const job=stored('recommendations','running'),status=publicCreatorJobStatus(job),calls:string[]=[],dispatches:string[]=[];
+ const operations=createPipelineOperations(identity,{async call(operation){calls.push(operation);return {ok:true,data:{status}};}},
+  async()=>{dispatches.push('unexpected');},()=>false);
+ const result=await operations.execute('get_creator_job_status','token',{job_id:job.id});
+ assert.deepEqual(result,{ok:true,data:{status}});assert.deepEqual(calls,['get_creator_job_status']);assert.deepEqual(dispatches,[]);
+ assert.equal(code(await operations.execute('get_creator_job_status','token',{job_id:job.id,account_id:account})),'VALIDATION_ERROR');
+});
+
+test('checkpoint context accepts exact replay revision and rejects malformed persistence replies',async()=>{
+ const job=stored('scripts','running');job.revision=2;const progress={kind:'scripts' as const,limitations:[]};
+ for(const reply of [
+  {ok:true,data:{status:'replay',revision:2,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:2,created_at:job.updated_at}}},
+  {ok:true,data:{status:'stored',revision:1,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:1,created_at:job.updated_at}}},
+  {ok:true,data:{status:'stored',revision:3,checkpoint:{key:'changed',stage:'building_analysis',progress,revision:3,created_at:job.updated_at}}},
+ ] as const){
+  const context=createGuardedProviderContext({async call(){return reply;}},job,ceilings,step) as any;
+  if(reply.data.status==='replay')await assert.doesNotReject(context.checkpoint('script:generate:start','building_analysis',progress));
+  else await assert.rejects(context.checkpoint('script:generate:start','building_analysis',progress),PipelineRunError);
+ }
 });

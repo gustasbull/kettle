@@ -546,7 +546,8 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.complete=pipelineFixture('video-analysis');
     window.pending=structuredClone(window.complete); window.pending.state='queued'; window.pending.result=null; window.pending.revision=1;
-    window.running=structuredClone(window.pending); window.running.state='running'; window.running.revision=2;
+    window.pending.stage='accepted'; window.pending.progress={kind:'scan',profile:null,videos:[],limitations:[]};
+    window.running=structuredClone(window.pending); window.running.state='running'; window.running.revision=2; window.running.stage='reviewing_video';
     window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {
       timeoutMs:500, toolTimeoutMs:80, pollIntervalMs:100, maxPollIntervalMs:160, maxPolls:3
     });

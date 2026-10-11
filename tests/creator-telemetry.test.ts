@@ -114,6 +114,16 @@ test('creator telemetry creates a correlation-bound observer without exposing ca
   }]);
 });
 
+test('checkpoint persistence telemetry accepts only content-free counts and correlation',()=>{
+ const emitted:CreatorTelemetryEvent[]=[];const telemetry=createCreatorTelemetry({emit:event=>emitted.push(event)});
+ assert.ok(telemetry.record({event:'creator_latency',job_id:jobId,stage:'checkpoint_persistence',status:'ok',
+  clock:'monotonic',duration_ms:2,operation:'persist',item_count:3}));
+ const base={event:'creator_latency',job_id:jobId,stage:'checkpoint_persistence',status:'ok',clock:'monotonic',duration_ms:2,operation:'persist'} as const;
+ for(const unsafe of [{progress:{kind:'scan'}},{url:'https://www.tiktok.com/@private'},{caption:'private'},
+  {key:'scan:feed:0'},{account_id:requestId}])assert.equal(telemetry.record({...base,...unsafe}),undefined);
+ assert.equal(emitted.length,1);assert.deepEqual(emitted[0]?.item_count,3);
+});
+
 test('HTTP traces stay distinct while logical request scope hands off to job scope', async () => {
   const emitted: CreatorTelemetryEvent[] = [];
   let now = 0;

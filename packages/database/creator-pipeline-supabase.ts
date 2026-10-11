@@ -1,7 +1,7 @@
 import type { PipelineRepository } from '../application/creator-pipeline.ts';
 import { createSupabaseRepository } from './supabase.ts';
 import { observed, type CreatorLatencyObserver } from '../application/creator-observability.ts';
-const allowed=new Set(['start_creator_scan','save_creator_scripts','start_creator_recommendations','start_creator_scripts','get_creator_job','run_creator_job','finish_creator_job','reserve_creator_attempt','complete_creator_attempt','list_creator_dispatches']);
+const allowed=new Set(['start_creator_scan','save_creator_scripts','start_creator_recommendations','start_creator_scripts','get_creator_job','get_creator_job_status','run_creator_job','finish_creator_job','reserve_creator_attempt','complete_creator_attempt','checkpoint_creator_job','list_creator_dispatches']);
 export function createPipelineSupabaseRepository(baseUrl:string,serviceRoleKey:string,fetcher:typeof fetch=fetch,telemetry?:CreatorLatencyObserver):PipelineRepository {
   createSupabaseRepository(baseUrl,serviceRoleKey,fetcher);
   return {async call(operation,accountId,input,operationTelemetry){

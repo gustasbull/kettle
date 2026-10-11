@@ -6,6 +6,10 @@ export function pipelineFixture(scenario: Scenario): CreatorJobView {
   const job = creatorJobFixture(['scan', 'video-analysis'].includes(scenario) ? 'scan' : ['scripts', 'three-variants', 'long-scripts'].includes(scenario) ? 'scripts' : 'recommendations');
   if (['queued', 'running', 'failed', 'needs_reconciliation'].includes(scenario)) {
     job.state = scenario as 'queued' | 'running' | 'failed' | 'needs_reconciliation';
+    job.stage = 'accepted';
+    job.progress = job.kind === 'scan' ? {kind:'scan',profile:null,videos:[],limitations:[]}
+      : job.kind === 'recommendations' ? {kind:'recommendations',identities:[],references:[],limitations:[]}
+        : {kind:'scripts',limitations:[]};
     job.result = null;
     job.message = scenario === 'failed' ? 'The fictional job could not finish.' : scenario === 'needs_reconciliation' ? 'The fictional request outcome could not be confirmed.' : null;
   }

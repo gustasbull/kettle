@@ -91,7 +91,7 @@ function jobOutput(value:unknown):CreatorJobPublicOutput|undefined {
   const failed=failure(value);if(failed)return failed;
   const outer=record(value,['ok','data']);if(!outer||outer.ok!==true)return;
   const data=record(outer.data,['job']);if(!data)return;
-  const job=record(data.job,['id','project_id','revision','kind','state','created_at','updated_at','result','message']
+  const job=record(data.job,['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','message']
     .concat((data.job as JsonObject)?.source_kind===undefined?[]:['source_kind']));
   if(!job||!isCreatorJobView(job))return;
   return {ok:true,data:{job:structuredClone(job) as CreatorJobView}};

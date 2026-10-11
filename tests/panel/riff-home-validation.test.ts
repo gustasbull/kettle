@@ -82,3 +82,17 @@ test('Home accepts the public maximum of 61 DNA limitations', () => {
   const contractValidJob = CreatorJobView.parse(job);
   assert.equal(isCreatorJobView(contractValidJob), true);
 });
+
+test('Home validates required safe progress without rendering raw provider or private fields',()=>{
+ const job=structuredClone(pipelineFixture('running'));
+ job.stage='reading_posts';
+ job.progress={kind:'scan',profile:{platform:'tiktok',native_id:'9000000000000000001',
+  url:'https://www.tiktok.com/@fictional_kettle_creator',handle:'fictional_kettle_creator',display_name:'Fixture',bio:null,follower_count:null,
+  provenance:{origin:'live',retrieved_at:job.created_at,source_observed_at:null,permission_basis:'Fixture display permission.',limitations:[]}},
+  videos:[],limitations:[]};job.kind='scan';
+ assert.equal(isCreatorJobView(job),true);
+ assert.equal(isCreatorJobView({...job,stage:'researching_formats'}),false);
+ assert.equal(isCreatorJobView({...job,progress:{...job.progress,receipt:{raw:'secret'}}}),false);
+ const queued={...job,state:'queued' as const};
+ assert.equal(isCreatorJobView(queued),false,'queued jobs cannot claim partial progress');
+});

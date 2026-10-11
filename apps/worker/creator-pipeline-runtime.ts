@@ -9,6 +9,8 @@ import { createCreatorPipelineProvider } from '../../packages/adapters/creator-p
 import type { ScrapeCreatorsCachePolicy } from '../../packages/adapters/creator-pipeline/requests.ts';
 import { createCreatorTelemetry, type CreatorTelemetry } from './creator-telemetry.ts';
 import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
+import { creatorWorkflowStepOptions } from './creator-workflow-policy.ts';
+export { creatorWorkflowStepOptions } from './creator-workflow-policy.ts';
 
 const CREATOR_CACHE_MAX_AGE = Object.freeze({
   profile: '1d', detail: '7d',
@@ -55,7 +57,7 @@ export class CreatorPipelineWorkflow extends WorkflowEntrypoint<Env,{job_id:stri
     const creators=createCreatorSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
     const durableStep:DurableStep=async <T>(name:string,run:()=>Promise<T>)=>{
       // Values crossing step boundaries are JSON receipts, never credentials or fetch handles.
-      const value=await step.do(name,{retries:{limit:name.startsWith('provider:')?0:2,delay:'1 second',backoff:'exponential'},timeout:'10 minutes'},
+      const value=await step.do(name,creatorWorkflowStepOptions(name),
         async()=>JSON.parse(JSON.stringify(await run())));
       return value as T;
     };

@@ -64,6 +64,48 @@ function metrics(value: unknown) {
     && optional(item, 'saves', candidate => nullable(candidate, integer));
 }
 
+function progressProvenance(value:unknown){
+  const item=shape(value,['origin','retrieved_at','source_observed_at','permission_basis','limitations']);
+  return !!item&&enumValue(item.origin,['fixture','live'])&&timestamp(item.retrieved_at)
+    &&nullable(item.source_observed_at,timestamp)&&text(item.permission_basis,1_000)&&textList(item.limitations,10,500);
+}
+function progressProfile(value:unknown){
+  const item=shape(value,['platform','native_id','url','handle','display_name','bio','follower_count','provenance'],['avatar_url']);
+  return !!item&&item.platform==='tiktok'&&text(item.native_id,200)&&creatorUrl(item.url)&&text(item.handle,100)
+    &&nullable(item.display_name,candidate=>text(candidate,200,true))&&nullable(item.bio,candidate=>text(candidate,1_000,true))
+    &&nullable(item.follower_count,integer)&&optional(item,'avatar_url',imageUrl)&&progressProvenance(item.provenance);
+}
+function progressCard(value:unknown){
+  const item=shape(value,['platform','native_id','url','caption','published_at','duration_seconds','metrics','provenance'],['thumbnail_url']);
+  return !!item&&item.platform==='tiktok'&&text(item.native_id,200)&&creatorUrl(item.url)
+    &&nullable(item.caption,candidate=>text(candidate,2_000,true))&&nullable(item.published_at,timestamp)
+    &&nullable(item.duration_seconds,positiveNumber)&&optional(item,'thumbnail_url',imageUrl)
+    &&metrics(item.metrics)&&progressProvenance(item.provenance);
+}
+function progressIdentity(value:unknown){
+  const item=shape(value,['platform','native_id','url','retrieved_at','origin','permission_basis','limitations']);
+  return !!item&&item.platform==='tiktok'&&text(item.native_id,200)&&creatorUrl(item.url)&&timestamp(item.retrieved_at)
+    &&enumValue(item.origin,['fixture','live'])&&text(item.permission_basis,1_000)&&textList(item.limitations,10,500);
+}
+function jobProgress(value:unknown,kind:string){
+  if(kind==='scan'){
+    const item=shape(value,['kind','profile','videos','limitations']);if(!item||item.kind!=='scan')return false;
+    const videos=Array.isArray(item.videos)?item.videos:[];
+    return (item.profile===null||progressProfile(item.profile))&&list(item.videos,10,progressCard)&&textList(item.limitations,20,500)
+      &&unique(videos,video=>{const card=object(video);return `${card?.platform}:${card?.native_id}`;});
+  }
+  if(kind==='recommendations'){
+    const item=shape(value,['kind','identities','references','limitations']);if(!item||item.kind!=='recommendations'
+      ||!list(item.identities,3,progressIdentity)||!list(item.references,3,progressCard)||!textList(item.limitations,20,500))return false;
+    const identities=item.identities as JsonObject[],references=item.references as JsonObject[];
+    return unique(identities,value=>`${value.platform}:${value.native_id}:${value.url}`)
+      &&unique(references,value=>`${value.platform}:${value.native_id}:${value.url}`)
+      &&references.every((value,index)=>{const identity=identities[index];return !!identity&&value.platform===identity.platform
+        &&value.native_id===identity.native_id&&value.url===identity.url;});
+  }
+  const item=shape(value,['kind','limitations']);return !!item&&item.kind==='scripts'&&textList(item.limitations,20,500);
+}
+
 function evidence(value: unknown) {
   const item = shape(value, ['observation_id', 'url', 'retrieved_at', 'source_observed_at', 'origin', 'published_at', 'metrics'], ['thumbnail_url', 'duration_seconds']);
   return !!item && id(item.observation_id) && creatorUrl(item.url) && timestamp(item.retrieved_at)
@@ -224,14 +266,24 @@ function scripts(value: unknown) {
  * the server's Zod graph into Home's first-paint bundle. */
 export function isCreatorJobView(value: unknown): value is CreatorJobView {
   const candidate = object(value); if (!candidate) return false;
-  const job = shape(candidate, ['id','project_id','revision','kind','state','created_at','updated_at','result','message'], ['source_kind']); if (!job) return false;
+  const job = shape(candidate, ['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','message'], ['source_kind']); if (!job) return false;
   try { if (JSON.stringify(job).length > 1_500_000) return false; } catch { return false; }
   if (!id(job.id) || !id(job.project_id) || !Number.isSafeInteger(job.revision) || Number(job.revision) < 1
     || !enumValue(job.kind, ['scan', 'recommendations', 'scripts'])
     || !enumValue(job.state, ['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'])
+    || !enumValue(job.stage,['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','researching_formats','enriching_references','saving'])
+    || !jobProgress(job.progress,String(job.kind))
     || !timestamp(job.created_at) || !timestamp(job.updated_at)
     || !(job.message === null || text(job.message, 1_000))) return false;
   if (job.source_kind !== undefined && (!enumValue(job.source_kind, ['video', 'profile']) || job.kind !== 'scan')) return false;
+  const stagePaths={scan:['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','saving'],
+    recommendations:['accepted','researching_formats','enriching_references','saving'],scripts:['accepted','building_analysis','saving']} as const;
+  if(!stagePaths[job.kind as keyof typeof stagePaths].includes(job.stage as never))return false;
+  if(job.source_kind==='profile'&&job.stage==='reviewing_video')return false;
+  if(job.state==='queued'&&(job.stage!=='accepted'||JSON.stringify(job.progress)!==JSON.stringify(job.kind==='scan'
+    ?{kind:'scan',profile:null,videos:[],limitations:[]}:job.kind==='recommendations'
+      ?{kind:'recommendations',identities:[],references:[],limitations:[]}:{kind:'scripts',limitations:[]})))return false;
+  if(job.state==='succeeded'&&job.stage!=='saving')return false;
   if (job.state !== 'succeeded') return job.result === null;
   const result = job.kind === 'scan' ? shape(job.result, ['kind','dna'])
     : job.kind === 'recommendations' ? shape(job.result, ['kind','batch']) : shape(job.result, ['kind','scripts']);

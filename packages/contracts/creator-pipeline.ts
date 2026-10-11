@@ -89,11 +89,65 @@ export const StartCreatorRecommendationsInput = z.strictObject({dna_id:Id,expect
 export const StartCreatorScriptsInput = z.strictObject({batch_id:Id,idea_id:Id,request_id:Id});
 export const SaveCreatorScriptsInput = StartCreatorScriptsInput.extend({variants:z.array(FilmingVariant.omit({id:true})).min(2).max(3)});
 export const GetCreatorJobInput = z.strictObject({job_id:Id});
+export const GetCreatorJobStatusInput = z.strictObject({job_id:Id});
+export const CreatorJobStage = z.enum(['accepted','reviewing_video','reading_profile','reading_posts',
+  'building_analysis','researching_formats','enriching_references','saving']);
+const progressText=(max:number)=>z.string().trim().min(1).max(max);
+const progressCount=z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable();
+export const CreatorProgressProvenance=z.strictObject({
+  origin:z.enum(['fixture','live']),retrieved_at:Timestamp,source_observed_at:Timestamp.nullable(),
+  permission_basis:progressText(1000),limitations:z.array(progressText(500)).max(10),
+});
+export const CreatorProgressProfile=z.strictObject({
+  platform:z.literal('tiktok'),native_id:progressText(200),url:CreatorUrl,handle:progressText(100),
+  display_name:z.string().max(200).nullable(),bio:z.string().max(1000).nullable(),
+  follower_count:progressCount,avatar_url:TikTokImageUrl.optional(),provenance:CreatorProgressProvenance,
+});
+export const CreatorProgressVideoCard=z.strictObject({
+  platform:z.literal('tiktok'),native_id:progressText(200),url:CreatorUrl,
+  caption:z.string().max(2000).nullable(),published_at:Timestamp.nullable(),
+  duration_seconds:z.number().positive().finite().nullable(),thumbnail_url:TikTokImageUrl.optional(),
+  metrics:z.strictObject({views:progressCount,likes:progressCount,comments:progressCount,shares:progressCount,
+    saves:progressCount.optional()}),provenance:CreatorProgressProvenance,
+});
+export const CreatorProgressReferenceIdentity=z.strictObject({
+  platform:z.literal('tiktok'),native_id:progressText(200),url:CreatorUrl,retrieved_at:Timestamp,
+  origin:z.enum(['fixture','live']),permission_basis:progressText(1000),limitations:z.array(progressText(500)).max(10),
+});
+const ScanProgress=z.strictObject({kind:z.literal('scan'),profile:CreatorProgressProfile.nullable(),
+  videos:z.array(CreatorProgressVideoCard).max(10),limitations:z.array(progressText(500)).max(20),
+}).superRefine((progress,context)=>{
+  const identities=progress.videos.map(video=>`${video.platform}:${video.native_id}`);
+  if(new Set(identities).size!==identities.length)context.addIssue({code:'custom',message:'Progress videos must be unique'});
+  if(progress.profile&&progress.videos.some(video=>new URL(video.url).pathname.split('/video/')[0]!==new URL(progress.profile!.url).pathname.replace(/\/$/,'')))
+    context.addIssue({code:'custom',message:'Progress videos must belong to the displayed profile'});
+});
+const RecommendationProgress=z.strictObject({kind:z.literal('recommendations'),
+  identities:z.array(CreatorProgressReferenceIdentity).max(3),references:z.array(CreatorProgressVideoCard).max(3),
+  limitations:z.array(progressText(500)).max(20),
+}).superRefine((progress,context)=>{
+  const identityKeys=progress.identities.map(value=>`${value.platform}:${value.native_id}:${value.url}`);
+  const referenceKeys=progress.references.map(value=>`${value.platform}:${value.native_id}:${value.url}`);
+  if(new Set(identityKeys).size!==identityKeys.length||new Set(referenceKeys).size!==referenceKeys.length)
+    context.addIssue({code:'custom',message:'Recommendation progress identities must be unique'});
+  if(referenceKeys.some((key,index)=>identityKeys[index]!==key))
+    context.addIssue({code:'custom',message:'Enriched references must be an ordered prefix of identified references'});
+});
+const ScriptProgress=z.strictObject({kind:z.literal('scripts'),limitations:z.array(progressText(500)).max(20)});
+export const CreatorJobProgress=z.discriminatedUnion('kind',[ScanProgress,RecommendationProgress,ScriptProgress]);
+export const emptyCreatorJobProgress=(kind:'scan'|'recommendations'|'scripts'):z.infer<typeof CreatorJobProgress>=>
+  kind==='scan'?{kind,profile:null,videos:[],limitations:[]}:
+    kind==='recommendations'?{kind,identities:[],references:[],limitations:[]}:{kind,limitations:[]};
+const allowedStages={
+  scan:['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','saving'],
+  recommendations:['accepted','researching_formats','enriching_references','saving'],
+  scripts:['accepted','building_analysis','saving'],
+} as const;
 export const CreatorJobView = z.strictObject({
   id:Id,project_id:Id,revision:z.number().int().positive(),kind:z.enum(['scan','recommendations','scripts']),
   source_kind:z.enum(['video','profile']).optional(),
   state:z.enum(['queued','running','succeeded','failed','needs_reconciliation']),
-  created_at:Timestamp,updated_at:Timestamp,
+  stage:CreatorJobStage,progress:CreatorJobProgress,created_at:Timestamp,updated_at:Timestamp,
   result:z.discriminatedUnion('kind',[
     z.strictObject({kind:z.literal('scan'),dna:CreatorDnaView}),
     z.strictObject({kind:z.literal('recommendations'),batch:RecommendationBatch}),
@@ -113,19 +167,50 @@ export const CreatorJobView = z.strictObject({
   if (job.result?.kind === 'scan' && job.result.dna.project_id !== job.project_id) {
     context.addIssue({ code: 'custom', message: 'Scan result must belong to the job project' });
   }
+  if(job.progress.kind!==job.kind||!allowedStages[job.kind].includes(job.stage as never))
+    context.addIssue({code:'custom',message:'Job kind, stage and progress must agree'});
+  if(job.kind==='scan'&&job.source_kind==='profile'&&job.stage==='reviewing_video')
+    context.addIssue({code:'custom',message:'Profile scans do not review a supplied video'});
+  if(job.state==='queued'&&(job.stage!=='accepted'||JSON.stringify(job.progress)!==JSON.stringify(emptyCreatorJobProgress(job.kind))))
+    context.addIssue({code:'custom',message:'Queued jobs begin with empty accepted progress'});
+  if(job.state==='succeeded'&&job.stage!=='saving')
+    context.addIssue({code:'custom',message:'Succeeded jobs have reached saving'});
 });
 export const CreatorJobOutput=result(z.strictObject({job:CreatorJobView}));
+export const CreatorJobStatusView=z.strictObject({
+  id:Id,kind:z.enum(['scan','recommendations','scripts']),
+  state:z.enum(['queued','running','succeeded','failed','needs_reconciliation']),
+  stage:CreatorJobStage,revision:z.number().int().positive(),created_at:Timestamp,updated_at:Timestamp,
+  progress:CreatorJobProgress,terminal_result_available:z.boolean(),
+}).superRefine((status,context)=>{
+  if(status.progress.kind!==status.kind||!allowedStages[status.kind].includes(status.stage as never))
+    context.addIssue({code:'custom',message:'Status kind, stage and progress must agree'});
+  if(status.terminal_result_available!==(status.state==='succeeded'))
+    context.addIssue({code:'custom',message:'Terminal result availability must match successful state'});
+  if(status.state==='queued'&&(status.stage!=='accepted'||JSON.stringify(status.progress)!==JSON.stringify(emptyCreatorJobProgress(status.kind))))
+    context.addIssue({code:'custom',message:'Queued status begins with empty accepted progress'});
+  if(status.state==='succeeded'&&status.stage!=='saving')
+    context.addIssue({code:'custom',message:'Successful status has reached saving'});
+});
+export const CreatorJobStatusOutput=result(z.strictObject({status:CreatorJobStatusView}));
 export const pipelineContracts={
   start_creator_scan:{input:StartCreatorScanInput,output:CreatorJobOutput,scope:'projects:write',readOnly:false},
   start_creator_recommendations:{input:StartCreatorRecommendationsInput,output:CreatorJobOutput,scope:'projects:write',readOnly:false},
   start_creator_scripts:{input:StartCreatorScriptsInput,output:CreatorJobOutput,scope:'projects:write',readOnly:false},
   save_creator_scripts:{input:SaveCreatorScriptsInput,output:CreatorJobOutput,scope:'projects:write',readOnly:false},
   get_creator_job:{input:GetCreatorJobInput,output:CreatorJobOutput,scope:'projects:read',readOnly:true},
+  get_creator_job_status:{input:GetCreatorJobStatusInput,output:CreatorJobStatusOutput,scope:'projects:read',readOnly:true},
 } as const;
 export type PipelineOperation=keyof typeof pipelineContracts;
 export type RecommendationBatch=z.infer<typeof RecommendationBatch>;
 export type CreatorScriptSet=z.infer<typeof CreatorScriptSet>;
 export type CreatorJobView=z.infer<typeof CreatorJobView>;
+export type CreatorJobStatusView=z.infer<typeof CreatorJobStatusView>;
+export type CreatorJobProgress=z.infer<typeof CreatorJobProgress>;
+export type CreatorJobStage=z.infer<typeof CreatorJobStage>;
+export type CreatorProgressProfile=z.infer<typeof CreatorProgressProfile>;
+export type CreatorProgressVideoCard=z.infer<typeof CreatorProgressVideoCard>;
+export type CreatorProgressReferenceIdentity=z.infer<typeof CreatorProgressReferenceIdentity>;
 export type PipelineReference=z.infer<typeof PipelineReference>;
 
 /** Trusted provider seam. Values are persisted by the lead runner, never public input. */
@@ -136,6 +221,8 @@ export interface CreatorProviderContext {
    * key is stable within the job. The guard reserves configured ceilings before I/O,
    * replays recorded successes and blocks ambiguous attempts. No provider retries. */
   call(key:string,provider:'scrapecreators'|'lightreel'|'openai',operation:'profile'|'feed'|'research'|'poll'|'video'|'generate',execute:()=>Promise<unknown>):Promise<unknown>;
+  /** Persist a validated public display snapshot. This never reserves provider allowance. */
+  checkpoint(key:string,stage:CreatorJobStage,progress:CreatorJobProgress):Promise<void>;
 }
 export interface CreatorPipelineProvider {
   scan(request:z.infer<typeof ProfileScanRequest>,context:CreatorProviderContext):Promise<z.infer<typeof CreatorAnalysis>>;

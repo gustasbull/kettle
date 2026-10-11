@@ -123,6 +123,12 @@ test('rejects lower revisions, contradictory same revision and terminal reactiva
   assert.match(f.notice()!,/older/);await f.tick(30);assert.equal(f.calls.length,0);
   f.controller.receiveResult(output('queued',4));assert.equal(f.reason(),'invalid');
 });
+test('same-revision progress contradictions fail closed while newer safe progress remains valid',t=>{
+ const f=setup(t),first=output('running',4,'scan');first.data.job.stage='reading_profile';
+ first.data.job.progress={kind:'scan',profile:null,videos:[],limitations:[]};f.launch(first);
+ const contradiction=structuredClone(first);contradiction.data.job.progress.limitations=['changed without revision'];
+ f.controller.receiveResult(contradiction);assert.equal(f.reason(),'invalid');
+});
 test('terminal cannot reactivate with a newer revision', t=>{
   const f=setup(t);f.launch(output('failed',3));f.controller.receiveResult(output('running',4));assert.equal(f.reason(),'invalid');
 });

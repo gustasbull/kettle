@@ -20,6 +20,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     window.startInput = {request_id:'00000000-0000-4000-8000-000000000622',source_url:'https://www.tiktok.com/@fixture'};
     const startJob = window.makeOutput('scan').data.job;
     startJob.state='queued'; startJob.revision=1; startJob.result=null; startJob.source_kind='profile';
+    startJob.stage='accepted'; startJob.progress={kind:'scan',profile:null,videos:[],limitations:[]};
     const createdAt=startJob.created_at, projectId=startJob.project_id;
     window.startOutput={ok:true,data:{
       project:{id:projectId,name:'@fixture creator work',project_type:'brand',current_version:1,created_at:createdAt,updated_at:createdAt,

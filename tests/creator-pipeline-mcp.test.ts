@@ -6,7 +6,7 @@ import { createOperations } from '../packages/application/operations.ts';
 import { createCreatorOperations, type CreatorRepository } from '../packages/application/creator-operations.ts';
 import { createPipelineOperations, runCreatorPipelineJob, canProcessCapturedDna, type PipelineRepository } from '../packages/application/creator-pipeline.ts';
 import { StoredCreatorAnalysis } from '../packages/contracts/creator-operations.ts';
-import { CreatorJobOutput, pipelineContracts, type CreatorJobView } from '../packages/contracts/creator-pipeline.ts';
+import { CreatorJobOutput, CreatorJobStatusOutput, pipelineContracts, type CreatorJobView } from '../packages/contracts/creator-pipeline.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
 import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipeline/provider.ts';
 import { providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
@@ -71,12 +71,23 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
+  const statusTool=listing.result.tools.find(t=>t.name==='get_creator_job_status');assert.ok(statusTool);
+  assert.deepEqual(statusTool.inputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.input),type:'object'});
+  assert.deepEqual(statusTool.outputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.output),type:'object'});
+  assert.deepEqual(statusTool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
+  assert.deepEqual(statusTool.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
+  assert.equal(statusTool._meta.ui.resourceUri,undefined);assert.match(statusTool.description,/provider-free/i);
   const saveScriptsTool=listing.result.tools.find(t=>t.name==='save_creator_scripts');
   assert.match(saveScriptsTool.description,/timed segments.*caption.*hashtags/i,
     'ChatGPT receives the persisted Studio fields needed by the Paper flow');
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
+  const dispatchBeforeStatus=dispatches.length,dbBeforeStatus=dbCalls.length;
+  const queuedStatus=CreatorJobStatusOutput.parse((await call('get_creator_job_status',{job_id:scan.id})).result.structuredContent);
+  assert.ok(queuedStatus.ok);assert.equal(queuedStatus.data.status.stage,'accepted');assert.equal(queuedStatus.data.status.terminal_result_available,false);
+  assert.deepEqual(Object.keys(queuedStatus.data.status).sort(),['created_at','id','kind','progress','revision','stage','state','terminal_result_available','updated_at']);
+  assert.equal(dispatches.length,dispatchBeforeStatus);assert.equal(f.http.length,0);assert.equal(dbCalls.length,dbBeforeStatus+1);
   await run(scan.id);scan=job(await call('render_creator_job',{job_id:scan.id}));assert.equal(scan.state,'succeeded');assert.equal(scan.result?.kind,'scan');
   assert.equal(f.http.length,3);assert.equal(new URL(f.http[0]!.url).hostname,'api.lightreel.ai');assert.equal(scan.result!.kind,'scan');if(scan.result!.kind!=='scan')throw Error('scan');
   const profileRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v1/tiktok/profile')!.url);
@@ -117,8 +128,12 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   assert.match(unauth.result._meta['mcp/www_authenticate'][0],/invalid_token/);
   const noScope=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},await identity.token({riff_permissions:['projects:read']}));
   assert.match(noScope.result._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);assert.equal(dbCalls.length,before);
+  const noRead=await call('get_creator_job_status',{job_id:saved.id},await identity.token({riff_permissions:['projects:write']}));
+  assert.match(noRead.result._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);assert.equal(dbCalls.length,before);
   const foreign=await identity.token({sub:'user-b'});
   assert.deepEqual((await call('render_creator_job',{job_id:saved.id},foreign)).result,(await call('render_creator_job',{job_id:crypto.randomUUID()},foreign)).result);
+  assert.deepEqual((await call('get_creator_job_status',{job_id:saved.id},foreign)).result,
+    (await call('get_creator_job_status',{job_id:crypto.randomUUID()},foreign)).result);
   const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);assert.match(foreignSave.result.content[0]!.text,/NOT_FOUND/);
   assert.equal(dispatches.length,dispatchCount);assert.equal(f.http.length,requests);
   const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v3.html'})).json() as any;

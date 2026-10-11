@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Id, Timestamp, result } from '../contracts/index.ts';
-import { CreatorJobView, CreatorJobOutput, pipelineContracts, RecommendationBatch, CreatorScriptSet,
+import { CreatorJobView, CreatorJobOutput, CreatorJobStatusView, CreatorJobStatusOutput, CreatorJobProgress,
+  CreatorJobStage, pipelineContracts, RecommendationBatch, CreatorScriptSet, emptyCreatorJobProgress,
   FilmingVariant, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider } from '../contracts/creator-pipeline.ts';
 import { CreatorAnalysis, CreatorUrl, ProfileScanRequest } from '../contracts/creator-profile.ts';
 import { StoredCreatorAnalysis } from '../contracts/creator-operations.ts';
@@ -9,12 +10,13 @@ import { projectCreatorDna, createCreatorIngestion, type CreatorRepository } fro
 import { observed, type CreatorLatencyObserver } from './creator-observability.ts';
 
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
-  | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'list_creator_dispatches';
+  | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'checkpoint_creator_job' | 'list_creator_dispatches';
 export interface PipelineRepository { call(operation: PipelineRepositoryOperation, accountId: string, input: unknown,
   telemetry?: CreatorLatencyObserver): Promise<unknown> }
 export const StoredCreatorJob = z.object({
   id:Id, account_id:Id, project_id:Id, request_id:Id, kind:z.enum(['scan','recommendations','scripts']),
   state:z.enum(['queued','running','succeeded','failed','needs_reconciliation']),revision:z.number().int().positive(),
+  stage:CreatorJobStage,progress:CreatorJobProgress,
   created_at:Timestamp,updated_at:Timestamp,input:z.record(z.string(),z.unknown()),captured:z.unknown(),
   result:CreatorJobView.shape.result,message:z.string().nullable(),
 });
@@ -41,9 +43,14 @@ export function publicCreatorJob(job:StoredCreatorJob):CreatorJobView {
   const capturedScan=job.kind==='scan'?CapturedCreatorScan.safeParse(job.captured):null;
   return CreatorJobView.parse({id:job.id,project_id:job.project_id,kind:job.kind,state:job.state,
     ...(capturedScan?.success?{source_kind:capturedScan.data.seed_url?'video':'profile'}:{}),
-    revision:job.revision,created_at:job.created_at,updated_at:job.updated_at,result:job.result,
+    revision:job.revision,stage:job.stage,progress:job.progress,created_at:job.created_at,updated_at:job.updated_at,result:job.result,
     message:job.state==='needs_reconciliation'?'A provider request needs review before another attempt. No automatic resubmission.':
       job.state==='failed'?'This job could not complete. Check the research allowance and source permissions before starting a new request.':null});
+}
+export function publicCreatorJobStatus(job:StoredCreatorJob):CreatorJobStatusView {
+  return CreatorJobStatusView.parse({id:job.id,kind:job.kind,state:job.state,stage:job.stage,revision:job.revision,
+    created_at:job.created_at,updated_at:job.updated_at,progress:job.progress,
+    terminal_result_available:job.state==='succeeded'&&job.result?.kind===job.kind});
 }
 export function createPipelineOperations(verifier:IdentityVerifier, repository:PipelineRepository,
   schedule:CreatorDispatchScheduler,isEnabled:(operation:PipelineOperation)=>boolean=()=>true,
@@ -57,21 +64,30 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
     const parsed=contract.input.safeParse(raw);if(!parsed.success)return failure('VALIDATION_ERROR');
     const operationTelemetry=telemetry?.scope?.('request_id' in parsed.data
       ? {request_id:parsed.data.request_id} : {job_id:parsed.data.job_id})??telemetry;
-    if(operation!=='get_creator_job'&&!isEnabled(operation)){const unavailable=failure('UNAVAILABLE');unavailable.error.message='Creator research is not enabled yet. Provider configuration or a test allocation is still required.';return unavailable;}
+    if(!contract.readOnly&&!isEnabled(operation)){const unavailable=failure('UNAVAILABLE');unavailable.error.message='Creator research is not enabled yet. Provider configuration or a test allocation is still required.';return unavailable;}
     try {
+      if(operation==='get_creator_job_status'){
+        if(!('job_id' in parsed.data))return failure('VALIDATION_ERROR');
+        const response=CreatorJobStatusOutput.parse(await observed(operationTelemetry,
+          {stage:'application_operation',clock:'monotonic',operation:'read'},
+          ()=>repository.call(operation,identity.account_id,parsed.data,operationTelemetry)));
+        if(!response.ok)return failure(response.error.code);
+        if(response.data.status.id!==parsed.data.job_id)return failure('UNAVAILABLE');
+        return response;
+      }
       const response=StoredCreatorJobOutput.parse(await observed(operationTelemetry,
-        {stage:'application_operation',clock:'monotonic',operation:operation==='get_creator_job'?'read':operation==='save_creator_scripts'?'persist':'start'},
+        {stage:'application_operation',clock:'monotonic',operation:contract.readOnly?'read':operation==='save_creator_scripts'?'persist':'start'},
         ()=>repository.call(operation,identity.account_id,parsed.data,operationTelemetry)));
       if(!response.ok)return failure(response.error.code);
       const job=response.data.job;
       if(job.account_id!==identity.account_id || ('job_id' in parsed.data && job.id!==parsed.data.job_id)
         || ('project_id' in parsed.data && job.project_id!==parsed.data.project_id)
         || ('request_id' in parsed.data && job.request_id!==parsed.data.request_id))return failure('UNAVAILABLE');
-      if(operation!=='get_creator_job'&&job.kind!==(operation==='save_creator_scripts'?'scripts':operation.replace('start_creator_','')))return failure('UNAVAILABLE');
+      if(!contract.readOnly&&job.kind!==(operation==='save_creator_scripts'?'scripts':operation.replace('start_creator_','')))return failure('UNAVAILABLE');
       const publicOutput=CreatorJobOutput.parse({ok:true,data:{job:publicCreatorJob(job)}});
       const jobTelemetry=operationTelemetry?.scope?.({job_id:job.id})??operationTelemetry;
       // Intent is already durable. A dispatch gap is reconciled by the scheduled outbox.
-      if(operation!=='get_creator_job'&&job.state==='queued')try{schedule(job.id,job.account_id,jobTelemetry);}catch{/* durable queued intent */}
+      if(!contract.readOnly&&job.state==='queued')try{schedule(job.id,job.account_id,jobTelemetry);}catch{/* durable queued intent */}
       return publicOutput;
     }catch{return failure('UNAVAILABLE');}
   }};
@@ -99,7 +115,25 @@ export type AttemptCeilings = Record<'scrapecreators'|'lightreel'|'openai',numbe
 export type DurableStep = <T>(name:string,run:()=>Promise<T>)=>Promise<T>;
 export function createGuardedProviderContext(repository:PipelineRepository,job:StoredCreatorJob,
   ceilings:AttemptCeilings, durableStep:DurableStep, telemetry?:CreatorLatencyObserver):CreatorProviderContext {
+  let revision=job.revision;
   return {now:()=>new Date().toISOString(),newId:()=>crypto.randomUUID(),
+    async checkpoint(key,stage,rawProgress){
+      if(!/^[a-z0-9][a-z0-9:_-]{0,199}$/.test(key))throw new PipelineRunError('failed');
+      const progress=CreatorJobProgress.parse(rawProgress);
+      const itemCount=progress.kind==='scan'?progress.videos.length:
+        progress.kind==='recommendations'?progress.references.length:0;
+      const saved=await durableStep(`checkpoint:${key}`,()=>observed(telemetry,
+        {stage:'checkpoint_persistence',clock:'monotonic',operation:'persist',item_count:itemCount},
+        ()=>repository.call('checkpoint_creator_job',job.account_id,{job_id:job.id,key,expected_revision:revision,stage,progress})));
+      const parsed=z.strictObject({ok:z.literal(true),data:z.strictObject({status:z.enum(['stored','replay']),
+        revision:z.number().int().positive(),checkpoint:z.strictObject({key:z.string(),stage:CreatorJobStage,
+          progress:CreatorJobProgress,revision:z.number().int().positive(),created_at:Timestamp})})}).safeParse(saved);
+      if(!parsed.success||parsed.data.data.checkpoint.key!==key||parsed.data.data.checkpoint.stage!==stage||
+        JSON.stringify(parsed.data.data.checkpoint.progress)!==JSON.stringify(progress)||
+        parsed.data.data.revision<revision||parsed.data.data.checkpoint.revision>parsed.data.data.revision)
+        throw new PipelineRunError('failed');
+      revision=parsed.data.data.revision;
+    },
     async call(key,provider,operation,execute) {
       if(!/^[\w:-]{1,200}$/.test(key)||!Number.isSafeInteger(ceilings[provider])||ceilings[provider]<0)throw new PipelineRunError('failed');
       // One provider request per step. Database reservation is authoritative even if
@@ -171,6 +205,8 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
         if(!idea||batch.dna_id!==dna.dna_id||batch.dna_version!==dna.version)throw new PipelineRunError('failed');
         const references=idea.reference_ids.map(referenceId=>batch.references.find(reference=>reference.id===referenceId));
         if(references.some(reference=>reference===undefined))throw new PipelineRunError('failed');
+        const scriptProgress=emptyCreatorJobProgress('scripts');
+        await context.checkpoint('script:generate:start','building_analysis',scriptProgress);
         const scripts=CreatorScriptSet.parse(captured.variants
           ? await durableStep('save-chat-draft',async()=>({id:crypto.randomUUID(),batch_id:batch.id,idea_id:idea.id,dna_id:dna.dna_id,dna_version:dna.version,version:1,created_at:new Date().toISOString(),
               variants:captured.variants!.map(v=>({...v,id:crypto.randomUUID()})),idea,references,contains_fixture_data:false,
@@ -179,6 +215,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
         if(scripts.batch_id!==batch.id||scripts.idea_id!==idea.id||scripts.dna_id!==dna.dna_id||scripts.dna_version!==dna.version
           ||scripts.contains_fixture_data||scripts.variants.some(v=>v.reference_ids.some(id=>!idea.reference_ids.includes(id)))
           ||JSON.stringify(scripts.idea)!==JSON.stringify(idea)||JSON.stringify(scripts.references)!==JSON.stringify(references))throw new PipelineRunError('failed');
+        await context.checkpoint('script:save','saving',scriptProgress);
         output={kind:'scripts',scripts};
       }
     }

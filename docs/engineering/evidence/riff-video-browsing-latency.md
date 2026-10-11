@@ -23,9 +23,13 @@ this record.
   allowing the Workflow's job scope to join the chain. URLs, handles,
   captions, provider bodies, exception text, headers, tokens, credentials,
   email, account IDs, issuer/subject, and arbitrary objects cannot be emitted.
-- Checkpoint persistence is not implemented in the current job contract. The
-  `checkpoint_persistence` stage is reserved in the reusable allowlist; no
-  checkpoint event is claimed until Task 4 adds real persistence.
+- Checkpoint persistence is implemented in the current job contract. Local
+  fixture tests exercise the real version-checked repository boundary and emit
+  `checkpoint_persistence` only for durable progress writes, with the operation
+  label, monotonic duration, job correlation and bounded item count. The same
+  tests reject content fields and verify that checkpoint failures do not become
+  provider attempts. This is deterministic local evidence only; it does not
+  claim a hosted checkpoint latency or provider completion.
 
 Telemetry is operational logging only and is never copied into MCP content,
 structured content, public job views, or panel props.

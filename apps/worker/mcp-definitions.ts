@@ -132,6 +132,7 @@ const PIPELINE_DESCRIPTIONS = Object.freeze({
   start_creator_scripts: 'Backend API generation is disabled for the current trial. Use save_creator_scripts with variants drafted in this conversation. When enabled: generate two or three filming-script variants for the user-selected idea from an existing recommendation batch. Use its exact batch_id and idea_id; binds the original DNA version. Can consume model credits and requires a research allowance. Saves the result as a durable job. Never generate merely to refresh or reopen a card.',
   save_creator_scripts: 'Save two or three filming variants drafted in this ChatGPT conversation for a user-selected Riff idea. First read the successful recommendation job and its captured DNA. Draft the hook, opening visual, script, shots, B-roll, on-screen text, showcase timing, CTA, estimated duration and pacing. Also provide timed segments for hook, main_content and cta with start/end seconds and filming directions, plus a platform caption and hashtags. Use only the selected idea reference IDs. Labels: Reference-led, Creator Fit, Experimental (two or three distinct labels). Pass batch_id, idea_id, variants and a new request_id; exact retries reuse that ID. Riff validates lineage and saves a durable script job without calling an external model or spending credits. Call render_creator_job with returned job_id to reopen.',
   get_creator_job: 'Read an existing creator scan, recommendation or script job by job_id, including its saved result. Does not call providers, spend credits, start or retry work. Preserve job_id to reopen in a later conversation.',
+  get_creator_job_status: 'Read compact persisted progress for an existing creator job by job_id. Provider-free and read-only: it never dispatches, calls providers, reserves allowance, starts or retries work.',
 });
 
 export const PIPELINE_TOOLS = Object.freeze([
@@ -139,7 +140,8 @@ export const PIPELINE_TOOLS = Object.freeze([
     name, operation: name as keyof typeof pipelineContracts,
     title: name === 'start_creator_scan' ? 'Analyze creator video'
       : name === 'start_creator_recommendations' ? 'Discover video ideas'
-        : name === 'save_creator_scripts' ? 'Save filming scripts' : 'Read creator job',
+        : name === 'save_creator_scripts' ? 'Save filming scripts'
+          : name === 'get_creator_job_status' ? 'Read creator job progress' : 'Read creator job',
     ui: undefined as { resourceUri: string } | undefined,
   })),
   { name: 'render_creator_job', title: 'Show creator work', operation: 'get_creator_job' as const,
@@ -220,7 +222,8 @@ const outputSchema = (schema: z.ZodType) =>
   ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
 const descriptorFor = (tool: typeof PRODUCT_TOOLS[number] | typeof CREATOR_TOOLS[number]
   | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number]): AuthTool => {
-  const output = publishedOutputSchema(tool.contract.output);
+  const output = tool.operation==='get_creator_job_status'
+    ? outputSchema(tool.contract.output) : publishedOutputSchema(tool.contract.output);
   return deepFreezePlain({
     name: tool.name, title: tool.title, description: tool.description,
     inputSchema: inputSchema(tool.contract.input), ...(output ? { outputSchema: output } : {}),

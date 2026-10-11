@@ -10,9 +10,16 @@ export function fakeGuard() {
   const successes = new Map<string, unknown>();
   const started = new Set<string>();
   const calls: { key: string; provider: string; operation: string }[] = [];
+  const checkpointValues = new Map<string,string>();
+  const checkpoints: {key:string;stage:string;progress:unknown}[]=[];
   const context: CreatorProviderContext = {
     now: () => '2026-10-09T12:00:00.000Z',
     newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12,'0')}`,
+    async checkpoint(key,stage,progress){
+      const value=JSON.stringify({stage,progress}),existing=checkpointValues.get(key);
+      if(existing!==undefined){if(existing!==value)throw new Error('Synthetic checkpoint conflict');return;}
+      checkpointValues.set(key,value);checkpoints.push({key,stage,progress:structuredClone(progress)});
+    },
     async call(key, provider, operation, execute) {
       if (successes.has(key)) return structuredClone(successes.get(key));
       if (started.has(key)) throw new Error('Synthetic guard: reconciliation required');
@@ -21,7 +28,7 @@ export function fakeGuard() {
       successes.set(key, structuredClone(result)); return result;
     },
   };
-  return { context, calls, successes };
+  return { context, calls, successes, checkpoints };
 }
 export function providerHttpFixture() {
   const input = normalizedFixtureInput();

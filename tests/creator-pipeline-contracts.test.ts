@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReference } from '../packages/contracts/creator-pipeline.ts';
+import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReference,
+  CreatorJobProgress, CreatorJobStatusView, CreatorJobStage } from '../packages/contracts/creator-pipeline.ts';
 import { recommendationBatchFixture, creatorScriptsFixture, creatorJobFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 test('pipeline contracts retain reference lineage and fictional origin without padding',()=>{
  const batch=recommendationBatchFixture(); assert.equal(batch.ideas.length,1);
@@ -69,5 +70,48 @@ test('job status cannot expose premature, mismatched or cross-project scan resul
  assert.ok(!CreatorJobView.safeParse({...job, result: null}).success);
  assert.ok(!CreatorJobView.safeParse({...job, kind: 'scripts'}).success);
  assert.ok(!CreatorJobView.safeParse({...job, project_id: job.id}).success);
- assert.ok(CreatorJobView.safeParse({...job, state: 'queued', result: null}).success);
+ assert.ok(CreatorJobView.safeParse({...job, state: 'queued', stage:'accepted',
+  progress:{kind:'scan',profile:null,videos:[],limitations:[]},result: null}).success);
+});
+
+const provenance={origin:'live' as const,retrieved_at:'2026-10-11T08:00:00.000Z',source_observed_at:null,
+ permission_basis:'Public metadata display approved.',limitations:[]};
+const identity={platform:'tiktok' as const,native_id:'9000000000000000011',
+ url:'https://www.tiktok.com/@fixture/video/9000000000000000011',retrieved_at:provenance.retrieved_at,
+ origin:'live' as const,permission_basis:provenance.permission_basis,limitations:[]};
+const card={platform:'tiktok' as const,native_id:identity.native_id,url:identity.url,caption:'Safe display caption',
+ published_at:null,duration_seconds:null,metrics:{views:1,likes:null,comments:null,shares:null},provenance};
+
+test('creator progress is a strict bounded display projection with ordered recommendation lineage',()=>{
+ assert.deepEqual(CreatorJobProgress.parse({kind:'scan',profile:null,videos:[],limitations:[]}),
+  {kind:'scan',profile:null,videos:[],limitations:[]});
+ assert.deepEqual(CreatorJobProgress.parse({kind:'recommendations',identities:[],references:[],limitations:[]}),
+  {kind:'recommendations',identities:[],references:[],limitations:[]});
+ assert.deepEqual(CreatorJobProgress.parse({kind:'scripts',limitations:[]}),{kind:'scripts',limitations:[]});
+ const recommended={kind:'recommendations' as const,identities:[identity],references:[card],limitations:[]};
+ assert.ok(CreatorJobProgress.safeParse(recommended).success);
+ for(const privateField of ['account_id','receipt','body','provider_credentials','allowance'])
+  assert.ok(!CreatorJobProgress.safeParse({...recommended,[privateField]:'secret'}).success,privateField);
+ assert.ok(!CreatorJobProgress.safeParse({...recommended,identities:[],references:[card]}).success);
+ assert.ok(!CreatorJobProgress.safeParse({...recommended,references:[{...card,native_id:'other'}]}).success);
+ assert.ok(!CreatorJobProgress.safeParse({...recommended,identities:Array.from({length:4},(_,i)=>({...identity,native_id:String(i),url:`https://www.tiktok.com/@fixture/video/${i}`}))}).success);
+ assert.ok(!CreatorJobProgress.safeParse({kind:'scan',profile:null,videos:Array.from({length:11},(_,i)=>({...card,native_id:String(i),url:`https://www.tiktok.com/@fixture/video/${i}`})),limitations:[]}).success);
+ assert.ok(!CreatorJobProgress.safeParse({...recommended,references:[{...card,caption:'x'.repeat(2001)}]}).success);
+ assert.ok(!CreatorJobProgress.safeParse({...recommended,references:[{...card,provenance:{...provenance,retrieved_at:undefined}}]}).success);
+});
+
+test('job stage and compact status reject unknown stages, private fields and terminal contradictions',()=>{
+ for(const stage of ['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','researching_formats','enriching_references','saving'])
+  assert.equal(CreatorJobStage.parse(stage),stage);
+ assert.ok(!CreatorJobStage.safeParse('downloading_media').success);
+ const job=creatorJobFixture('recommendations');
+ const status={id:job.id,kind:job.kind,state:job.state,stage:'saving',revision:job.revision,
+  created_at:job.created_at,updated_at:job.updated_at,progress:{kind:'recommendations',identities:[],references:[],limitations:[]},
+  terminal_result_available:true};
+ assert.ok(CreatorJobStatusView.safeParse(status).success);
+ for(const key of ['project_id','result','account_id','request_id','captured','receipt','message'])
+  assert.ok(!CreatorJobStatusView.safeParse({...status,[key]:'private'}).success,key);
+ assert.ok(!CreatorJobStatusView.safeParse({...status,state:'running',terminal_result_available:true}).success);
+ assert.ok(!CreatorJobStatusView.safeParse({...status,state:'succeeded',stage:'building_analysis'}).success);
+ assert.ok(!CreatorJobStatusView.safeParse({...status,kind:'scan'}).success);
 });

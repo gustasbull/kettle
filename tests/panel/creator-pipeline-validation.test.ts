@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { creatorJobFixture, recommendationBatchFixture } from '../../evals/creator-loop/pipeline-fixtures.ts';
 import { creatorFailure } from '../../packages/application/creator-operations.ts';
-import { CreatorJobOutput } from '../../packages/contracts/creator-pipeline.ts';
+import { CreatorJobOutput, emptyCreatorJobProgress } from '../../packages/contracts/creator-pipeline.ts';
 import { StartRiffCreatorOutput } from '../../packages/contracts/riff-creator.ts';
 import { creatorJobStructuredOutput, parseCreatorJobOutput, parseGetCreatorJobInput, parseStartRiffCreatorInput } from '../../apps/panel/creator-pipeline-validation.ts';
 
@@ -14,6 +14,7 @@ const invalid=(kind:'scan'|'recommendations'|'scripts',mutate:(job:any)=>void)=>
 
 function validStartOutput(kind:'profile'|'video'='profile') {
   const job=creatorJobFixture('scan');job.state='queued';job.revision=1;job.result=null;job.source_kind=kind;
+  job.stage='accepted';job.progress=emptyCreatorJobProgress('scan');
   const projectId=job.project_id,createdAt=job.created_at,handle='fixture';
   const profileUrl=`https://www.tiktok.com/@${handle}`;
   const videoUrl=kind==='video'?`${profileUrl}/video/9000000000000000011`:null;

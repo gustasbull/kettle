@@ -28,6 +28,7 @@ test('runtime factory composes verified identity, service storage, canonicalizat
       },
       job: { id: jobId, account_id: accountA, project_id: projectId, request_id: requestId,
         kind: 'scan', state: 'queued', revision: 1, created_at: timestamp, updated_at: timestamp,
+        stage: 'accepted', progress: { kind: 'scan', profile: null, videos: [], limitations: [] },
         input: {}, captured: {}, result: null, message: null },
       source: { platform: 'tiktok', kind: 'profile', handle: 'creator.one', canonical_url: sourceUrl,
         profile_url: sourceUrl, video_url: null },

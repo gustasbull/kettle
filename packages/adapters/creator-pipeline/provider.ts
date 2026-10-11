@@ -1,8 +1,10 @@
 import { topicalMatchingText } from '../creator-scan/topical-context.ts';
 import { z } from 'zod';
 import { CreatorDnaView } from '../../contracts/creator-operations.ts';
-import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview } from '../../contracts/creator-profile.ts';
-import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment,
+import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview,
+  type ProfileObservation, type VideoObservation } from '../../contracts/creator-profile.ts';
+import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment, CreatorJobProgress,
+  type CreatorProgressProfile, type CreatorProgressVideoCard,
   type CreatorPipelineProvider, type CreatorProviderContext } from '../../contracts/creator-pipeline.ts';
 import { buildGroundedCreatorDna } from '../creator-scan/dna.ts';
 import { characterizeFeed, characterizeProfile } from '../creator-scan/scrapecreators-characterization.ts';
@@ -49,6 +51,28 @@ export type CreatorPipelineAdapterOptions = {
   telemetry?: CreatorLatencyObserver;
 };
 const seedReviewCaveat = 'Supplied video review, not whole-profile DNA. Reported access is a Lightreel claim, not independently verified video evidence.';
+const truncate=(value:string|null,max:number)=>value===null?null:value.slice(0,max);
+const progressProvenance=(value:{origin:'fixture'|'live';retrieved_at:string;source_observed_at:string|null;
+  permission:{basis:string}})=>({origin:value.origin,retrieved_at:value.retrieved_at,
+  source_observed_at:value.source_observed_at,permission_basis:value.permission.basis.slice(0,1000),limitations:[]});
+const progressProfile=(value:ProfileObservation):CreatorProgressProfile=>({
+  platform:'tiktok',native_id:value.profile.native_id,url:value.canonical_url,handle:value.handle,
+  display_name:truncate(value.display_name,200),bio:truncate(value.bio,1000),follower_count:value.follower_count,
+  ...(value.avatar_url?{avatar_url:value.avatar_url}:{}),provenance:progressProvenance(value.provenance),
+});
+const progressVideo=(value:VideoObservation):CreatorProgressVideoCard=>({
+  platform:'tiktok',native_id:value.video.native_id,url:value.canonical_url,caption:truncate(value.caption,2000),
+  published_at:value.published_at,duration_seconds:value.duration_seconds,
+  ...(value.thumbnail_url?{thumbnail_url:value.thumbnail_url}:{}),metrics:{views:value.metrics.views,likes:value.metrics.likes,
+    comments:value.metrics.comments,shares:value.metrics.shares,...(value.metrics.saves!==undefined?{saves:value.metrics.saves}:{})},
+  provenance:progressProvenance(value.provenance),
+});
+const scanProgress=(scan:ReturnType<typeof normalizeLiveTikTokScan>):Extract<z.infer<typeof CreatorJobProgress>,{kind:'scan'}>=>{
+  const seen=new Set<string>(),videos=[] as CreatorProgressVideoCard[];
+  for(const observation of scan.video_observations){const key=`${observation.video.platform}:${observation.video.native_id}`;
+    if(seen.has(key))continue;seen.add(key);videos.push(progressVideo(observation));if(videos.length===10)break;}
+  return {kind:'scan',profile:scan.profile_observations[0]?progressProfile(scan.profile_observations[0]):null,videos,limitations:[]};
+};
 // Persisted legacy variants may omit these fields, while a new strict model
 // response must always make an explicit structured choice for Paper Studio.
 // Segment-level on-screen text remains available in the persisted contract,
@@ -139,8 +163,10 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       if (request.max_pages > 2 || request.max_videos > 10) throw new Error('Pilot scan exceeds ten videos/two pages');
       let seedReview: z.infer<typeof LightreelSeedReview> | undefined;
       let seedReceipt: z.infer<typeof receipt> | undefined;
+      let progress:Extract<z.infer<typeof CreatorJobProgress>,{kind:'scan'}>={kind:'scan',profile:null,videos:[],limitations:[]};
       if (seedUrl !== undefined) {
         if (!seedUrl.startsWith(request.supplied_url.replace(/\/$/,'') + '/video/')) throw new CreatorProviderError('permission');
+        await context.checkpoint('scan:seed:start','reviewing_video',progress);
         seedReceipt = await call(context, 'seed-review', 'lightreel', 'research', new URL('https://api.lightreel.ai/v1/chat'),
           seedReviewBody(seedUrl), body => JSON.stringify(readLightreelSeedReview(body, seedUrl)), timeouts.seedReview);
         // Revalidate durable replay too. No callbacks/history reads or retry/resubmission path.
@@ -153,6 +179,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             retrieved_at: seedReceipt.retrieved_at, source_observed_at: null, source_url: seedUrl,
             permission, modalities: ['metadata'] } });
       }
+      await context.checkpoint('scan:profile:start','reading_profile',progress);
       const profile = await call(context, 'profile', 'scrapecreators', 'profile',
         profileRequest(request.supplied_url, cacheMaxAge.profile), undefined,
         body => {
@@ -164,6 +191,9 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       if (parsed.kind !== 'available' || parsed.user.uniqueId.toLowerCase() !== parseTikTokUrl(request.supplied_url).handle.toLowerCase()) {
         throw new CreatorProviderError('unavailable');
       }
+      progress=scanProgress(normalizeLiveTikTokScan({id:context.newId(),created_at:profile.retrieved_at,request,
+        profileAttempt:profile,feedAttempts:[],latency_ms:profile.latency_ms,permission},context.newId));
+      await context.checkpoint('scan:profile','reading_posts',progress);
       const pages: (ScanReceipt & { requestedCursor: string | null })[] = [];
       let cursor: string | null = null;
       for (let page = 0; page < request.max_pages; page++) {
@@ -174,10 +204,15 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const replay = characterizeFeed({ profileBody: profile.body, attempts: pages,
           maxPages: request.max_pages, maxVideos: request.max_videos });
         if (replay.pages.length !== pages.length) throw new CreatorProviderError('malformed');
+        const nextProgress=scanProgress(normalizeLiveTikTokScan({id:context.newId(),created_at:profile.retrieved_at,request,
+          profileAttempt:profile,feedAttempts:pages,latency_ms:profile.latency_ms+pages.reduce((n,p)=>n+p.latency_ms,0),permission},context.newId));
+        if(nextProgress.videos.length>progress.videos.length){progress=nextProgress;
+          await context.checkpoint(`scan:feed:${page}`,'reading_posts',progress);}
         // A finite input replay ends here only when a valid next page can be requested.
         if (replay.stop !== 'replay_ended') break;
         cursor = replay.nextCursor;
       }
+      await context.checkpoint('scan:analysis','building_analysis',progress);
       const newId = await receiptIds(profile.id, 300);
       const scan = normalizeLiveTikTokScan({ id: newId(), created_at: profile.retrieved_at, request,
         profileAttempt: profile, feedAttempts: pages, permission,
@@ -188,11 +223,15 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
           credits: null, usd: null, usd_basis: 'unknown', conversion_basis: null });
         scan.cost.latency_ms += seedReceipt.latency_ms;
       }
-      return CreatorAnalysis.parse({ ...buildGroundedCreatorDna(scan, { id: newId(), created_at: profile.retrieved_at }, newId),
+      const analysis=CreatorAnalysis.parse({ ...buildGroundedCreatorDna(scan, { id: newId(), created_at: profile.retrieved_at }, newId),
         ...(seedReview ? { seed_review: seedReview } : {}) });
+      await context.checkpoint('scan:save','saving',progress);
+      return analysis;
     },
     async recommend(raw, context) {
       const dna = checkDna(raw);
+      await context.checkpoint('recommend:research:start','researching_formats',
+        {kind:'recommendations',identities:[],references:[],limitations:[]});
       const query = researchBody({ profile: dna.profile, dna_version: dna.version,
         claims: dna.claims, limitations: dna.limitations, ...(dna.seed_review ? { supplied_video_review: dna.seed_review } : {}) });
       const research = await call(context, 'research', 'lightreel', 'research', new URL('https://api.lightreel.ai/v1/chat'), query,
@@ -206,6 +245,11 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         result = researchResult(history.body);
       }
       if (result.urls === null) throw new CreatorProviderError('unavailable');
+      const identities=result.urls.map(url=>{const parsed=parseTikTokUrl(url);return {platform:'tiktok' as const,
+        native_id:parsed.videoId!,url,retrieved_at:research.retrieved_at,origin:'live' as const,
+        permission_basis:permission.basis.slice(0,1000),limitations:[]};});
+      let recommendationProgress:z.infer<typeof CreatorJobProgress>={kind:'recommendations',identities,references:[],limitations:[]};
+      await context.checkpoint('recommend:identities','enriching_references',recommendationProgress);
       const references: RecommendationBatch['references'] = [];
       const observedViews = dna.evidence.flatMap(e => e.metrics?.views !== null && e.metrics?.views !== undefined && e.metrics.views > 0
         ? [e.metrics.views] : []).sort((a, b) => a - b);
@@ -241,8 +285,12 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             'Views are an observation, not evidence of causal success or expected results.',
             ...(multiplier !== undefined ? [`View multiplier compares observed views with the median of ${observedViews.length} displayed profile observation${observedViews.length === 1 ? '' : 's'}; it is not a performance prediction.`] : []),
             o.provenance.source_observed_at ? `Provider cache observation time: ${o.provenance.source_observed_at}.` : 'Source observation time is unknown; retrieval time does not establish metric freshness.'] });
+        recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(o)]};
+        await context.checkpoint(`recommend:detail:${nativeId}`,'enriching_references',recommendationProgress);
       }
-      return buildRecommendations(dna, references, { newId: await receiptIds(research.id, 5), now: () => research.retrieved_at });
+      const batch=buildRecommendations(dna, references, { newId: await receiptIds(research.id, 5), now: () => research.retrieved_at });
+      await context.checkpoint('recommend:save','saving',recommendationProgress);
+      return batch;
     },
     async generate(input, context) {
       // Missing backend access must fail before any durable reservation or HTTP request.
