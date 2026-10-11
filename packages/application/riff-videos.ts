@@ -71,7 +71,8 @@ export type CatalogJob={id:string;account_id:string;kind:'scan'|'recommendations
 export function riffVideoCatalogInput(job:CatalogJob,checkpointKey:string,role:z.infer<typeof RiffVideoRole>,observations:readonly TrustedCatalogObservation[]){
   Id.parse(job.id);Id.parse(job.account_id);
   const roleMatches=(job.kind==='scan'&&role==='own_profile'&&/^scan:feed:\d+$/.test(checkpointKey))||
-    (job.kind==='recommendations'&&role==='discovered_reference'&&/^recommend:detail:[^:]{1,200}$/.test(checkpointKey));
+    (job.kind==='recommendations'&&role==='discovered_reference'&&observations.length===1&&
+      checkpointKey===`recommend:detail:${observations[0]?.native_id}`);
   if(!roleMatches)throw new Error('Invalid catalog source');
   return TrustedRiffVideoIngest.parse({job_id:job.id,checkpoint_key:checkpointKey,role,observations:[...observations]});
 }

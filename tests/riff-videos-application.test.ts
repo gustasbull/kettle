@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRiffVideoOperations, encodeRiffVideoCursor, type RiffVideoRepository } from '../packages/application/riff-videos.ts';
+import { createRiffVideoOperations, encodeRiffVideoCursor, riffVideoCatalogInput,
+  type RiffVideoRepository } from '../packages/application/riff-videos.ts';
 import { failure, type IdentityVerifier } from '../packages/application/operations.ts';
+import { TrustedCatalogObservation } from '../packages/contracts/riff-videos.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const account=id(1),project=id(2),observation=id(3);
@@ -29,4 +31,13 @@ test('cursor mismatch and malformed storage fail closed without exposing owner d
   const h=harness();assert.deepEqual(await h.operations.execute('list_riff_videos','token',{cursor}),failure('VALIDATION_ERROR'));assert.equal(h.calls.length,0);
   const bad=harness(undefined,{ok:true,data:{cards:[{...card,account_id:account}],next_position:null}});
   assert.deepEqual(await bad.operations.execute('list_riff_videos','token',{}),failure('UNAVAILABLE'));
+});
+
+test('recommendation catalog input binds its detail key to the one admitted native video',()=>{
+  const trusted=TrustedCatalogObservation.parse(Object.fromEntries(
+    Object.entries(card).filter(([key])=>!['observed_at','role'].includes(key))));
+  const job={id:id(4),account_id:account,kind:'recommendations' as const};
+  assert.throws(()=>riffVideoCatalogInput(job,'recommend:detail:different','discovered_reference',[trusted]),
+    /Invalid catalog source/);
+  assert.doesNotThrow(()=>riffVideoCatalogInput(job,'recommend:detail:9001','discovered_reference',[trusted]));
 });

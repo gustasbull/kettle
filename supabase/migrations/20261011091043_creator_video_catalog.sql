@@ -86,7 +86,8 @@ end; $$;
 
 create function public.kettle_ingest_riff_videos(p_account_id uuid,p_input jsonb) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare j public.creator_jobs%rowtype; stored public.riff_video_catalog_ingests%rowtype; item jsonb;
+declare j public.creator_jobs%rowtype; checkpoint_row public.creator_job_checkpoints%rowtype;
+ stored public.riff_video_catalog_ingests%rowtype; item jsonb;
  identity_id uuid; checkpoint text:=p_input->>'checkpoint_key'; catalog_role text:=p_input->>'role';
  normalized jsonb; receipt jsonb; ids jsonb; inserted_at timestamptz:=now();
 begin
@@ -107,8 +108,10 @@ begin
   return stored.output;
  end if;
  if j.state<>'running' then return public.kettle_error('FORBIDDEN');end if;
- if not exists(select 1 from public.creator_job_checkpoints cp where cp.job_id=j.id and cp.key=checkpoint
-   and cp.stage=case when j.kind='scan' then 'reading_posts' when j.kind='recommendations' then 'enriching_references' else '' end)
+ select cp.* into checkpoint_row from public.creator_job_checkpoints cp where cp.job_id=j.id and cp.key=checkpoint;
+ if not found then return public.kettle_error('VALIDATION_ERROR');end if;
+ if checkpoint_row.stage is distinct from (case when j.kind='scan' then 'reading_posts'
+   when j.kind='recommendations' then 'enriching_references' else '' end)
   then return public.kettle_error('VALIDATION_ERROR');end if;
  if not ((j.kind='scan' and catalog_role='own_profile' and checkpoint~'^scan:feed:[0-9]+$')
   or (j.kind='recommendations' and catalog_role='discovered_reference' and checkpoint~'^recommend:detail:[^:]{1,200}$'))
@@ -119,6 +122,18 @@ begin
  if exists(select 1 from jsonb_array_elements(p_input->'observations') value where not public.kettle_riff_video_observation_valid(value))
   or (select count(*) from jsonb_array_elements(p_input->'observations'))<>(select count(distinct value->>'id') from jsonb_array_elements(p_input->'observations') value)
   or (select count(*) from jsonb_array_elements(p_input->'observations'))<>(select count(distinct (value->>'platform',value->>'native_id')) from jsonb_array_elements(p_input->'observations') value)
+  then return public.kettle_error('VALIDATION_ERROR');end if;
+ if j.kind='scan' and exists(
+   select 1 from jsonb_array_elements(p_input->'observations') observation
+   where not exists(select 1 from jsonb_array_elements(checkpoint_row.progress->'videos') video
+    where (video->>'platform',video->>'native_id',video->>'url') is not distinct from
+      (observation->>'platform',observation->>'native_id',observation->>'canonical_url')))
+  then return public.kettle_error('VALIDATION_ERROR');end if;
+ if j.kind='recommendations' and (jsonb_array_length(checkpoint_row.progress->'references')=0 or
+   (checkpoint_row.progress->'references'->(jsonb_array_length(checkpoint_row.progress->'references')-1)->>'platform',
+    checkpoint_row.progress->'references'->(jsonb_array_length(checkpoint_row.progress->'references')-1)->>'native_id',
+    checkpoint_row.progress->'references'->(jsonb_array_length(checkpoint_row.progress->'references')-1)->>'url') is distinct from
+   (p_input#>>'{observations,0,platform}',p_input#>>'{observations,0,native_id}',p_input#>>'{observations,0,canonical_url}'))
   then return public.kettle_error('VALIDATION_ERROR');end if;
  if exists(select 1 from jsonb_array_elements(p_input->'observations') value join public.riff_video_observations existing on existing.id=(value->>'id')::uuid)
   then return public.kettle_error('IDEMPOTENCY_CONFLICT');end if;
