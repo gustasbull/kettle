@@ -71,7 +71,7 @@ test('filtered DNA controller renders the real saved-view component without host
   });
   await t.test('auth loss clears the real DOM and an outstanding response cannot restore it', async () => {
     await page.evaluate(() => { window.pending = window.review.refresh(); window.review.receiveResult(window.failure('UNAUTHENTICATED')); });
-    assert.match(await root.textContent(), /Reconnect your Kettle account/);
+    assert.match(await root.textContent(), /Reconnect your Riff account/);
     assert.doesNotMatch(await root.textContent(), /Desk demonstrations|Saved version/);
     await page.evaluate(async () => { window.calls[1].resolve(window.makeResult(3)); await window.pending; });
     assert.equal(await page.evaluate(() => window.calls[1].signal.aborted), true);
@@ -81,7 +81,7 @@ test('filtered DNA controller renders the real saved-view component without host
     await page.evaluate(() => { window.mount(20); window.launch(); });
     await page.evaluate(() => window.review.refresh());
     assert.match(await root.textContent(), /Refresh timed out/);
-    assert.match(await root.textContent(), /Ask Kettle in chat to reopen/);
+    assert.match(await root.textContent(), /Ask Riff in chat to reopen/);
     assert.doesNotMatch(await root.textContent(), /Desk demonstrations/);
     await page.evaluate(async () => { const p = window.review.refresh(); window.calls[1].resolve(window.makeResult(2)); await p; });
     assert.match(await root.textContent(), /Saved version 2/);

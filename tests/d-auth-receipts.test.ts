@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { createJwtVerifier, scopes } from '../packages/auth/index.ts';
+import { createMcpJwtVerifier, internalPermissions } from '../packages/auth/index.ts';
 import { createOperations, failure, type ProjectRepository } from '../packages/application/operations.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
 import { config } from './auth-fixtures.ts';
@@ -13,7 +13,7 @@ import { createInput } from './fixtures.ts';
 // These cases prove neither hosted provider revocation nor forthcoming D operations.
 async function harness() {
   const db = new PGlite();
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const file of (await readdir('supabase/migrations')).filter(f => f.endsWith('.sql')).sort()) {
     await db.exec(await readFile(`supabase/migrations/${file}`, 'utf8'));
   }
@@ -22,9 +22,10 @@ async function harness() {
   const issued = Math.floor(Date.now() / 1000) - 10;
   const token = (sub: string, claims: Record<string, unknown> = {}) => new SignJWT({
     sub, iss: config.issuer, aud: config.resource, iat: issued, exp: issued + 300,
-    scope: scopes.join(' '), ...claims,
+    role: 'authenticated', client_id: 'chatgpt-dcr-client', scope: 'openid offline_access',
+    riff_permissions: [...internalPermissions], ...claims,
   }).setProtectedHeader({ alg: 'RS256', kid: 'd-auth' }).sign(privateKey);
-  const verifier = createJwtVerifier(config, (issuer, subject, iat) => db.transaction(async tx => {
+  const verifier = createMcpJwtVerifier(config, (issuer, subject, iat) => db.transaction(async tx => {
     await tx.exec('set local role service_role');
     return (await tx.query<{ id: string | null }>('select public.kettle_resolve_identity($1,$2,$3) as id', [issuer, subject, iat])).rows[0]!.id;
   }), keys);
@@ -56,7 +57,7 @@ test('receipt replay rechecks expiry, scope and SQL identity cutoff/block before
   const calls = h.calls();
   for (const [credential, code] of [
     [await h.token('fictional-a', { exp: h.issued + 1 }), 'UNAUTHENTICATED'],
-    [await h.token('fictional-a', { scope: 'account:read projects:read' }), 'FORBIDDEN'],
+    [await h.token('fictional-a', { riff_permissions: ['account:read', 'projects:read'] }), 'FORBIDDEN'],
   ] as const) {
     assert.deepEqual(await h.ops.execute('save_project', credential, input), failure(code));
     assert.equal(h.calls(), calls, 'even an exact successful receipt replay must reauthorize');

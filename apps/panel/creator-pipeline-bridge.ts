@@ -1,4 +1,8 @@
-import { App, PostMessageTransport, applyDocumentTheme, type McpUiHostContext } from '@modelcontextprotocol/ext-apps';
+import {
+  App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
+  type McpUiHostContext,
+} from '@modelcontextprotocol/ext-apps';
+import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 
@@ -8,10 +12,11 @@ const WAIT_MS = 10_000;
 export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPipelineLimits = {}) {
   const timeoutMs = limits.timeoutMs ?? WAIT_MS;
   const app = new App({ name: 'kettle-creator-pipeline', version: '1.0.0' },
-    { availableDisplayModes: ['inline'] }, { autoResize: false });
+    { availableDisplayModes: ['inline', 'fullscreen'] }, { autoResize: false });
+  const extensions = new OpenAIExtensions(app);
   const doc = root.ownerDocument;
   const host = doc.createElement('section');
-  host.setAttribute('aria-label', 'Kettle creator job');
+  host.setAttribute('aria-label', 'Riff creator job');
   host.style.cssText = 'font-family:system-ui,sans-serif;color:inherit;line-height:1.5';
   const message = doc.createElement('p');
   message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
@@ -29,15 +34,51 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     if (hadFocus) message.focus({ preventScroll: true });
   }
   const messages = {
-    reauthorize: 'Reconnect your Kettle account through ChatGPT, then reopen this job.',
-    unavailable: 'This creator job is unavailable. Ask Kettle in chat to reopen it.',
-    invalid: 'Kettle returned invalid or mismatched job details. Reopen this job in chat.',
-    connection: 'The connection could not load this creator job. Reopen it in chat or reconnect Kettle.',
+    reauthorize: 'Reconnect your Riff account through ChatGPT, then reopen this job.',
+    unavailable: 'This creator job is unavailable. Ask Riff in ChatGPT to reopen it.',
+    invalid: 'Riff returned invalid or mismatched job details. Reopen this job in ChatGPT.',
+    connection: 'The connection could not load this Riff creator job. Reopen it in ChatGPT or reconnect Riff.',
   } as const;
+  let bridgeReady = false;
+  const sendPrompt = async (prompt: string) => {
+    if (!bridgeReady || !app.getHostCapabilities()?.message?.text) return {
+      status: 'unsupported' as const, message: 'Continue with this request in the ChatGPT composer.',
+    };
+    try {
+      const params = { role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] };
+      const result = extensions.message
+        ? await extensions.message.send({ ...params, _meta: { 'openai/message': { target: 'active', send: true } } })
+        : await app.sendMessage(params);
+      return result.isError
+        ? { status: 'failed' as const, message: 'ChatGPT did not accept that handoff. Continue in the composer.' }
+        : { status: 'sent' as const, message: 'Sent to ChatGPT. Continue there when you are ready.' };
+    } catch {
+      return { status: 'failed' as const, message: 'The handoff failed. Continue in the ChatGPT composer.' };
+    }
+  };
+  const requestFullscreen = async () => {
+    const context = app.getHostContext();
+    if (!bridgeReady || !context?.availableDisplayModes?.includes('fullscreen')) return {
+      status: 'unsupported' as const, message: 'Fullscreen is unavailable in this ChatGPT version. Continue from the inline summary.',
+    };
+    try {
+      const result = await app.requestDisplayMode({ mode: 'fullscreen' });
+      view?.setDisplayMode(result.mode === 'fullscreen' ? 'fullscreen' : 'inline');
+      return result.mode === 'fullscreen'
+        ? { status: 'sent' as const, message: 'Opened fullscreen.' }
+        : { status: 'unsupported' as const, message: 'ChatGPT kept this result inline.' };
+    } catch {
+      return { status: 'failed' as const, message: 'Fullscreen could not open. Continue from the inline summary.' };
+    }
+  };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
     job(job, status) {
-      view ??= mountCreatorPipeline(card); view.render(job);
+      view ??= mountCreatorPipeline(card, {
+        displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
+        sendPrompt, requestFullscreen,
+      });
+      view.render(job);
       message.textContent = status.notice ?? (status.refreshing ? 'Checking saved job status…' : '');
       refresh.hidden = !status.canRefresh; refresh.disabled = status.refreshing;
     },
@@ -50,11 +91,15 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const initialTimer = setTimeout(() => controller.connectionFailed(), timeoutMs);
   const applyContext = (context: McpUiHostContext | undefined) => {
     if (context?.theme) applyDocumentTheme(context.theme);
+    if (context?.styles?.variables) applyHostStyleVariables(context.styles.variables);
+    if (context?.styles?.css?.fonts) applyHostFonts(context.styles.css.fonts);
     if (context?.locale) document.documentElement.lang = context.locale;
-    // No host font CSS is injected: this card uses system fonts and no assets.
+    view?.setDisplayMode(context?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline');
+    if (context?.safeAreaInsets) for (const [name, value] of Object.entries(context.safeAreaInsets)) {
+      if (Number.isFinite(value)) document.documentElement.style.setProperty(`--riff-safe-${name}`, `${Math.max(0, value)}px`);
+    }
   };
   let disposed = false;
-  let bridgeReady = false;
   let resizeObserver: ResizeObserver | undefined;
   let resizeFrame: number | undefined;
   let lastSize = '';

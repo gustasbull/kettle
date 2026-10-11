@@ -1,4 +1,16 @@
-# Kettle Conductor Reference Pack
+# Riff engineering repository
+
+> **Current product source of truth:** [`PRODUCT.md`](PRODUCT.md) defines the
+> design-led **Riff** product direction and canonical creator-video happy path.
+> This Kettle pack remains historical engineering and product context where it
+> does not conflict with that specification or newer adopted decisions.
+
+The repository now includes the Riff ChatGPT plugin package, install-time setup
+skill, conversational welcome, fullscreen Home, and saved creator-job UI for
+Analysis, Discovery, and Studio. See the [panel guide](apps/panel/README.md) for
+local previews and [`plugins/riff`](plugins/riff) for the portable plugin bundle.
+Internal `kettle_*` names remain compatibility identifiers; they are not the
+display brand.
 
 ## Runnable engineering foundation
 
@@ -14,9 +26,9 @@ npm run dev
 npm run check
 ```
 
-The local MCP server exposes a harmless diagnostic only. Product authentication
-and hosted integration are the [next assignments](docs/engineering/assignments/A-auth-persistence.md).
-The original reference-pack content continues below.
+Run `npm run check` before pushing UI or MCP changes. The development MCP remains
+deployment-dependent; repository changes alone do not update the hosted Worker.
+The original historical reference-pack content continues below.
 
 Prepared 6 October 2026 for Gustas and the agents building Kettle.
 

@@ -16,6 +16,7 @@ test('Creator DNA resource is a static bundled MCP App with consistent empty-net
   const list = await client.listResources();
   assert.equal(list.resources.length,1);
   assert.equal(list.resources[0]!.uri,CREATOR_REVIEW_URI);
+  assert.equal(list.resources[0]!.title,'Riff Creator DNA review');
   assert.equal(list.resources[0]!.mimeType,CREATOR_REVIEW_MIME);
   assert.deepEqual(list.resources[0]!._meta,CREATOR_REVIEW_META);
   const result = await client.readResource({uri:CREATOR_REVIEW_URI});
@@ -27,6 +28,7 @@ test('Creator DNA resource is a static bundled MCP App with consistent empty-net
   assert.ok('text' in content);
   const html = content.text as string;
   assert.match(html,/id="root"/);
+  assert.match(html,/<title>Riff Creator DNA review<\/title>/);
   assert.match(html,/get_creator_dna/);
   assert.match(html,/kettle-creator-review/);
   assert.doesNotMatch(html,/<script[^>]+src=|StoredCreatorAnalysis|sourceMappingURL/);

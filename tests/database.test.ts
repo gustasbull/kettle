@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { createOperations, failure } from '../packages/application/operations.ts';
-import { SaveProjectOutput, GetProjectOutput, GetAccountStateOutput, type toolContracts } from '../packages/contracts/index.ts';
+import {
+  GetAccountStateOutput,
+  GetProjectOutput,
+  MarkRiffOnboardingSeenOutput,
+  SaveProjectOutput,
+  type toolContracts,
+} from '../packages/contracts/index.ts';
 import { accountA, accountB, createInput } from './fixtures.ts';
 
 const db = new PGlite();
 before(async () => {
   // Supabase supplies these roles. PGlite is PostgreSQL in WASM, not hosted Supabase.
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const file of (await readdir('supabase/migrations')).filter((f) => f.endsWith('.sql')).sort()) {
     await db.exec(await readFile(`supabase/migrations/${file}`, 'utf8'));
   }
@@ -27,6 +33,8 @@ test('identity provisioning is stable, issuer scoped, server only, and revocable
   });
   const id = await resolve('https://identity.example.com/', 'test-subject');
   assert.ok(id);
+  const provisioned = await db.query<{ display_name: string }>('select display_name from public.accounts where id=$1', [id]);
+  assert.equal(provisioned.rows[0]!.display_name, 'Riff member');
   assert.equal(await resolve('https://identity.example.com/', 'test-subject'), id);
   assert.notEqual(await resolve('https://other.example.com/', 'test-subject'), id);
   await db.query('update public.account_identities set tokens_valid_after=to_timestamp($1) where account_id=$2', [issued, id]);
@@ -60,9 +68,68 @@ test('migrations and seed apply; account state reports unconfigured billing hone
   const response = GetAccountStateOutput.parse(await ops.execute('get_account_state', 'fixture-a', {}));
   assert.ok(response.ok);
   assert.equal(response.data.account.display_name, 'Fictional Lamp Studio');
+  assert.equal(response.data.account.onboarding_seen_at, null);
   assert.equal(response.data.entitlements.status, 'not_configured');
   const rows = await db.query('select * from public.brief_versions');
   assert.equal(rows.rows.length, 1);
+});
+test('onboarding is marked once per internal account and replay returns the original timestamp', async () => {
+  const first = MarkRiffOnboardingSeenOutput.parse(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', {}));
+  assert.ok(first.ok);
+  const replay = MarkRiffOnboardingSeenOutput.parse(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', {}));
+  assert.deepEqual(replay, first);
+  const state = GetAccountStateOutput.parse(await ops.execute('get_account_state', 'fixture-a', {}));
+  assert.ok(state.ok);
+  assert.equal(state.data.account.onboarding_seen_at, first.data.onboarding_seen_at);
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', { replay: true }), failure('VALIDATION_ERROR'));
+});
+test('custom token hook binds OAuth tokens to canonical Riff while leaving website audience unchanged', async () => {
+  const requiredClaims = {
+    iss: 'https://fixture.supabase.co/auth/v1', aud: 'authenticated', exp: 1_800_000_000,
+    iat: 1_799_999_000, sub: crypto.randomUUID(), role: 'authenticated', aal: 'aal1',
+    session_id: crypto.randomUUID(), email: 'creator@example.com', phone: '', is_anonymous: false,
+  };
+  const invokeHook = (event: unknown) => db.transaction(async (tx) => {
+    await tx.exec('set local role supabase_auth_admin');
+    return (await tx.query<{ result: { claims: Record<string, unknown> } }>(
+      'select public.riff_custom_access_token_hook($1::jsonb) as result', [JSON.stringify(event)],
+    )).rows[0]!.result;
+  });
+  const issued = await invokeHook({
+    user_id: requiredClaims.sub, authentication_method: 'oauth_provider/authorization_code',
+    claims: { ...requiredClaims, client_id: 'oauth-client' },
+  });
+  assert.equal(issued.claims.aud, 'https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp');
+  assert.equal(issued.claims.client_id, 'oauth-client');
+  assert.deepEqual(issued.claims.riff_permissions, ['account:read', 'projects:read', 'projects:write']);
+  for (const [claim, value] of Object.entries(requiredClaims)) {
+    if (claim !== 'aud') assert.deepEqual(issued.claims[claim], value);
+  }
+
+  const refreshed = await invokeHook({
+    user_id: requiredClaims.sub, authentication_method: 'token_refresh',
+    claims: { ...requiredClaims, client_id: 'oauth-client' },
+  });
+  assert.equal(refreshed.claims.aud, 'https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp');
+  assert.deepEqual(refreshed.claims.riff_permissions, ['account:read', 'projects:read', 'projects:write']);
+
+  const website = await invokeHook({
+    user_id: requiredClaims.sub, authentication_method: 'password',
+    claims: { ...requiredClaims, aud: 'authenticated', riff_permissions: ['projects:write'] },
+  });
+  assert.equal(website.claims.aud, 'authenticated');
+  assert.equal('riff_permissions' in website.claims, false);
+});
+test('hook and onboarding RPC execution grants stay separated by server role', async () => {
+  const event = JSON.stringify({ claims: { client_id: 'fixture' } });
+  await assert.rejects(db.transaction(async (tx) => {
+    await tx.exec('set local role service_role');
+    await tx.query('select public.riff_custom_access_token_hook($1::jsonb)', [event]);
+  }), /permission denied/);
+  await assert.rejects(db.transaction(async (tx) => {
+    await tx.exec('set local role supabase_auth_admin');
+    await tx.query('select public.kettle_mark_riff_onboarding_seen($1::uuid,$2::jsonb)', [accountA, '{}']);
+  }), /permission denied/);
 });
 test('save, reopen, edit, duplicate and stale edit preserve immutable history', async () => {
   const input = createInput();

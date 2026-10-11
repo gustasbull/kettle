@@ -7,12 +7,13 @@ import { runInNewContext } from 'node:vm';
 // @ts-expect-error Build tooling is a Node ESM module, not part of the Worker.
 import { buildPanel } from '../scripts/build-panel.mjs';
 
-for (const kind of ['project', 'creator']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
+for (const kind of ['project', 'creator', 'riff-onboarding', 'riff-home']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'kettle-panel-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const name = kind === 'creator' ? 'creator-review' : 'project-review';
-  const bridge = kind === 'creator' ? 'creator-review-bridge.ts' : 'bridge.ts';
-  const symbol = kind === 'creator' ? 'creatorReviewScript' : 'projectReviewScript';
+  const name = kind === 'creator' ? 'creator-review' : kind === 'project' ? 'project-review' : kind;
+  const bridge = kind === 'creator' ? 'creator-review-bridge.ts' : kind === 'project' ? 'bridge.ts' : `${kind}-bridge.ts`;
+  const symbol = kind === 'creator' ? 'creatorReviewScript' : kind === 'project' ? 'projectReviewScript'
+    : kind === 'riff-onboarding' ? 'riffOnboardingScript' : 'riffHomeScript';
   const panel = join(root, 'apps/panel');
   const output = join(panel, `generated/${name}-bundle.ts`);
   await mkdir(join(panel, 'generated'), { recursive: true });
@@ -21,7 +22,9 @@ for (const kind of ['project', 'creator']) test(`${kind} panel build bundles com
   await assert.rejects(readFile(output));
   await writeFile(join(panel, bridge), `import { message } from './${name}'; globalThis.rendered = message;`);
   await assert.rejects(buildPanel(root, kind), /requires/);
-  await writeFile(join(panel, `${name}.ts`), 'export const message = "</script><script>untrusted</script>";');
+  const component = kind.startsWith('riff-') ? join(panel, name, 'index.ts') : join(panel, `${name}.ts`);
+  await mkdir(join(component, '..'), { recursive: true });
+  await writeFile(component, 'export const message = "</script><script>untrusted</script>";');
   assert.equal((await buildPanel(root, kind)).status, 'built');
   const source = await readFile(output, 'utf8');
   const literal = source.split(`export const ${symbol}: string = `)[1]!.trim().slice(0, -1);

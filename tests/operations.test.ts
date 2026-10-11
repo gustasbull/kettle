@@ -25,6 +25,24 @@ test('ownership comes from verifier and malformed inputs stop before storage', a
   assert.deepEqual(await ops.execute('save_project', 'fixture', createInput()), failure('NOT_FOUND'));
   assert.equal(calls, 1);
 });
+test('marking onboarding is an authenticated idempotent write routed with verified ownership', async () => {
+  let calls = 0;
+  const seenAt = '2026-10-10T00:01:00Z';
+  const ops = createOperations({ async verify() {
+    return { account_id: accountA, scopes: ['account:read'] };
+  } }, { async call(operation, accountId, input) {
+    calls++;
+    assert.equal(operation, 'mark_riff_onboarding_seen');
+    assert.equal(accountId, accountA);
+    assert.deepEqual(input, {});
+    return { ok: true, data: { onboarding_seen_at: seenAt } };
+  } });
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', {}), {
+    ok: true, data: { onboarding_seen_at: seenAt },
+  });
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', { account_id: accountA }), failure('VALIDATION_ERROR'));
+  assert.equal(calls, 1);
+});
 test('storage errors and invalid outputs are sanitized', async () => {
   for (const call of [async () => { throw new Error('secret connection string'); }, async () => ({ account_id: accountA })]) {
     const ops = createOperations({ async verify() { return { account_id: accountA, scopes: ['projects:read'] }; } }, { call });

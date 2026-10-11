@@ -20,7 +20,7 @@ test('saved DNA and scan cards separate Lightreel supplied-video review from pro
       const dna=CreatorDnaView.parse({...creatorDnaViewFixture(),...(seed?{seed_review:seed}:{})});
       saved=mountSavedCreatorReview(document.getElementById('saved'),async()=>({ok:true,data:{dna}}));
       saved.receiveInput({dna_id:dna.dna_id});saved.receiveResult({ok:true,data:{dna}});saved.connected(true);
-      pipeline=mountCreatorPipeline(document.getElementById('pipeline'));
+      pipeline=mountCreatorPipeline(document.getElementById('pipeline'),{displayMode:'fullscreen'});
       pipeline.render(CreatorJobView.parse({...creatorJobFixture('scan'),result:{kind:'scan',dna}}));
     };
     window.clearReviews=()=>{
@@ -46,13 +46,14 @@ test('saved DNA and scan cards separate Lightreel supplied-video review from pro
       assert.match(await section.textContent(),/supplied video only.*Profile-wide Creator DNA is shown separately/s);
       assert.match(await section.textContent(),/has not independently verified that access/);
       assert.match(await section.textContent(),/Synthetic supplied-video analysis: <img/);
-      assert.match(await section.textContent(),/Retrieved: 2026-10-09 12:00:00 UTC/);
+      assert.match(await section.textContent(),/Retrieved:?\s*2026-10-09 12:00:00 UTC/);
       assert.match(await section.textContent(),/Review limitations.*access is not independently proven/s);
       const link=section.getByRole('link');assert.equal(await link.getAttribute('href'),seed.url);assert.equal(await link.getAttribute('rel'),'noopener noreferrer');assert.equal(await link.getAttribute('referrerpolicy'),'no-referrer');
       assert.equal(await section.locator('img,iframe,script').count(),0);
       assert.equal(await section.locator('.kc-claim').count(),0,'review is not rendered as an observed DNA claim');
     }
-    assert.equal(await page.getByRole('heading',{name:'Creator DNA',exact:true}).count(),2);
+    assert.equal(await page.getByRole('heading',{name:'Creator DNA',exact:true}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:'Video analysis',exact:true}).count(),1);
   });
   await t.test('access wording reports only supplied basis and fictional URLs are inert',async()=>{
     for(const [access_basis,phrase] of [['transcript_or_caption_only','transcript or caption access only'],['unavailable','video was unavailable'],['unknown','Video access is unverified']]){
@@ -65,7 +66,8 @@ test('saved DNA and scan cards separate Lightreel supplied-video review from pro
   });
   await t.test('no-review path, private clearing and disposal remove supplied review content',async()=>{
     await page.evaluate(()=>window.renderReview());assert.equal(await sections.count(),0);
-    assert.equal(await page.getByRole('heading',{name:'Creator DNA',exact:true}).count(),2);
+    assert.equal(await page.getByRole('heading',{name:'Creator DNA',exact:true}).count(),1);
+    assert.equal(await page.getByRole('heading',{name:'Creator analysis',exact:true}).count(),1);
     await page.evaluate(seed=>window.renderReview(seed),seed);await page.evaluate(()=>window.clearReviews());
     assert.equal(await sections.count(),0);assert.doesNotMatch(await page.locator('body').innerText(),/Synthetic supplied-video analysis/);
     await page.evaluate(seed=>window.renderReview(seed),seed);await page.evaluate(()=>window.disposeReviews());

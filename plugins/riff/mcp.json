@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "riff": {
+      "type": "streamable-http",
+      "url": "https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "mixed",
+            "client": {
+              "mode": "dcr"
+            },
+            "resource": "https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp",
+            "baseScopes": [
+              "openid",
+              "offline_access"
+            ],
+            "defaultScopes": []
+          }
+        }
+      }
+    }
+  }
+}

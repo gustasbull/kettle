@@ -7,12 +7,12 @@ export type ProjectReviewState =
   | { kind: 'error'; message: string; recovery: Failure['error']['recovery'] | 'reopen' };
 
 const recoveryText: Record<Failure['error']['recovery'] | 'reopen', string> = {
-  reauthorize: 'Reconnect Kettle through ChatGPT, then ask to reopen this brief.',
-  correct_input: 'Tell Kettle what needs correcting in chat, then ask to reopen the brief.',
-  reload: 'Ask Kettle to reopen this brief in chat.',
-  retry_same_request: 'Ask Kettle to try opening this brief again in chat.',
-  contact_support: 'If this continues, contact Kettle support.',
-  reopen: 'Ask Kettle to reopen this brief in chat.',
+  reauthorize: 'Reconnect Riff through ChatGPT, then ask to reopen this brief.',
+  correct_input: 'Tell Riff what needs correcting in chat, then ask to reopen the brief.',
+  reload: 'Ask Riff to reopen this brief in chat.',
+  retry_same_request: 'Ask Riff to try opening this brief again in chat.',
+  contact_support: 'If this continues, contact Riff support.',
+  reopen: 'Ask Riff to reopen this brief in chat.',
 };
 
 /** No navigation is performed until a user follows a vetted source link. */

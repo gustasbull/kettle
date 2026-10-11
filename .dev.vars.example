@@ -1,11 +1,11 @@
 # Template only. Put actual development values in ignored .dev.vars.development.
 # Never copy a secret file or a local database URL from another workspace.
-# All seven bindings are required for authenticated mode. Empty/missing values keep
-# the default Worker diagnostic-only. See docs/engineering/auth-stage2.md.
-AUTH_ISSUER=
-AUTH_AUDIENCE=
-AUTH_CLIENT_ID=
-AUTH_CLIENT_SECRET=
-AUTH_SESSION_SECRET=
+# Supabase-only authentication. Empty/missing values keep the Worker
+# diagnostic-only. The service-role key is server-only.
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+RIFF_MCP_RESOURCE=
+RIFF_WEBSITE_ORIGIN=
+# 64 hexadecimal characters (32 random bytes).
+RIFF_AUTH_COOKIE_SECRET=

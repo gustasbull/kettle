@@ -141,7 +141,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
         const scripts=CreatorScriptSet.parse(captured.variants
           ? await durableStep('save-chat-draft',async()=>({id:crypto.randomUUID(),batch_id:batch.id,idea_id:idea.id,dna_id:dna.dna_id,dna_version:dna.version,version:1,created_at:new Date().toISOString(),
               variants:captured.variants!.map(v=>({...v,id:crypto.randomUUID()})),contains_fixture_data:false,
-              limitations:['Drafted in the ChatGPT conversation and saved by Kettle. No separate OpenAI API request was made.','Filming instructions are proposals; reference citations do not establish factual accuracy or predicted performance.']}))
+              limitations:['Drafted in the ChatGPT conversation and saved by Riff. No separate OpenAI API request was made.','Filming instructions are proposals; reference citations do not establish factual accuracy or predicted performance.']}))
           : await providerFor(job).generate({batch,idea_id:idea.id,dna},context));
         if(scripts.batch_id!==batch.id||scripts.idea_id!==idea.id||scripts.dna_id!==dna.dna_id||scripts.dna_version!==dna.version
           ||scripts.contains_fixture_data||scripts.variants.some(v=>v.reference_ids.some(id=>!idea.reference_ids.includes(id))))throw new PipelineRunError('failed');

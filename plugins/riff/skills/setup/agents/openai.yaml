@@ -1,0 +1,16 @@
+interface:
+  display_name: "Set up Riff"
+  short_description: "Connect Riff and open the creator workflow"
+  brand_color: "#3865F8"
+  default_prompt: "Use $setup to connect Riff and guide me through first use."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "riff"
+      description: "Riff creator analysis, discovery, and studio MCP server"
+      transport: "streamable_http"
+      url: "https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp"
+
+policy:
+  allow_implicit_invocation: true

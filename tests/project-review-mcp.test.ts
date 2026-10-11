@@ -6,7 +6,10 @@ import { z } from 'zod';
 import { createOperations } from '../packages/application/operations.ts';
 import { GetProjectInput, GetProjectOutput, SaveProjectOutput } from '../packages/contracts/index.ts';
 import { handleMcp, type McpAuth } from '../apps/worker/mcp.ts';
+import { oauthScopes } from '../packages/auth/index.ts';
 import { PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME, PROJECT_REVIEW_META, projectReviewHtml } from '../apps/worker/project-review-resource.ts';
+import { RIFF_ONBOARDING_MIME, RIFF_ONBOARDING_URI } from '../apps/worker/riff-onboarding-resource.ts';
+import { RIFF_HOME_MIME, RIFF_HOME_URI } from '../apps/worker/riff-home-resource.ts';
 import { config, fixtureAuth } from './auth-fixtures.ts';
 import { createInput } from './fixtures.ts';
 
@@ -20,7 +23,7 @@ async function rpc(method: string, params: unknown, auth?: McpAuth, token?: stri
 test('project-review render tool uses signed identity, exact read contract and real SQL ownership', async (t) => {
   const db = new PGlite();
   t.after(() => db.close());
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const file of (await readdir('supabase/migrations')).filter((name) => name.endsWith('.sql')).sort()) {
     await db.exec(await readFile(`supabase/migrations/${file}`, 'utf8'));
   }
@@ -45,7 +48,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.ok(tool);
   assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(GetProjectInput), type: 'object' });
   assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(GetProjectOutput), type: 'object' });
-  const securitySchemes = [{ type: 'oauth2', scopes: ['projects:read'] }];
+  const securitySchemes = [{ type: 'oauth2', scopes: [...oauthScopes] }];
   assert.deepEqual(tool.securitySchemes, securitySchemes);
   assert.deepEqual(tool._meta, { securitySchemes, ui: { resourceUri: PROJECT_REVIEW_URI } });
   assert.deepEqual(tool.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
@@ -60,16 +63,16 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.ok(saved.ok);
   const args = { project_id: saved.data.project.id };
   const shown = (await call('show_project_brief', args, token)).result;
-  assert.equal(shown.isError, false);
+  assert.notEqual(shown.isError, true);
   assert.deepEqual(GetProjectOutput.parse(shown.structuredContent), { ok: true, data: { project: saved.data.project } });
   assert.deepEqual(JSON.parse(shown.content[0]!.text), { project: saved.data.project }, 'complete text fallback includes every brief field, fact and version');
   const count = calls;
   const anonymous = (await call('show_project_brief', args)).result;
   assert.equal(anonymous.isError, true);
-  assert.match(anonymous._meta!['mcp/www_authenticate']![0]!, /invalid_token.*projects:read/);
-  const scope = (await call('show_project_brief', args, await identity.token({ scope: 'account:read' }))).result;
+  assert.match(anonymous._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
+  const scope = (await call('show_project_brief', args, await identity.token({ riff_permissions: ['account:read'] }))).result;
   assert.equal(scope.isError, true);
-  assert.match(scope._meta!['mcp/www_authenticate']![0]!, /insufficient_scope.*projects:read/);
+  assert.match(scope._meta!['mcp/www_authenticate']![0]!, /insufficient_scope.*scope="openid"/);
   const injected = await call('show_project_brief', { ...args, account_id: 'caller-owned', brief: input.brief }, token);
   assert.ok(injected.error || injected.result?.isError, 'strict input rejects injected ownership/snapshot');
   assert.equal(calls, count, 'anonymous, scope-denied and malformed requests cannot touch storage');
@@ -81,8 +84,9 @@ test('project-review render tool uses signed identity, exact read contract and r
   const other = (await call('show_project_brief', args, otherToken)).result;
   const absent = (await call('show_project_brief', { project_id: crypto.randomUUID() }, otherToken)).result;
   assert.deepEqual(other, absent, 'another account cannot distinguish owned from missing IDs');
-  const denied = GetProjectOutput.parse(other.structuredContent);
-  assert.ok(!denied.ok && denied.error.code === 'NOT_FOUND');
+  assert.equal(other.isError, true);
+  assert.equal('structuredContent' in other, false, 'errors must not violate success-only output schemas');
+  assert.equal(other.content[0]!.text, 'This project is unavailable.');
   assert.ok(!JSON.stringify(other).includes(input.brief.product));
 
   const updated = SaveProjectOutput.parse((await call('save_project', { ...input, ...args,
@@ -96,7 +100,10 @@ test('project-review render tool uses signed identity, exact read contract and r
 
   const resources = await (await rpc('resources/list', {}, auth)).json() as { result: { resources: Record<string, unknown>[] } };
   assert.deepEqual(resources.result.resources.map((r) => [r.name, r.uri, r.mimeType]),
-    [['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME]]);
+    [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
+      ['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME],
+      ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME]]);
+  assert.equal(resources.result.resources.find((r) => r.uri === PROJECT_REVIEW_URI)!.title, 'Riff project brief');
   const read = await (await rpc('resources/read', { uri: PROJECT_REVIEW_URI }, auth)).json() as {
     result: { contents: { uri: string; mimeType: string; text: string; _meta: unknown }[] };
   };
@@ -106,6 +113,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.deepEqual((resource._meta as Record<string, unknown>)['openai/ui'], { availableDisplayModes: ['inline'] });
   assert.ok(!('availableDisplayModes' in PROJECT_REVIEW_META.ui));
   assert.match(resource.text, /<script>/);
+  assert.match(resource.text, /<title>Riff project brief<\/title>/);
   assert.match(resource.text, /ui\/initialize/);
   assert.match(resource.text, /Your project brief/);
   assert.ok(!resource.text.includes(token));
@@ -115,7 +123,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.deepEqual(another, read, 'static resource is independent of caller');
 });
 
-test('unconfigured auth stays diagnostic-only and does not expose project-review resource', async () => {
+test('unconfigured auth exposes only the public diagnostic and no account resources', async () => {
   const listing = await (await rpc('tools/list', {})).json() as { result: { tools: { name: string }[] } };
   assert.deepEqual(listing.result.tools.map((t) => t.name), ['kettle_diagnostic']);
   const call = await (await rpc('tools/call', { name: 'show_project_brief', arguments: { project_id: crypto.randomUUID() } })).json() as { result?: { isError: boolean }; error?: unknown };

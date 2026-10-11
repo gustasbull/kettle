@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { createJwtVerifier, scopes } from '../packages/auth/index.ts';
+import { createMcpJwtVerifier, internalPermissions } from '../packages/auth/index.ts';
 import { createOperations, type ProjectRepository } from '../packages/application/operations.ts';
 import { createCreatorOperations, createCreatorIngestion, creatorFailure, type CreatorRepository } from '../packages/application/creator-operations.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
@@ -18,7 +18,7 @@ import { createInput } from './fixtures.ts';
 const db = new PGlite();
 const issued = Math.floor(Date.now() / 1000) - 20;
 let token: (subject: string, claims?: Record<string, unknown>) => Promise<string>;
-let verifier: ReturnType<typeof createJwtVerifier>;
+let verifier: ReturnType<typeof createMcpJwtVerifier>;
 let creatorCalls = 0;
 const repository: CreatorRepository = { call: (operation, owner, input) => {
   creatorCalls++;
@@ -31,15 +31,16 @@ async function rpc(operation: string, owner: string, input: unknown) {
   });
 }
 before(async () => {
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const file of (await readdir('supabase/migrations')).filter(f => f.endsWith('.sql')).sort()) {
     await db.exec(await readFile(`supabase/migrations/${file}`, 'utf8'));
   }
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   token = (sub, claims = {}) => new SignJWT({ sub, iss: config.issuer, aud: config.resource,
-    iat: issued, exp: issued + 3600, azp: config.clientId, scope: scopes.join(' '), ...claims,
+    iat: issued, exp: issued + 3600, role: 'authenticated', client_id: 'chatgpt-dcr-client',
+    scope: 'openid offline_access', riff_permissions: [...internalPermissions], ...claims,
   }).setProtectedHeader({ alg: 'RS256', kid: 'd-creator-auth' }).sign(privateKey);
-  verifier = createJwtVerifier(config, (issuer, subject, iat) => db.transaction(async tx => {
+  verifier = createMcpJwtVerifier(config, (issuer, subject, iat) => db.transaction(async tx => {
     await tx.exec('set local role service_role');
     return (await tx.query<{ id: string | null }>('select public.kettle_resolve_identity($1,$2,$3) as id', [issuer, subject, iat])).rows[0]!.id;
   }), createLocalJWKSet({ keys: [{ ...await exportJWK(publicKey), kid: 'd-creator-auth', alg: 'RS256' }] }));
@@ -95,8 +96,8 @@ test('signed creator reads and receipt replay recheck scope, expiry, SQL cutoff 
   assert.ok(saved.ok);
   const before = await snapshot();
   const reads = [{ dna_id: target.id }, { dna_id: target.id, version: 1 }, { dna_id: target.id, version: 2 }];
-  const noRead = await token(a.subject, { scope: 'projects:write' });
-  const noWrite = await token(a.subject, { scope: 'projects:read' });
+  const noRead = await token(a.subject, { riff_permissions: ['projects:write'] });
+  const noWrite = await token(a.subject, { riff_permissions: ['projects:read'] });
   let calls = creatorCalls;
   for (const input of reads) assert.deepEqual(await ops.execute('get_creator_dna', noRead, input), creatorFailure('FORBIDDEN'));
   assert.deepEqual(await ops.execute('correct_creator_dna', noWrite, request), creatorFailure('FORBIDDEN'));
@@ -116,7 +117,7 @@ test('signed creator reads and receipt replay recheck scope, expiry, SQL cutoff 
   await denied(await token(a.subject, { aud: 'https://wrong.example/mcp' }));
   await db.query('update public.account_identities set tokens_valid_after=to_timestamp($1) where account_id=$2', [issued, a.account]);
   await denied(a.credential); // iat exactly equals cutoff
-  const fresh = await token(a.subject, { iat: issued + 1, azp: 'separate-chatgpt-client' });
+  const fresh = await token(a.subject, { iat: issued + 1, client_id: 'separate-chatgpt-client' });
   assert.deepEqual(await operations().execute('correct_creator_dna', fresh, request), saved);
   await db.query('update public.account_identities set blocked=true where account_id=$1', [a.account]);
   await denied(fresh);

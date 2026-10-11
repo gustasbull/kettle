@@ -9,12 +9,13 @@ import { creatorContracts, StoredCreatorOutput, GetCreatorDnaOutput, CorrectCrea
 import { creatorAnalysisFixture } from '../packages/contracts/fixtures/creator-profile.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
 import { handleMcp } from '../apps/worker/mcp.ts';
+import { oauthScopes } from '../packages/auth/index.ts';
 import { fixtureAuth, config } from './auth-fixtures.ts';
 import { createInput, accountA } from './fixtures.ts';
 
 test('Creator MCP reads, render and corrections use signed identity, real SQL and public projection', async t => {
   const db = new PGlite(); t.after(() => db.close());
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const file of (await readdir('supabase/migrations')).filter(f => f.endsWith('.sql')).sort()) await db.exec(await readFile(`supabase/migrations/${file}`, 'utf8'));
   await db.exec(await readFile('supabase/seed.sql', 'utf8'));
   const identity = await fixtureAuth();
@@ -40,7 +41,7 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
     const contract = creatorContracts[name === 'correct_creator_dna' ? name : 'get_creator_dna'];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
     assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output),type:'object'});
-    assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[contract.scope]}]);
+    assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t => /ingest|scan|generate/.test(String(t.name))));
   const input = {dna_id:stored.data.dna_id};
@@ -52,7 +53,7 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const before = calls;
   const denied = (await call('render_creator_dna',input)).result;
   assert.match(denied._meta!['mcp/www_authenticate']![0]!,/invalid_token/);
-  const noScope = (await call('get_creator_dna',input,await identity.token({scope:'account:read'}))).result;
+  const noScope = (await call('get_creator_dna',input,await identity.token({riff_permissions:['account:read']}))).result;
   assert.match(noScope._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);
   const injected = await call('get_creator_dna',{...input,account_id:accountA},token); assert.ok(injected.error || injected.result.isError);
   assert.equal(calls,before);

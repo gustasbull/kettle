@@ -3,10 +3,10 @@ import { mountCreatorReview } from './creator-loop/index.ts';
 import { createCreatorReviewController } from './creator-review-controller.ts';
 
 const messages = {
-  reauthorize: 'Reconnect your Kettle account through ChatGPT, then reopen this review.',
+  reauthorize: 'Reconnect your Riff account through ChatGPT, then reopen this review.',
   unavailable: 'This creator review is unavailable.',
-  invalid: 'Kettle returned an invalid or mismatched creator review.',
-  connection: 'The connection could not load this creator review. Reconnect Kettle if needed.',
+  invalid: 'Riff returned an invalid or mismatched creator review.',
+  connection: 'The connection could not load this creator review. Reconnect Riff if needed.',
 } as const;
 
 /**

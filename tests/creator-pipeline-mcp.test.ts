@@ -12,6 +12,7 @@ import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipe
 import { providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
 import { creatorScriptsFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 import { handleMcp } from '../apps/worker/mcp.ts';
+import { oauthScopes } from '../packages/auth/index.ts';
 import { fixtureAuth, config } from './auth-fixtures.ts';
 import { createInput, accountA } from './fixtures.ts';
 import { z } from 'zod';
@@ -19,7 +20,7 @@ import { z } from 'zod';
 // Entire proof is offline: signed synthetic JWT, actual SQL, fake provider HTTP.
 test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-script journey',async t=>{
   const db=new PGlite();t.after(()=>db.close());
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for(const f of (await readdir('supabase/migrations')).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(`supabase/migrations/${f}`,'utf8'));
   await db.exec(await readFile('supabase/seed.sql','utf8'));
   const identity=await fixtureAuth(),token=await identity.token(),f=providerHttpFixture();
@@ -66,7 +67,7 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
     assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output),type:'object'});
-    assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[contract.scope]}]);
+    assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
@@ -98,7 +99,7 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const before=dbCalls.length;
   const unauth=await (await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}})).json() as any;
   assert.match(unauth.result._meta['mcp/www_authenticate'][0],/invalid_token/);
-  const noScope=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},await identity.token({scope:'projects:read'}));
+  const noScope=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},await identity.token({riff_permissions:['projects:read']}));
   assert.match(noScope.result._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);assert.equal(dbCalls.length,before);
   const foreign=await identity.token({sub:'user-b'});
   assert.deepEqual((await call('render_creator_job',{job_id:saved.id},foreign)).result,(await call('render_creator_job',{job_id:crypto.randomUUID()},foreign)).result);

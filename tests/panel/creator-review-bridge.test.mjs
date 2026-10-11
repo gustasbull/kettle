@@ -77,7 +77,7 @@ test('Creator DNA bridge parent transport, refresh, denial and teardown', async 
   });
   await t.test('auth failure clears data and late host output cannot restore it',async()=>{
     await page.evaluate(()=>window.send('ui/notifications/tool-result',{structuredContent:window.denied,isError:true,content:[]}));
-    await frame.waitForFunction(()=>document.querySelector('#review').textContent.includes('Reconnect your Kettle'));
+    await frame.waitForFunction(()=>document.querySelector('#review').textContent.includes('Reconnect your Riff'));
     await page.evaluate(()=>window.send('ui/notifications/tool-result',{structuredContent:window.output,content:[]}));
     await frame.evaluate(()=>window.bridge.refresh());
     assert.doesNotMatch(await frame.locator('#review').textContent(),/Desk demonstrations|Saved version/);

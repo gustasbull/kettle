@@ -34,7 +34,7 @@ export const Brief = z.strictObject({
 
 export const Account = z.strictObject({
   id: Id, display_name: text(120), state: z.enum(['active', 'suspended']),
-  preferred_language: text(35), created_at: Timestamp,
+  preferred_language: text(35), created_at: Timestamp, onboarding_seen_at: Timestamp.nullable(),
 });
 export const BriefVersion = z.strictObject({
   id: Id, project_id: Id, version: z.number().int().positive(),
@@ -68,6 +68,8 @@ export const GetAccountStateOutput = result(z.strictObject({
   entitlements: z.strictObject({ status: z.literal('not_configured') }),
   usage: z.strictObject({ status: z.literal('not_configured'), reset_at: z.null() }),
 }));
+export const MarkRiffOnboardingSeenInput = z.strictObject({});
+export const MarkRiffOnboardingSeenOutput = result(z.strictObject({ onboarding_seen_at: Timestamp }));
 export const GetProjectInput = z.strictObject({ project_id: Id });
 export const GetProjectOutput = result(z.strictObject({ project: Project }));
 export const SaveProjectInput = z.strictObject({
@@ -87,6 +89,12 @@ export type Account = z.infer<typeof Account>;
 // Registration metadata is shared now; product handlers are deliberately not registered yet.
 export const toolContracts = {
   get_account_state: { input: GetAccountStateInput, output: GetAccountStateOutput, scope: 'account:read', readOnly: true },
+  mark_riff_onboarding_seen: {
+    input: MarkRiffOnboardingSeenInput,
+    output: MarkRiffOnboardingSeenOutput,
+    scope: 'account:read',
+    readOnly: false,
+  },
   get_project: { input: GetProjectInput, output: GetProjectOutput, scope: 'projects:read', readOnly: true },
   save_project: { input: SaveProjectInput, output: SaveProjectOutput, scope: 'projects:write', readOnly: false },
 } as const;

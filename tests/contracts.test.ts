@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GetAccountStateInput, GetProjectInput, SaveProjectInput, Brief } from '../packages/contracts/index.ts';
+import {
+  Account,
+  Brief,
+  GetAccountStateInput,
+  GetProjectInput,
+  MarkRiffOnboardingSeenInput,
+  MarkRiffOnboardingSeenOutput,
+  SaveProjectInput,
+} from '../packages/contracts/index.ts';
 import { noReferenceFixture } from '../packages/adapters/providers.ts';
 import { createInput } from './fixtures.ts';
 
@@ -10,6 +18,20 @@ test('description-only input is valid; ownership and unknown fields are rejected
   assert.equal(SaveProjectInput.safeParse({ ...input, account_id: crypto.randomUUID() }).success, false);
   assert.equal(GetAccountStateInput.safeParse({ account_id: crypto.randomUUID() }).success, false);
   assert.equal(GetProjectInput.safeParse({ project_id: 'not-a-uuid' }).success, false);
+});
+test('onboarding state is nullable and marking accepts no client-owned fields', () => {
+  const account = {
+    id: crypto.randomUUID(), display_name: 'Riff member', state: 'active', preferred_language: 'en',
+    created_at: '2026-10-10T00:00:00Z', onboarding_seen_at: null,
+  };
+  assert.ok(Account.safeParse(account).success);
+  assert.ok(Account.safeParse({ ...account, onboarding_seen_at: '2026-10-10T00:01:00Z' }).success);
+  assert.equal(Account.safeParse({ ...account, onboarding_seen_at: 'not-a-timestamp' }).success, false);
+  assert.ok(MarkRiffOnboardingSeenInput.safeParse({}).success);
+  assert.equal(MarkRiffOnboardingSeenInput.safeParse({ account_id: crypto.randomUUID() }).success, false);
+  assert.ok(MarkRiffOnboardingSeenOutput.safeParse({
+    ok: true, data: { onboarding_seen_at: '2026-10-10T00:01:00Z' },
+  }).success);
 });
 test('bounds and create/update version combinations are enforced', () => {
   const input = createInput();

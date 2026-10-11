@@ -43,7 +43,7 @@ test('project-review real-browser component acceptance', async () => {
     assert.equal(await card.locator('button').count(),0);
     await page.selectOption('#scenario','auth');
     assert.doesNotMatch(await card.textContent(),/Daylight/);
-    assert.match(await card.textContent(),/Reconnect Kettle through ChatGPT/);
+    assert.match(await card.textContent(),/Reconnect Riff through ChatGPT/);
     await page.selectOption('#scenario','error');
     assert.match(await card.textContent(),/This project is unavailable/);
     await page.selectOption('#scenario','empty');

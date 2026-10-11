@@ -1,9 +1,9 @@
 import { CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
 import { creatorJobFixture } from '../../../evals/creator-loop/pipeline-fixtures.ts';
-export const scenarioNames = ['ideas', 'empty', 'three-ideas', 'scripts', 'three-variants', 'scan', 'queued', 'running', 'failed', 'needs_reconciliation', 'long', 'long-scripts', 'hostile'] as const;
+export const scenarioNames = ['ideas', 'empty', 'three-ideas', 'scripts', 'three-variants', 'scan', 'video-analysis', 'queued', 'running', 'failed', 'needs_reconciliation', 'long', 'long-scripts', 'hostile'] as const;
 export type Scenario = typeof scenarioNames[number];
 export function pipelineFixture(scenario: Scenario): CreatorJobView {
-  const job = creatorJobFixture(scenario === 'scan' ? 'scan' : ['scripts', 'three-variants', 'long-scripts'].includes(scenario) ? 'scripts' : 'recommendations');
+  const job = creatorJobFixture(['scan', 'video-analysis'].includes(scenario) ? 'scan' : ['scripts', 'three-variants', 'long-scripts'].includes(scenario) ? 'scripts' : 'recommendations');
   if (['queued', 'running', 'failed', 'needs_reconciliation'].includes(scenario)) {
     job.state = scenario as 'queued' | 'running' | 'failed' | 'needs_reconciliation';
     job.result = null;
@@ -29,6 +29,17 @@ export function pipelineFixture(scenario: Scenario): CreatorJobView {
   }
   if (scenario === 'long-scripts' && job.result?.kind === 'scripts') {
     job.result.scripts.variants[0]!.script = 'LongUnbrokenScript'.repeat(600);
+  }
+  if (scenario === 'video-analysis' && job.result?.kind === 'scan') {
+    job.result.dna.seed_review = {
+      url: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',
+      provider: 'lightreel',
+      summary: 'The supplied fictional video opens on the finished desk, then demonstrates one small change.',
+      access_basis: 'video_access_reported',
+      limitations: ['Authored fixture; provider media access was not independently verified.'],
+      retrieved_at: job.result.dna.created_at,
+      origin: 'fixture',
+    };
   }
   return CreatorJobView.parse(job);
 }

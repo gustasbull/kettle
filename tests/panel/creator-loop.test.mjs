@@ -41,7 +41,7 @@ test('creator-loop read-only component acceptance', async t => {
       assert.doesNotMatch(await dna.textContent(), /Saved version/);
       assert.match(await dna.textContent(), /UncertaintyOne caption does not establish a recurring pattern/);
       assert.match(await dna.textContent(), /Audience and visual pacing are unknown/);
-      assert.match(await dna.textContent(), /tell Kettle in chat/);
+      assert.match(await dna.textContent(), /tell Riff in chat/);
       assert.equal(await review.locator('button,input,textarea,a').count(), 0);
       const evidence = dna.locator('summary').first();
       await evidence.focus(); await page.keyboard.press('Space');
@@ -72,7 +72,7 @@ test('creator-loop read-only component acceptance', async t => {
       assert.equal(await review.getByRole('status').textContent(), 'Loading scan and Creator DNA…');
       assert.doesNotMatch(await review.textContent(), /Desk demonstrations|Snapshot version/);
       await scenario('error');
-      assert.match(await review.textContent(), /Ask Kettle in chat to reopen/);
+      assert.match(await review.textContent(), /Ask Riff in chat to reopen/);
       assert.equal(await review.locator('details').count(), 0);
     });
     await t.test('untrusted content and unavailable display permissions', async () => {

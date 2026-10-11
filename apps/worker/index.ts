@@ -1,10 +1,12 @@
 import { reconcileCreatorDispatches } from './creator-pipeline-runtime.ts';
 export { CreatorPipelineWorkflow } from './creator-pipeline-runtime.ts';
 import { handleMcp } from './mcp.ts';
+import { withMcpCors } from './mcp-cors.ts';
 import { website } from '../web/index.ts';
-import { authConfig, authServices } from './auth.ts';
+import { authServices, websiteAccountReader } from './auth.ts';
+import { authConfig, isWebsiteAuthPath } from './auth-config.ts';
 import { protectedResource } from '../../packages/auth/index.ts';
-import { handleWebsiteAuth, websiteAuthUnavailable } from '../../packages/auth/website.ts';
+import { createSupabaseWebsiteAuthClient, handleWebsiteAuth, websiteAuthUnavailable } from '../../packages/auth/website.ts';
 export { FoundationWorkflow } from './workflow.ts';
 
 export default {
@@ -23,22 +25,28 @@ export default {
       } });
     }
     if (url.pathname === '/.well-known/oauth-protected-resource' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
-      return config && request.method === 'GET' ? Response.json(protectedResource(config)) : new Response('Not configured', { status: 404 });
+      return config && request.method === 'GET' ? Response.json(protectedResource(config.mcp)) : new Response('Not configured', { status: 404 });
     }
     if (url.pathname === '/mcp') {
-      const origin = request.headers.get('origin');
-      if (origin && origin !== url.origin) return new Response('Origin not allowed', { status: 403 });
-      try {
-        if (config && url.origin !== new URL(config.resource).origin) return new Response('Invalid resource origin', { status: 400 });
-        return await handleMcp(request, config ? await authServices(env, config) : undefined);
-      } catch { return new Response('Authentication service unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } }); }
+      return withMcpCors(request, env.MCP_CORS_ORIGINS, async () => {
+        try {
+          if (config && url.origin !== new URL(config.mcp.resource).origin) return new Response('Invalid resource origin', { status: 400 });
+          return await handleMcp(request, config ? await authServices(env, config) : undefined);
+        } catch { return new Response('Authentication service unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } }); }
+      });
     }
-    if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/') || url.pathname === '/account') {
-      if (!config) return new Response('Sign-in is not configured for this development build.', { status: 503 });
+    if (isWebsiteAuthPath(url)) {
+      if (!config) return new Response('Sign-in is not configured for this development build.', {
+        status: 503, headers: { 'Cache-Control': 'no-store' },
+      });
       try {
-        const services = await authServices(env, config);
-        return await handleWebsiteAuth(request, config, services.metadata, services.websiteVerifier, services.websiteOperations);
-      } catch { return websiteAuthUnavailable(request, config); }
+        return await handleWebsiteAuth(
+          request,
+          config.website,
+          createSupabaseWebsiteAuthClient(config.website),
+          websiteAccountReader(env, config),
+        );
+      } catch { return websiteAuthUnavailable(request, config.website); }
     }
     return new Response('Not found', { status: 404 });
   },

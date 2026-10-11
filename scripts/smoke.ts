@@ -21,7 +21,9 @@ try {
   assert.equal(health.status, 200);
   assert.equal((await health.json() as { status: string }).status, 'ok');
   const home = await fetch(base);
-  assert.match(await home.text(), /Kettle/);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /<title>Riff<\/title>/);
+  assert.doesNotMatch(homeHtml, /\bKettle\b/);
   assert.equal((await fetch(`${base}/mcp`, { method: 'POST', headers: { Origin: 'https://untrusted.example' } })).status, 403);
   const authRuntime = await fetch(`${base}/__fixture/auth`, { method: 'POST' });
   assert.equal(authRuntime.status, 200);
@@ -34,7 +36,7 @@ try {
   assert.deepEqual(tools.map((tool) => tool.name), ['kettle_diagnostic']);
   const result = await client.callTool({ name: 'kettle_diagnostic', arguments: {} });
   assert.deepEqual(result.structuredContent, { status: 'ok', contract_version: '1.0.0' });
-  for (const name of ['save_project', 'get_project', 'get_account_state']) {
+  for (const name of ['show_riff_welcome', 'save_project', 'get_project', 'get_account_state']) {
     const denied = await client.callTool({ name, arguments: {} });
     assert.equal(denied.isError, true, `${name} must not be exposed`);
   }
@@ -54,7 +56,7 @@ try {
     await delay(250);
   }
   assert.ok(completed, 'Local workflow must complete within 15 seconds');
-  console.log('PASS: workerd health + website, MCP initialize/list/call, product tools unavailable, origin rejection, local Workflow completion; fixture JWT/PKCE/encrypted-cookie roundtrip in workerd.');
+  console.log('PASS: workerd health + Riff website, diagnostic-only anonymous MCP initialize/list/call, protected tools unavailable, origin rejection, local Workflow completion; fixture JWT/PKCE/encrypted-cookie roundtrip in workerd.');
 } finally {
   await client.close();
   await worker.stop();

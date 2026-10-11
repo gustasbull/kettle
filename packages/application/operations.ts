@@ -10,13 +10,13 @@ export interface ProjectRepository {
   call(operation: keyof typeof toolContracts, accountId: string, input: unknown): Promise<unknown>;
 }
 const errors: Record<ErrorCode, [string, Failure['error']['recovery']]> = {
-  UNAUTHENTICATED: ['Connect or reauthorize your Kettle account.', 'reauthorize'],
+  UNAUTHENTICATED: ['Connect or reauthorize your Riff account.', 'reauthorize'],
   FORBIDDEN: ['This action is not permitted for this account.', 'contact_support'],
   VALIDATION_ERROR: ['Check the required fields and their allowed values.', 'correct_input'],
   NOT_FOUND: ['This project is unavailable.', 'reload'],
   VERSION_CONFLICT: ['The project has changed. Reload before saving a new request.', 'reload'],
   IDEMPOTENCY_CONFLICT: ['This request ID was already used for different content. Use a new request ID.', 'correct_input'],
-  UNAVAILABLE: ['Kettle could not complete the request. Retry with the same request ID.', 'retry_same_request'],
+  UNAVAILABLE: ['Riff could not complete the request. Retry with the same request ID.', 'retry_same_request'],
 };
 export function failure(code: ErrorCode): Failure {
   const [message, recovery] = errors[code];

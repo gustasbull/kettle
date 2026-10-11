@@ -8,13 +8,18 @@ const repository = fileURLToPath(new URL('../', import.meta.url));
 
 /** No fixture or fallback component is emitted by this build. */
 export async function buildPanel(root = repository, kind = 'project') {
-  const creator = kind === 'creator';
-  const pipeline = kind === 'pipeline';
-  if (!['project', 'creator', 'pipeline'].includes(kind)) throw new Error('Unknown panel');
-  const name = pipeline ? 'creator-pipeline' : creator ? 'creator-review' : 'project-review';
-  const symbol = pipeline ? 'creatorPipelineScript' : creator ? 'creatorReviewScript' : 'projectReviewScript';
-  const entry = resolve(root, pipeline ? 'apps/panel/creator-pipeline-bridge.ts' : creator ? 'apps/panel/creator-review-bridge.ts' : 'apps/panel/bridge.ts');
-  const component = resolve(root, pipeline ? 'apps/panel/creator-pipeline/index.ts' : `apps/panel/${name}.ts`);
+  const panels = {
+    project: { name: 'project-review', symbol: 'projectReviewScript', entry: 'apps/panel/bridge.ts', component: 'apps/panel/project-review.ts' },
+    creator: { name: 'creator-review', symbol: 'creatorReviewScript', entry: 'apps/panel/creator-review-bridge.ts', component: 'apps/panel/creator-review.ts' },
+    pipeline: { name: 'creator-pipeline', symbol: 'creatorPipelineScript', entry: 'apps/panel/creator-pipeline-bridge.ts', component: 'apps/panel/creator-pipeline/index.ts' },
+    'riff-onboarding': { name: 'riff-onboarding', symbol: 'riffOnboardingScript', entry: 'apps/panel/riff-onboarding-bridge.ts', component: 'apps/panel/riff-onboarding/index.ts' },
+    'riff-home': { name: 'riff-home', symbol: 'riffHomeScript', entry: 'apps/panel/riff-home-bridge.ts', component: 'apps/panel/riff-home/index.ts' },
+  };
+  const panel = panels[kind];
+  if (!panel) throw new Error('Unknown panel');
+  const { name, symbol } = panel;
+  const entry = resolve(root, panel.entry);
+  const component = resolve(root, panel.component);
   const resource = resolve(root, `apps/worker/${name}-resource.ts`);
   const output = resolve(root, `apps/panel/generated/${name}-bundle.ts`);
   // Remove stale output even when a subsequent build fails.
@@ -63,7 +68,7 @@ export async function buildPanel(root = repository, kind = 'project') {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  for (const kind of ['project', 'creator', 'pipeline']) {
+  for (const kind of ['project', 'creator', 'pipeline', 'riff-onboarding', 'riff-home']) {
     const result = await buildPanel(repository, kind);
     console.log(result.status === 'built'
       ? `${kind} panel browser bundle: ${result.bytes} bytes.`

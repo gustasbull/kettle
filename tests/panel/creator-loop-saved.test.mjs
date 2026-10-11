@@ -119,9 +119,9 @@ test('filtered saved DNA accessibility and recovery', async t => {
     });
     await t.test('auth/error clears output, keeps recovery accessible and never steals external focus',async()=> {
       await reset(); await review.locator('summary').focus();
-      await page.evaluate(()=>savedTest.ui.render({kind:'error',message:'Reconnect Kettle in ChatGPT, then reopen this review.'}));
+      await page.evaluate(()=>savedTest.ui.render({kind:'error',message:'Reconnect Riff in ChatGPT, then reopen this review.'}));
       assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Creator review');
-      assert.match(await review.getByRole('status').textContent(),/Reconnect Kettle/);
+      assert.match(await review.getByRole('status').textContent(),/Reconnect Riff/);
       assert.equal(await review.locator('details,article,a').count(),0);
       assert.doesNotMatch(await review.textContent(),/Desk demonstrations|version 1/);
       await page.locator('#theme').focus(); await reset();

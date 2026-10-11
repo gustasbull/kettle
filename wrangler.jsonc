@@ -37,13 +37,12 @@
       ],
       "secrets": {
         "required": [
-          "AUTH_ISSUER",
-          "AUTH_AUDIENCE",
-          "AUTH_CLIENT_ID",
-          "AUTH_CLIENT_SECRET",
-          "AUTH_SESSION_SECRET",
           "SUPABASE_URL",
+          "SUPABASE_PUBLISHABLE_KEY",
           "SUPABASE_SERVICE_ROLE_KEY",
+          "RIFF_MCP_RESOURCE",
+          "RIFF_WEBSITE_ORIGIN",
+          "RIFF_AUTH_COOKIE_SECRET",
           "LIGHTREEL_API_KEY",
           "SCRAPECREATORS_API_KEY"
         ]
@@ -57,9 +56,10 @@
         }
       },
       "vars": {
+        "MCP_CORS_ORIGINS": "https://chatgpt.com",
         "CREATOR_PIPELINE_ENABLED": "true",
         "CREATOR_MODEL": "gpt-4.1-mini",
-        "CREATOR_SOURCE_PERMISSION_BASIS": "User-authorized bounded trial: Lightreel reviews the supplied public TikTok video; ScrapeCreators supplies public metadata and references. Kettle does not download media. Provider-reported media access is not independently verified.",
+        "CREATOR_SOURCE_PERMISSION_BASIS": "User-authorized bounded trial: Lightreel reviews the supplied public TikTok video; ScrapeCreators supplies public metadata and references. Riff does not download media. Provider-reported media access is not independently verified.",
         "CREATOR_SCRAPE_CEILING_MICROUSD": "0",
         "CREATOR_LIGHTREEL_CEILING_MICROUSD": "0",
         "CREATOR_OPENAI_CEILING_MICROUSD": "0"

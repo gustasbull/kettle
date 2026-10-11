@@ -1,146 +1,155 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
-import { creatorPipelinePreviewServer } from '../../apps/panel/creator-pipeline/preview-server.mjs';
 
-test('creator pipeline read-only component', async t => {
-  const server = await creatorPipelinePreviewServer();
-  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch();
-  const page = await browser.newPage({viewport:{width:672,height:1100}});
-  const errors = [], external = [];
-  page.on('pageerror', error=>errors.push(error.message));
-  page.on('request', request=>{if(!request.url().startsWith(base))external.push(request.url());});
-  const captures = fileURLToPath(new URL('../../.context/creator-pipeline/',import.meta.url));
-  await mkdir(captures,{recursive:true});
-  try {
-    const response = await page.goto(base);
-    assert.match(response.headers()['content-security-policy'],/connect-src 'none'/);
-    const review = page.locator('#review');
-    const scenario = name=>page.selectOption('#scenario',name);
-    await t.test('ideas show grounding, lineage, chat selection, dates and zero/unknown metrics',async()=> {
-      assert.match(await review.textContent(),/Captured DNA version1/);
-      assert.match(await review.textContent(),/Later DNA corrections do not change this result/);
-      assert.match(await review.textContent(),/Contains fictional test data/);
-      assert.match(await review.textContent(),/Why it fits.*Evidence.*How to film it/s);
-      assert.match(await review.textContent(),/tell Kettle in chat.*from batch/s);
-      await review.locator('summary').focus(); await page.keyboard.press('Enter');
-      assert.equal(await review.locator('details').evaluate(n=>n.open),true);
-      assert.match(await review.textContent(),/Retrieved2026-10-09 12:00:00 UTC/);
-      assert.match(await review.textContent(),/Views120/);
-      assert.equal(await review.locator('a,button').count(),0);
-      await scenario('empty');
-      assert.equal(await review.locator('article').count(),0);
-      assert.match(await review.textContent(),/No evidence-backed ideas returned/);
-      assert.match(await review.textContent(),/Contains fictional test data/);
-      await scenario('three-ideas');
-      assert.equal(await review.locator('article').count(),3);
-      assert.match(await review.textContent(),/PublishedUnknown.*ViewsUnknown/s);
-    });
-    await t.test('waiting, failures and uncertain outcomes never offer implicit retry',async()=> {
-      for (const state of ['queued','running','failed','needs_reconciliation']) {
-        await scenario(state);
-        assert.equal(await review.locator('article,details,a,button').count(),0);
-        assert.doesNotMatch(await review.textContent(),/One useful desk change|Captured DNA/);
-        assert.match(await review.textContent(),/chat/);
-      }
-      assert.match(await review.getByRole('status').textContent(),/reconcile.*before retrying/);
-      assert.match(await review.textContent(),/outcome is uncertain/i);
-      await scenario('scan');
-      assert.match(await review.textContent(),/Saved version 1/);
-      assert.match(await review.textContent(),/Contains fictional test data/);
-      assert.match(await review.textContent(),/To get ideas.*DNA version 1/s);
-    });
-    await t.test('two or three script variants preserve all filming fields and historical lineage',async()=> {
-      await scenario('scripts');
-      assert.equal(await review.locator('details').count(),2);
-      assert.match(await review.textContent(),/Captured DNA version1/);
-      for (const field of ['Hook','Opening visual','Script','Shots','B-roll','On-screen text','Showcase timing','Call to action','Pacing','Reference IDs','Variant limitations']) {
-        assert.match(await review.textContent(),new RegExp(field));
-      }
-      assert.match(await review.textContent(),/reopen that batch for source links and dates/);
-      assert.equal(await review.locator('a,button').count(),0);
-      await scenario('three-variants');
-      assert.equal(await review.locator('details').count(),3);
-      const summary = review.locator('summary').last();
-      assert.match(await summary.ariaSnapshot(),/Experimental/);
-      await summary.focus(); await page.keyboard.press('Space');
-      assert.equal(await review.locator('details').last().evaluate(n=>n.open),true);
-      await page.keyboard.press('Tab'); // Native controls remain keyboard reachable.
-    });
-    await t.test('narrow/light/dark, long and hostile text, enlarged text',async()=> {
-      for (const name of ['ideas','scripts']) for (const width of [320,640]) for (const theme of ['light','dark']) {
-        await page.setViewportSize({width:width===640?672:320,height:1100});
-        await page.selectOption('#theme',theme); await scenario(name);
-        await review.locator('summary').first().evaluate(n=>n.parentElement.open=true);
-        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-        await review.screenshot({path:`${captures}/${name}-${width}-${theme}.png`});
-      }
-      await page.setViewportSize({width:320,height:1100}); await scenario('long');
-      await review.locator('summary').click();
-      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-      await page.addStyleTag({content:'.kettle-pipeline :is(h2,h3,h4,p,dt,dd,summary,li) { font-size:200% !important;line-height:1.5 !important }'});
-      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-      await scenario('long-scripts');
-      await review.locator('summary').first().evaluate(n=>n.parentElement.open=true);
-      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-      await scenario('hostile');
-      assert.match(await review.textContent(),/<img src=x onerror=alert\(1\)>/);
-      assert.equal(await review.locator('img,script,iframe').count(),0);
-    });
-    await t.test('lifecycle, same-job focus, identity isolation, stable announcements and safe links',async()=> {
-      const bundle = await build({stdin:{contents:`
-        import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
-        import { creatorJobFixture } from './evals/creator-loop/pipeline-fixtures.ts';
-        import { CreatorJobView } from './packages/contracts/creator-pipeline.ts';
-        window.pipelineTest={mountCreatorPipeline,creatorJobFixture,CreatorJobView};
-      `,resolveDir:fileURLToPath(new URL('../../',import.meta.url))},bundle:true,write:false,format:'iife',platform:'browser'});
-      await page.route(`${base}/test.js`,route=>route.fulfill({contentType:'text/javascript',body:bundle.outputFiles[0].text}));
-      await page.addScriptTag({url:`${base}/test.js`});
-      const result = await page.evaluate(()=> {
-        const {mountCreatorPipeline,creatorJobFixture,CreatorJobView}=pipelineTest;
-        const root=document.createElement('div'); document.body.append(root);
-        const ui=mountCreatorPipeline(root);
-        let calls=0; const oldFetch=window.fetch;window.fetch=()=>{calls++;throw new Error('No network');};
-        const job=creatorJobFixture();ui.render(CreatorJobView.parse(job));
-        let details=root.querySelector('details');details.open=true;details.querySelector('summary').focus();
-        const status=root.querySelector('[role=status]');const observer=new MutationObserver(()=>{});
-        observer.observe(status,{childList:true,characterData:true,subtree:true});
-        ui.render(job);
-        const stable=observer.takeRecords().length===0;observer.disconnect();
-        const retained=root.querySelector('details').open && document.activeElement.tagName==='SUMMARY';
-        const historical=structuredClone(job);historical.revision++;historical.result.batch.dna_version=2;
-        ui.render(CreatorJobView.parse(historical));
-        const captured=root.textContent.includes('Captured DNA version2') && !root.textContent.includes('Captured DNA version1');
-        ui.render(CreatorJobView.parse(job));
-        const history=root.textContent.includes('Captured DNA version1'); // Host may explicitly reopen historical jobs.
-        const failed={...job,state:'failed',result:null,message:'Safe recovery message'};
-        ui.render(CreatorJobView.parse(failed));
-        const recovered=document.activeElement.tagName==='H2' && !root.querySelector('details');
-        document.querySelector('#theme').focus();ui.render(job);
-        const externalFocus=document.activeElement.id==='theme';
-        root.querySelector('details').open=true;
-        const other=structuredClone(job);other.id='00000000-0000-4000-8000-000000000999';ui.render(other);
-        const isolated=!root.querySelector('details').open;
-        const live=structuredClone(job);live.result.batch.contains_fixture_data=false;
-        live.result.batch.references[0].origin='live';live.result.batch.references[0].views=0;
-        live.result.batch.references[0].url='https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011';ui.render(CreatorJobView.parse(live));
-        const link=root.querySelector('a');const safe=link.href==='https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011' && link.rel==='noopener noreferrer';
-        const zero=root.textContent.includes('Views0');
-        live.result.batch.references[0].url='javascript:alert(1)';ui.render(live);
-        const unsafe=!root.querySelector('a');
-        const missing=structuredClone(job);missing.result.batch.references=[];ui.render(missing);
-        const withheld=root.textContent.includes('Idea withheld') && !root.textContent.includes('How to film it');
-        ui.dispose();ui.dispose();ui.render(job);
-        const empty=root.childElementCount===0;root.remove();window.fetch=oldFetch;
-        return {stable,retained,captured,history,recovered,externalFocus,isolated,safe,zero,unsafe,withheld,empty,calls};
+test('Riff Analysis, Discovery, and Studio render only persisted creator-job facts', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.actions=[]; window.fullscreen=[];
+    window.boot=(scenario='scan',mode='fullscreen')=>{
+      window.view?.dispose();
+      window.view=mountCreatorPipeline(document.getElementById('root'),{
+        displayMode:mode,
+        sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
+        requestFullscreen:async()=>{window.fullscreen.push(true);window.view.setDisplayMode('fullscreen');return {status:'sent',message:'Opened fullscreen.'}},
       });
-      assert.deepEqual(result,{stable:true,retained:true,captured:true,history:true,recovered:true,externalFocus:true,isolated:true,safe:true,zero:true,unsafe:true,withheld:true,empty:true,calls:0});
+      window.job=pipelineFixture(scenario); window.view.render(window.job);
+    };
+    window.show=scenario=>{window.job=pipelineFixture(scenario);window.view.render(window.job)};
+  ` }, bundle: true, format: 'iife', platform: 'browser', write: false });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.setContent('<div id="root"></div>');
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  const root = page.locator('#root');
+
+  await t.test('live and recovery states are indeterminate and never imply retry', async () => {
+    await page.evaluate(() => boot('queued', 'fullscreen'));
+    assert.match(await root.textContent(), /Preparing|queued|saved job/i);
+    assert.equal(await root.locator('[role="progressbar"]').count(), 1);
+    assert.equal(await root.locator('[role="progressbar"][aria-valuenow]').count(), 0);
+    assert.equal(await root.locator('button,a').count(), 0);
+    await page.evaluate(() => show('running'));
+    assert.doesNotMatch(await root.locator('.riff-pipeline').textContent(), /\d+%/);
+    await page.evaluate(() => show('failed'));
+    assert.match(await root.textContent(), /does not retry/i);
+    assert.equal(await root.getByRole('button', { name: /retry/i }).count(), 0);
+    await page.evaluate(() => show('needs_reconciliation'));
+    assert.match(await root.textContent(), /reconcile.*before.*retry/i);
+    assert.equal(await root.getByRole('button', { name: /retry/i }).count(), 0);
+  });
+
+  await t.test('fullscreen Analysis follows the six truthful dimensions and explicit handoffs', async () => {
+    await page.evaluate(() => boot('scan', 'fullscreen'));
+    assert.match(await root.getByRole('heading', { level: 1 }).textContent(), /Video analysis|Creator analysis/);
+    for (const name of ['Hook', 'Content', 'Style & pacing', 'Voice & language', 'Script', 'CTA']) {
+      assert.equal(await root.getByRole('heading', { name, exact: true }).count(), 1, name);
+    }
+    assert.match(await root.textContent(), /Observed|Inferred|User-corrected/);
+    assert.doesNotMatch(await root.textContent(), /Working well|Needs attention/);
+    assert.match(await root.textContent(), /unique video|coverage/i);
+    assert.match(await root.textContent(), /Limitations/);
+    for (const label of ['Rework this video', 'Explore viral formats', 'Create a video']) {
+      assert.equal(await root.getByRole('button', { name: label }).count(), 1);
+    }
+    await root.getByRole('button', { name: 'Explore viral formats' }).click();
+    assert.match((await page.evaluate(() => window.actions.at(-1))), /DNA version 1|creator job/i);
+  });
+
+  await t.test('inline Analysis stays compact with two actions and no duplicate attribution', async () => {
+    await page.evaluate(() => boot('scan', 'inline'));
+    assert.equal(await root.locator('svg[aria-label="Riff"]').count(), 0);
+    assert.equal(await root.locator('button').count(), 2);
+    assert.equal(await root.getByRole('button', { name: 'Open analysis' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Explore viral formats' }).count(), 1);
+    assert.equal(await root.getByRole('heading', { name: 'Voice & language' }).count(), 0);
+    await root.getByRole('button', { name: 'Open analysis' }).click();
+    assert.equal(await page.evaluate(() => window.fullscreen.length), 1);
+    assert.equal(await root.getByRole('heading', { name: 'Voice & language' }).count(), 1);
+  });
+
+  await t.test('fullscreen Discovery is a bounded real-count keyboard carousel', async () => {
+    await page.evaluate(() => boot('three-ideas', 'fullscreen'));
+    assert.equal(await root.getByRole('heading', { name: 'Find your next breakout idea.' }).count(), 1);
+    assert.match(await root.textContent(), /3 ideas/);
+    assert.equal(await root.locator('[data-library]').count(), 4);
+    assert.match(await root.locator('[data-library="hooks"]').textContent(), /ChatGPT/);
+    assert.doesNotMatch(await root.textContent(), /7 ideas|lift|likes/i);
+    const region = root.locator('[data-discovery-carousel]');
+    assert.match(await region.textContent(), /Fictional desk idea 1/);
+    await region.focus(); await page.keyboard.press('ArrowRight');
+    assert.match(await region.textContent(), /Fictional desk idea 2/);
+    await root.getByRole('button', { name: 'Next idea' }).click();
+    assert.match(await region.textContent(), /Fictional desk idea 3/);
+    assert.match(await region.textContent(), /ViewsUnknown/);
+    await root.getByRole('button', { name: 'Make it mine' }).click();
+    assert.match((await page.evaluate(() => window.actions.at(-1))), /batch 00000000-0000-4000-8000-000000000600.*idea 00000000-0000-4000-8000-000000000702/i);
+    await page.evaluate(() => show('empty'));
+    assert.match(await root.textContent(), /No evidence-backed ideas/);
+  });
+
+  await t.test('inline Discovery is a summary and opens fullscreen without nested navigation', async () => {
+    await page.evaluate(() => boot('ideas', 'inline'));
+    assert.match(await root.textContent(), /1 idea/);
+    assert.equal(await root.getByRole('button', { name: 'Open discovery' }).count(), 1);
+    assert.equal(await root.locator('[role="tablist"],[data-discovery-carousel]').count(), 0);
+    assert.ok(await root.locator('button').count() <= 2);
+  });
+
+  await t.test('fullscreen Studio maps actual variants into component tabs and honest state handoffs', async () => {
+    await page.evaluate(() => boot('scripts', 'fullscreen'));
+    assert.equal(await root.getByRole('heading', { name: 'Your script, ready to film.' }).count(), 1);
+    assert.equal(await root.getByRole('tab').count(), 4);
+    for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab }).count(), 1);
+    assert.equal(await root.locator('[data-variant]').count(), 2);
+    assert.match(await root.textContent(), /Reference-led|Creator Fit/);
+    assert.match(await root.textContent(), /Caption.*not available|publishing fields.*not part/i);
+    await root.getByRole('tab', { name: 'Hook' }).click();
+    assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /One small change for this desk|Wide shot/);
+    await root.getByRole('tab', { name: 'Main content' }).click();
+    assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /Shots|B-roll|On-screen text|Showcase timing|Pacing/);
+    await root.getByRole('tab', { name: 'CTA' }).click();
+    assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /What would you change/);
+    await root.getByRole('button', { name: 'Save for later' }).click();
+    assert.match((await page.evaluate(() => window.actions.at(-1))), /save.*ChatGPT.*not.*saved/i);
+    await root.getByRole('button', { name: 'I filmed it' }).click();
+    assert.match((await page.evaluate(() => window.actions.at(-1))), /filmed.*ChatGPT.*not.*persisted/i);
+  });
+
+  await t.test('inline scripts remain one-action summaries; hostile text stays inert and layouts do not overflow', async () => {
+    await page.evaluate(() => boot('three-variants', 'inline'));
+    assert.match(await root.textContent(), /Your script, ready to film/);
+    assert.equal(await root.getByRole('button', { name: 'Open Studio' }).count(), 1);
+    assert.equal(await root.getByRole('tab').count(), 0);
+    await page.evaluate(() => boot('hostile', 'fullscreen'));
+    assert.match(await root.textContent(), /<img src=x onerror=alert\(1\)>/);
+    assert.equal(await root.locator('img,iframe,script').count(), 0);
+    for (const width of [320, 375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    }
+  });
+
+  await t.test('same-job selection/focus persists, a different job resets it, and disposal is final', async () => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.evaluate(() => boot('three-ideas', 'fullscreen'));
+    await root.getByRole('button', { name: 'Next idea' }).click();
+    await root.getByRole('button', { name: 'Make it mine' }).focus();
+    const result = await page.evaluate(() => {
+      window.job.revision += 1; window.view.render(window.job);
+      const preserved = document.body.textContent.includes('Fictional desk idea 2') && document.activeElement.textContent === 'Make it mine';
+      const other = structuredClone(window.job); other.id = '00000000-0000-4000-8000-000000000999'; window.view.render(other);
+      const reset = document.body.textContent.includes('Fictional desk idea 1');
+      window.view.dispose(); window.view.dispose(); window.view.render(other);
+      return { preserved, reset, empty: document.getElementById('root').childElementCount === 0 };
     });
-    assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
+    assert.deepEqual(result, { preserved: true, reset: true, empty: true });
+  });
+
+  assert.deepEqual(errors, []);
 });

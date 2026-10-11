@@ -20,14 +20,15 @@ export function projectReviewHtml(script: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kettle project brief</title></head>
+<title>Riff project brief</title></head>
 <body><div id="root"><p role="status">Loading your project brief…</p></div>
 <script>${safeScript}</script></body></html>`;
 }
 
 export function registerProjectReviewResource(server: McpServer): void {
   server.registerResource('kettle-project-review', PROJECT_REVIEW_URI, {
-    description: 'Read-only saved Kettle project brief. Refresh after changes are saved in chat.',
+    title: 'Riff project brief',
+    description: 'Read-only saved Riff project brief. Refresh after changes are saved in chat.',
     mimeType: PROJECT_REVIEW_MIME, _meta: PROJECT_REVIEW_META,
   }, async () => ({ contents: [{
     uri: PROJECT_REVIEW_URI, mimeType: PROJECT_REVIEW_MIME,

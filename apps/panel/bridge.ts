@@ -4,7 +4,7 @@ import { GetProjectInput, GetProjectOutput, type Project } from '../../packages/
 import { mountProjectReview, type ProjectReviewState } from './project-review.ts';
 
 const WAIT_MS = 10_000;
-const REOPEN = 'Ask Kettle to reopen this project brief in chat.';
+const REOPEN = 'Ask Riff to reopen this project brief in chat.';
 const PREVIOUS = 'Refresh failed; try Refresh brief again.';
 type ReadProject = (projectId: string, signal: AbortSignal) => Promise<unknown>;
 
@@ -57,14 +57,14 @@ export function createProjectReviewController(
     const envelope = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const parsed = GetProjectOutput.safeParse(envelope.structuredContent);
     if (!parsed.success || (envelope.isError === true && parsed.data.ok)) {
-      error(`Kettle returned an unreadable project brief. ${REOPEN}`);
+      error(`Riff returned an unreadable project brief. ${REOPEN}`);
       return;
     }
     const result = parsed.data;
     if (!result.ok) {
       switch (result.error.code) {
         case 'UNAUTHENTICATED':
-          error('Reconnect your Kettle account through ChatGPT, then reopen this brief.', 'reauthorize'); return;
+          error('Reconnect your Riff account through ChatGPT, then reopen this brief.', 'reauthorize'); return;
         case 'FORBIDDEN':
           error('Access to this project is denied.', 'contact_support'); return;
         case 'NOT_FOUND':
@@ -73,7 +73,7 @@ export function createProjectReviewController(
           if (refreshing && project) { ready(PREVIOUS); return; }
           break;
       }
-      error(`Kettle could not load this project brief. ${REOPEN}`);
+      error(`Riff could not load this project brief. ${REOPEN}`);
       return;
     }
     const next = result.data.project;
@@ -118,7 +118,7 @@ export function createProjectReviewController(
       if (disposed || current !== generation) return;
       pending = undefined;
       if (timedOut || (caught instanceof McpError && caught.code === ErrorCode.RequestTimeout)) ready(PREVIOUS);
-      else error(`The host could not refresh this brief. Reconnect Kettle if needed. ${REOPEN}`);
+      else error(`The host could not refresh this brief. Reconnect Riff if needed. ${REOPEN}`);
     } finally {
       clearTimeout(timer);
     }

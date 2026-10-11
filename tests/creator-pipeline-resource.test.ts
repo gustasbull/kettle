@@ -16,6 +16,7 @@ test('Creator pipeline resource is a static bundled MCP App with consistent empt
   const list = await client.listResources();
   assert.equal(list.resources.length,1);
   assert.equal(list.resources[0]!.uri,CREATOR_PIPELINE_URI);
+  assert.equal(list.resources[0]!.title,'Riff creator workflow');
   assert.equal(list.resources[0]!.mimeType,CREATOR_PIPELINE_MIME);
   assert.deepEqual(list.resources[0]!._meta,CREATOR_PIPELINE_META);
   const result = await client.readResource({uri:CREATOR_PIPELINE_URI});
@@ -24,9 +25,14 @@ test('Creator pipeline resource is a static bundled MCP App with consistent empt
   assert.equal(content.mimeType,CREATOR_PIPELINE_MIME);
   assert.deepEqual(content._meta,CREATOR_PIPELINE_META);
   assert.deepEqual(CREATOR_PIPELINE_META.ui.csp,{connectDomains:[],resourceDomains:[],frameDomains:[],baseUriDomains:[]});
+  assert.deepEqual(CREATOR_PIPELINE_META['openai/ui'],{
+    availableDisplayModes:['inline','fullscreen'],preferredDisplayMode:'fullscreen',
+  });
   assert.ok('text' in content);
   const html = content.text as string;
   assert.match(html,/id="root"/);
+  assert.match(html,/<title>Riff creator workflow<\/title>/);
+  assert.match(html,/Riff creator workflow/);
   assert.match(html,/get_creator_job/);
   assert.match(html,/kettle-creator-pipeline/);
   assert.doesNotMatch(html,/<script[^>]+src=|StoredCreatorAnalysis|sourceMappingURL/);

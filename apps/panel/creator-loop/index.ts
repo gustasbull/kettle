@@ -169,8 +169,8 @@ export function mountCreatorReview(root: HTMLElement): {
       return;
     }
     if (state.kind === 'error') {
-      content.append(el('p', state.message, 'kc-notice kc-text'), el('p', 'Ask Kettle in chat to reopen this review.', 'kc-meta'));
-      announce(`Creator review unavailable. ${state.message} Ask Kettle in chat to reopen this review.`);
+      content.append(el('p', state.message, 'kc-notice kc-text'), el('p', 'Ask Riff in chat to reopen this review.', 'kc-meta'));
+      announce(`Creator review unavailable. ${state.message} Ask Riff in chat to reopen this review.`);
       restoreFocus(content.querySelector('h2')!);
       return;
     }
@@ -187,7 +187,7 @@ export function mountCreatorReview(root: HTMLElement): {
           ['Video coverage', `${dna.coverage.unique_videos} unique ${dna.coverage.unique_videos === 1 ? 'video' : 'videos'} returned · up to ${dna.requested_videos} requested`],
           ['Oldest post', date(dna.coverage.oldest_published_at)], ['Newest post', date(dna.coverage.newest_published_at)]]),
         notes('Limitations', dna.limitations),
-        el('p', 'To correct a trait, tell Kettle in chat which statement to change. This review does not save corrections.', 'kc-notice'));
+        el('p', 'To correct a trait, tell Riff in chat which statement to change. This review does not save corrections.', 'kc-notice'));
       if (dna.coverage_limited) review.append(el('p', 'Coverage: bounded sample.', 'kc-meta'));
       if (dna.withheld_claim_count) review.append(el('p', `${dna.withheld_claim_count} ${dna.withheld_claim_count === 1 ? 'trait' : 'traits'} withheld because source display permission is unavailable.`, 'kc-meta'));
       if (!dna.claims.length) review.append(el('p', 'No displayable DNA traits supplied.', 'kc-meta'));
@@ -248,7 +248,7 @@ export function mountCreatorReview(root: HTMLElement): {
     section.append(el('p', 'This is a bounded sample, not proof of complete profile coverage. Missing metrics remain unknown; zero means a reported zero.', 'kc-meta'),
       notes('Scan limitations', result.limitations), notes('Omissions', result.coverage.omissions));
     if (result.coverage.errors.length) section.append(notes('Reported scan errors', result.coverage.errors.map(e => errorLabels[e.code])));
-    if (result.status === 'failed' || result.status === 'unavailable') section.append(el('p', 'Share a description of what you create in chat, or ask Kettle about this scan. Opening this review does not retry it.', 'kc-notice'));
+    if (result.status === 'failed' || result.status === 'unavailable') section.append(el('p', 'Share a description of what you create in chat, or ask Riff about this scan. Opening this review does not retry it.', 'kc-notice'));
     const allEvidence = details(`Scan evidence (${observations.length} observations)`, 'scan-evidence');
     if (!observations.length) allEvidence.append(el('p', 'No observations available.', 'kc-meta'));
     observations.forEach(o => allEvidence.append(observation(o, fictional, `scan-${o.id}`)));
@@ -259,9 +259,9 @@ export function mountCreatorReview(root: HTMLElement): {
       const review = el('section', undefined, 'kc-section kc-stack');
       review.setAttribute('aria-label', 'Creator DNA');
       review.append(el('h3', 'Creator DNA'), el('p', `Snapshot version ${dna.version} · Created ${date(dna.created_at)}`, 'kc-meta'),
-        el('p', 'To correct a trait, tell Kettle in chat which statement to change. This review does not save corrections.', 'kc-notice'),
+        el('p', 'To correct a trait, tell Riff in chat which statement to change. This review does not save corrections.', 'kc-notice'),
         notes('DNA limitations', dna.limitations));
-      if (!dna.claims.length) review.append(el('p', 'No DNA traits supplied. Ask Kettle in chat for the available context.', 'kc-meta'));
+      if (!dna.claims.length) review.append(el('p', 'No DNA traits supplied. Ask Riff in chat for the available context.', 'kc-meta'));
       const byId = new Map(observations.map(o => [o.id, o]));
       dna.claims.forEach(claim => {
         const block = el('article', undefined, 'kc-claim');

@@ -1,0 +1,20 @@
+{
+  "name": "riff-local",
+  "interface": {
+    "displayName": "Riff local"
+  },
+  "plugins": [
+    {
+      "name": "riff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/riff"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creativity"
+    }
+  ]
+}

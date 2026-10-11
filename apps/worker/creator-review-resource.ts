@@ -20,14 +20,15 @@ export function creatorReviewHtml(script: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kettle Creator DNA review</title></head>
+<title>Riff Creator DNA review</title></head>
 <body><div id="root"><p role="status">Loading your Creator DNA review…</p></div>
 <script>${safeScript}</script></body></html>`;
 }
 
 export function registerCreatorReviewResource(server: McpServer): void {
   server.registerResource('kettle-creator-review', CREATOR_REVIEW_URI, {
-    description: 'Read-only saved Kettle Creator DNA review. Refresh after changes are saved in chat.',
+    title: 'Riff Creator DNA review',
+    description: 'Read-only saved Riff Creator DNA review. Refresh after changes are saved in chat.',
     mimeType: CREATOR_REVIEW_MIME, _meta: CREATOR_REVIEW_META,
   }, async () => ({ contents: [{
     uri: CREATOR_REVIEW_URI, mimeType: CREATOR_REVIEW_MIME,

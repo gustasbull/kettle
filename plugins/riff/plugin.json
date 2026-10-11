@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "riff",
+  "version": "0.1.0",
+  "description": "Turn creator context and public video references into evidence-backed video ideas and filmable scripts.",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "Riff",
+        "shortDescription": "Plan videos worth filming",
+        "longDescription": "Start with a creator profile, public video link, or an idea. Riff keeps analysis, discovery, and filmable script development in one guided workflow.",
+        "category": "Creativity",
+        "capabilities": ["Interactive"],
+        "defaultPrompt": [
+          "Help me plan my next creator video.",
+          "Analyze a creator profile or public video link.",
+          "Turn a saved Riff idea into a filmable script."
+        ],
+        "logo": "./assets/logo.svg",
+        "composerIcon": "./assets/composer-icon.svg",
+        "brandColor": "#3865F8"
+      }
+    }
+  }
+}

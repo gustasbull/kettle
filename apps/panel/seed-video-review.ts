@@ -3,11 +3,13 @@ import { creatorReviewStyles } from './creator-loop/styles.ts';
 
 type SeedReview = NonNullable<CreatorDnaView['seed_review']>;
 const accessMessages: Record<SeedReview['access_basis'], string> = {
-  video_access_reported: 'Lightreel reports access to the video. Kettle has not independently verified that access.',
+  video_access_reported: 'Lightreel reports access to the video. Riff has not independently verified that access.',
   transcript_or_caption_only: 'Lightreel reports transcript or caption access only. Visual details are not verified.',
   unavailable: 'Lightreel reports that the video was unavailable. No video access is established.',
   unknown: 'Lightreel did not establish its access to the video. Video access is unverified.',
 };
+
+export const seedVideoAccessMessage = (basis: SeedReview['access_basis']) => accessMessages[basis];
 
 /** Static, inert provider summary. This describes only the supplied video, not profile-wide DNA. */
 export function seedVideoReview(doc: Document, review: SeedReview): HTMLElement {
@@ -23,7 +25,7 @@ export function seedVideoReview(doc: Document, review: SeedReview): HTMLElement 
   card.append(el('h3', 'Lightreel review of supplied video'),
     el('p', 'This review concerns the supplied video only. Profile-wide Creator DNA is shown separately.', 'kc-meta'));
   if (review.origin === 'fixture') card.append(el('p', 'Fictional test review. This is not live provider evidence.', 'kc-notice'));
-  card.append(el('p', accessMessages[review.access_basis], 'kc-notice'), el('p', review.summary, 'kc-text'));
+  card.append(el('p', seedVideoAccessMessage(review.access_basis), 'kc-notice'), el('p', review.summary, 'kc-text'));
   let href: string | undefined;
   if (review.origin === 'live') {
     try {

@@ -10,7 +10,7 @@ const db = new PGlite();
 let projectId: string;
 let calls = 0;
 before(async () => {
-  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
+  await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for (const f of (await readdir('supabase/migrations')).filter(f => f.endsWith('.sql')).sort()) await db.exec(await readFile(`supabase/migrations/${f}`, 'utf8'));
   await db.exec(await readFile('supabase/seed.sql', 'utf8'));
   const r = await db.query<{result: {data: {project: {id: string}}}}>('select public.kettle_save_project($1,$2) as result',[accountA,JSON.stringify(createInput())]);

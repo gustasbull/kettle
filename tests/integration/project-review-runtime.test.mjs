@@ -46,7 +46,9 @@ test('workerd serves the real bundle; browser exercises the MCP Apps parent brid
     assert.deepEqual(resource._meta.ui.csp.connectDomains, []);
     assert.deepEqual(resource._meta.ui.csp.resourceDomains, []);
     const anonymous = await rpc('tools/call', { name: 'show_project_brief', arguments: { project_id: projectId } });
-    assert.equal(anonymous.result.structuredContent.error.code, 'UNAUTHENTICATED');
+    assert.equal(anonymous.result.isError, true);
+    assert.equal('structuredContent' in anonymous.result, false);
+    assert.equal(anonymous.result.content[0].text, 'Connect or reauthorize your Riff account.');
     assert.ok(anonymous.result._meta['mcp/www_authenticate']);
 
     browser = await chromium.launch({ headless: true });
@@ -130,7 +132,7 @@ test('workerd serves the real bundle; browser exercises the MCP Apps parent brid
       content: [], isError: true, _meta: { 'mcp/www_authenticate': ['Bearer realm="fixture"'] },
       structuredContent: { ok: false, error: { code: 'UNAUTHENTICATED', message: 'Reconnect', retryable: false, recovery: 'reauthorize' } },
     } }));
-    await card.getByText('Reconnect your Kettle account through ChatGPT, then reopen this brief.', { exact: true }).waitFor();
+    await card.getByText('Reconnect your Riff account through ChatGPT, then reopen this brief.', { exact: true }).waitFor();
     assert.equal(await card.getByText('Fictional lamp', { exact: true }).count(), 0);
     assert.equal(await card.getByRole('button').count(), 0);
     await page.evaluate(() => window.send({ id: 'teardown', method: 'ui/resource-teardown', params: {} }));
@@ -138,7 +140,7 @@ test('workerd serves the real bundle; browser exercises the MCP Apps parent brid
     await page.waitForFunction(() => !window.card.contentDocument.querySelector('.kr-card'));
     // Reopen the real resource under an incapable host and then a silent host.
     await page.evaluate(html => { window.supportsTools = false; window.card.srcdoc = html; }, resource.text);
-    await card.getByText('This host cannot refresh project briefs. Ask Kettle to reopen this project brief in chat.', { exact: true }).waitFor();
+    await card.getByText('This host cannot refresh project briefs. Ask Riff to reopen this project brief in chat.', { exact: true }).waitFor();
     assert.equal(await card.getByRole('button').count(), 0);
     await page.evaluate(html => { window.initializeEnabled = false; window.card.srcdoc = html; }, resource.text);
     await card.getByText(/The (project brief did not load in time|ChatGPT connection is unavailable)/).first().waitFor({ timeout: 15_000 });
