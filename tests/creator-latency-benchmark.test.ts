@@ -303,8 +303,9 @@ test('provider exceptions collapse to a fixed diagnostic and never leak content'
   assert.doesNotMatch(deps.summary.join('\n'), /private|aaaaaaaa|workers\.dev|token=/i);
 });
 
-test('package script is exact and contains no live side effect', async () => {
+test('package lifecycle builds panel artifacts before the exact no-live benchmark command', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+  assert.equal(packageJson.scripts['prebenchmark:creator'], 'npm run build:panel');
   assert.equal(packageJson.scripts['benchmark:creator'], 'tsx scripts/creator-latency-benchmark.ts');
   assert.doesNotMatch(packageJson.scripts['benchmark:creator'], /provider|allocation|provision|deploy|credential/i);
 });
