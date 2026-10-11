@@ -170,6 +170,24 @@ test('stale poll performance finishes rejected',async t=>{
   f.calls[0]!.resolve(output('running',3));await flush();
   assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.visible()?.revision,4);
 });
+for(const field of ['id','project_id','kind','created_at'] as const) test(`refresh performance rejects mismatched ${field}`,async t=>{
+  const f=observedSetup(t);f.launch();await f.tick(20);const next=output('running',2);
+  if(field==='kind')next.data.job.kind='scan';
+  else if(field==='created_at')next.data.job.created_at='2026-10-08T00:00:00Z';
+  else next.data.job[field]='00000000-0000-4000-8000-000000000999';
+  f.calls[0]!.resolve(next);await flush();
+  assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.reason(),'invalid');
+});
+test('refresh performance rejects contradictory same-revision results',async t=>{
+  const f=observedSetup(t);f.launch(output('running',4));await f.tick(20);
+  f.calls[0]!.resolve(output('queued',4));await flush();
+  assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.reason(),'invalid');
+});
+test('refresh performance rejects terminal reactivation',async t=>{
+  const f=observedSetup(t);f.launch(output('failed',3));
+  const refresh=f.controller.refresh();f.calls[0]!.resolve(output('running',4));await refresh;
+  assert.deepEqual(f.pollStatuses,['rejected']);assert.equal(f.reason(),'invalid');
+});
 test('timed out poll performance finishes timeout',async t=>{
   const f=observedSetup(t);f.launch();await f.tick(20);await f.tick(100);
   assert.deepEqual(f.pollStatuses,['timeout']);assert.equal(f.calls[0]!.signal.aborted,true);
