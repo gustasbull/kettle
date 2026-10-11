@@ -1,6 +1,12 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
 import { mountCreatorPipeline, type RiffDiscoveryLibrary, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
 import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import {
+  mountRiffProductContext,
+  type ProductContextSaveOutcome,
+} from '../riff-product-context/index.ts';
+import type { ProductDraft } from '../riff-product-context-validation.ts';
+import type { Project } from '../../../packages/contracts/index.ts';
 import { mountRiffMenu } from '../riff-shell/menu.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
@@ -31,6 +37,8 @@ type ScriptResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'scri
 
 export type RiffHomeActions = {
   start(source: string): Promise<RiffActionResult>;
+  saveProduct?: (context: { draft: ProductDraft; project: Project | null }) => Promise<ProductContextSaveOutcome>;
+  discoverProduct?: (project: Project) => Promise<RiffActionResult>;
   inputChanged?: (source: string) => void;
   send: RiffPanelAction;
   upload?: () => Promise<RiffActionResult>;
@@ -115,6 +123,11 @@ body { min-height: 100vh; }
 .riff-home__chip:disabled, .riff-home__upload:disabled, .riff-home__submit:disabled, .riff-home__recent-next:disabled, .riff-home__recent-card:disabled { cursor: wait; opacity: .62; }
 .riff-home__status { width: 760px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; text-align: left; }
 .riff-home__status:empty { display: none; }
+.riff-home__intent { display:flex; width:760px; max-width:100%; align-items:center; justify-content:center; flex-wrap:wrap; gap:10px; padding:14px; border:1px solid #DDE5F1; border-radius:16px; background:#FFFFFFCC; }
+.riff-home__intent[hidden] { display:none; }
+.riff-home__intent legend { width:100%; padding:0; color:#363B45; font-size:13px; font-weight:600; line-height:20px; text-align:center; }
+.riff-home__intent button { min-height:44px; padding:10px 18px; border:1px solid #D6DDEA; border-radius:999px; color:#492481; background:#FFF; font:600 13px/20px inherit; cursor:pointer; }
+.riff-home__intent button:hover { background:#F5F0FC; }
 .riff-home__section { display: flex; width: 760px; max-width: 100%; flex-direction: column; gap: 12px; padding-top: 8px; }
 .riff-home__section-head { display: flex; align-items: center; justify-content: space-between; }
 .riff-home__section h2 { color: #202124; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0; }
@@ -286,6 +299,11 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const submit = node('button', 'Find my next idea', 'riff-home__submit'); submit.type = 'submit';
   footer.append(upload, submit); inputShell.append(input, footer); form.append(label, chips, inputShell);
   const status = node('p', '', 'riff-home__status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+  const intent = doc.createElement('fieldset'); intent.className = 'riff-home__intent'; intent.hidden = true;
+  const intentLegend = node('legend', 'What did you share?');
+  const productChoice = node('button', 'Product description'); productChoice.type = 'button';
+  const ideaChoice = node('button', 'Video idea'); ideaChoice.type = 'button';
+  intent.append(intentLegend, productChoice, ideaChoice);
 
   const recentSection = node('section', undefined, 'riff-home__section');
   recentSection.setAttribute('aria-labelledby', 'riff-home-recents-title');
@@ -296,7 +314,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   recentHead.append(recentTitle, recentNext);
   const recents = node('div', undefined, 'riff-home__recents');
   recentSection.append(recentHead, recents);
-  home.append(hero, form, status, recentSection);
+  home.append(hero, form, intent, status, recentSection);
 
   const workflow = node('section', undefined, 'riff-home__workflow'); workflow.hidden = true;
   const workflowRoot = node('div'); workflow.append(workflowRoot);
@@ -304,6 +322,8 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
 
   let disposed = false;
   let pipeline: ReturnType<typeof mountCreatorPipeline> | undefined;
+  let product: ReturnType<typeof mountRiffProductContext> | undefined;
+  let pendingIntent = '';
   let menu!: ReturnType<typeof mountRiffMenu>;
   let recentsState: RiffRecentsState = { status: 'loading' };
   const invoke = async (action: () => Promise<RiffActionResult>, pending: string, control?: HTMLButtonElement) => {
@@ -322,15 +342,30 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const showHome = () => {
     if (disposed) return;
     invocationEpoch++;
+    if (product) { product.dispose(); product = undefined; workflowRoot.replaceChildren(); }
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
     menu?.render({ activeRoute: 'home' });
   };
-  const ensurePipeline=()=>pipeline??=mountCreatorPipeline(workflowRoot,{
+  const ensurePipeline=()=>{
+    product?.dispose(); product=undefined;
+    return pipeline??=mountCreatorPipeline(workflowRoot,{
     displayMode:'fullscreen',sendPrompt:actions.send,embeddedChrome:false,
     requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
     startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
     setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,
-  });
+    });
+  };
+  const showProduct=(description:string)=>{
+    if(disposed)return;
+    invocationEpoch++; pipeline?.dispose(); pipeline=undefined; workflowRoot.replaceChildren();
+    location.textContent='Product context'; home.hidden=true; workflow.hidden=false;
+    menu?.render({activeRoute:'home'});
+    product=mountRiffProductContext(workflowRoot,{
+      onSave:actions.saveProduct??(async()=>({status:'failed',message:'Riff cannot save product context in this host.'})),
+      onDiscover:actions.discoverProduct??(project=>actions.send(`Continue from this saved Riff product brief: ${JSON.stringify(project)}`)),
+    });
+    product.start({kind:'unsaved',description}); workflow.scrollIntoView({block:'start'});
+  };
   const showCatalog=(library:RiffDiscoveryLibrary='videos')=>{
     if(disposed)return;
     invocationEpoch++;location.textContent='Discover videos';home.hidden=true;workflow.hidden=false;
@@ -346,7 +381,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
     },
     onCreate(){
-      invocationEpoch++;input.value='';actions.inputChanged?.('');status.textContent='';showHome();input.focus({preventScroll:true});
+      invocationEpoch++;input.value='';pendingIntent='';intent.hidden=true;actions.inputChanged?.('');status.textContent='';showHome();input.focus({preventScroll:true});
     },
     onClose(){ /* Closing the local drawer does not mutate workflow state. */ },
     onAccountSettings:actions.accountSettings ?? (()=>actions.send('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.')),
@@ -358,12 +393,30 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   form.addEventListener('submit', event => {
     event.preventDefault(); const rawValue=input.value;
     if (!rawValue.trim()) { status.textContent = 'Add a video link, profile link, or idea first.'; input.focus(); return; }
+    let parsed: URL | undefined; try { parsed = new URL(rawValue.trim()); } catch { /* Explicit choice below. */ }
+    if (!parsed) {
+      pendingIntent=rawValue; intent.hidden=false;
+      status.textContent='Choose how Riff should use this text. Nothing runs until you choose.';
+      productChoice.focus(); return;
+    }
+    pendingIntent='';intent.hidden=true;
     void invoke(() => actions.start(rawValue), 'Starting your Riff analysis…', submit);
   });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) form.requestSubmit();
   });
-  input.addEventListener('input', () => actions.inputChanged?.(input.value));
+  input.addEventListener('input', () => {
+    pendingIntent=''; intent.hidden=true; status.textContent=''; actions.inputChanged?.(input.value);
+  });
+  productChoice.addEventListener('click',()=>{
+    if(disposed||!pendingIntent)return;
+    const description=pendingIntent;pendingIntent='';intent.hidden=true;showProduct(description);
+  });
+  ideaChoice.addEventListener('click',()=>{
+    if(disposed||!pendingIntent)return;
+    const idea=pendingIntent;pendingIntent='';intent.hidden=true;
+    void invoke(()=>actions.start(idea),'Sending your video idea to ChatGPT…',ideaChoice);
+  });
   upload.addEventListener('click', () => void invoke(
     actions.upload ?? (() => actions.send('I want to analyze a video with Riff. Help me attach it through ChatGPT, and do not claim it was uploaded until the host confirms the file.')),
     'Opening the ChatGPT file picker…',
@@ -447,10 +500,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setCatalog(page){pipeline?.setCatalog(page);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
-    clearPrivate(){if(disposed)return;input.value='';menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;workflowRoot.replaceChildren();showHome();},
+    clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
-      if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); pipeline = undefined; root.replaceChildren();
+      if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();
     },
   };
 }

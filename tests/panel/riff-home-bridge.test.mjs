@@ -71,6 +71,14 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   assert.doesNotMatch(uploadMessage, internalWorkflowLanguage);
 
   await input.fill('A fast desk makeover with one surprising constraint'); await input.press('Control+Enter');
+  assert.equal(await frame.getByRole('group', { name: 'What did you share?' }).count(), 1);
+  assert.equal(await frame.getByRole('button', { name: 'Product description' }).count(), 1);
+  assert.equal(await frame.getByRole('button', { name: 'Video idea' }).count(), 1);
+  assert.equal(await page.evaluate(() => window.messages.length), 1,
+    'non-URL text waits for an explicit local intent choice');
+  assert.equal(await page.evaluate(() => window.calls.some(call => /provider|creator|recommendation/i.test(call.name))), false,
+    'the local intent choice does not call a classifier, model, or provider');
+  await frame.getByRole('button', { name: 'Video idea' }).click();
   await page.waitForFunction(() => window.messages.length === 2);
   assert.match(await page.evaluate(() => window.messages[1].content[0].text), /desk makeover.*clarifying/i);
   assert.equal(await page.evaluate(() => window.calls.filter(call => call.name === 'start_riff_creator').length), 0,
@@ -208,6 +216,7 @@ test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT 
   assert.equal(await submit.isEnabled(), true, 'a stalled compatibility tool cannot leave the action locked');
 
   await input.fill('A quick desk makeover'); await submit.click();
+  await frame.getByRole('button', { name: 'Video idea' }).click();
   await frame.getByText(/handoff failed/i).waitFor();
   assert.equal(await submit.isEnabled(), true);
 });
@@ -752,4 +761,155 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
   assert.equal(await page.evaluate(() => window.fullCalls), 1, 'the terminal result is read in full exactly once');
   await page.waitForFunction(() => window.listCalls >= 3);
   await frame.evaluate(() => window.bridge.dispose());
+});
+
+test('Riff Product context saves only on confirmation, retries exactly, updates, and hands off the exact saved snapshot', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.calls=[];window.prompts=[];window.saveMode='unavailable';window.latest=undefined;
+    window.openai={
+      callTool:async(name,args)=>{
+        window.calls.push({name,args:structuredClone(args)});
+        if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+        if(name==='save_project'){
+          if(window.saveMode==='unavailable')return {structuredContent:{ok:false,error:{code:'UNAVAILABLE',message:'private',retryable:true,recovery:'retry_same_request'}}};
+          if(window.saveMode==='malformed')return {structuredContent:{ok:true,data:{}}};
+          if(window.saveMode==='conflict')return {structuredContent:{ok:false,error:{code:'VERSION_CONFLICT',message:'private',retryable:false,recovery:'reload'}}};
+          const created='2026-10-11T10:00:00Z';const id=args.project_id??'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';const version=args.expected_version+1;
+          const project={id,name:args.name,project_type:'brand',current_version:version,created_at:created,updated_at:created,
+            brief_version:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',project_id:id,version,name:args.name,brief:structuredClone(args.brief),created_at:created}};
+          window.latest=project;return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};
+        }
+        if(name==='get_project')return {structuredContent:{ok:true,data:{project:window.latest}}};
+        return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'private',retryable:false,recovery:'reload'}}};
+      },
+      sendFollowUpMessage:async({prompt})=>{window.prompts.push(prompt);return {};},
+    };
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 900, height: 1000 } }); page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find(item => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const rawDescription = '  A user-written focus app description.  ';
+  await input.fill(rawDescription); await input.press('Control+Enter');
+  assert.equal(await frame.getByRole('group', { name: 'What did you share?' }).count(), 1);
+  assert.equal(await frame.evaluate(() => window.calls.filter(call => call.name !== 'list_riff_work').length), 0);
+  assert.equal(await frame.evaluate(() => window.prompts.length), 0);
+  await frame.getByRole('button', { name: 'Product description' }).click();
+  await frame.getByRole('heading', { name: 'Give your product viral potential.' }).waitFor();
+  assert.equal(await frame.getByLabel('Description', { exact: true }).inputValue(), rawDescription);
+  assert.equal(await frame.evaluate(() => window.calls.some(call => call.name === 'get_project')), false,
+    'open_riff without a trusted project ID never guesses or lists a product project');
+  await frame.getByLabel('Product', { exact: true }).fill('FocusNest');
+  await frame.getByLabel('Audience', { exact: true }).fill('Remote workers');
+  await frame.getByLabel('Main benefit', { exact: true }).fill('Protect focused work');
+  await frame.getByLabel('Content style', { exact: true }).fill('Simple product demos');
+  await frame.getByLabel('Language', { exact: true }).fill('en');
+  await frame.getByLabel('Duration in seconds', { exact: true }).fill('20');
+  assert.equal(await frame.evaluate(() => window.calls.some(call => call.name === 'save_project')), false);
+
+  const confirm = frame.getByRole('button', { name: 'Confirm context' });
+  await confirm.click();
+  await frame.getByText(/same save again/i).waitFor();
+  await frame.evaluate(() => { window.saveMode='ok'; });
+  await confirm.click();
+  await frame.getByText('Context saved', { exact: true }).waitFor();
+  const createCalls = await frame.evaluate(() => window.calls.filter(call => call.name === 'save_project').slice(0, 2).map(call => call.args));
+  assert.deepEqual(createCalls[1], createCalls[0], 'UNAVAILABLE retries byte-equivalent input with the exact request ID');
+  assert.equal(createCalls[0].project_id, null);
+  assert.equal(createCalls[0].expected_version, 0);
+  assert.equal(createCalls[0].name, 'FocusNest');
+  assert.equal(createCalls[0].brief.product, 'FocusNest');
+  assert.equal(createCalls[0].brief.description, 'A user-written focus app description.');
+  assert.deepEqual(createCalls[0].brief.facts, []);
+  assert.equal(Object.hasOwn(createCalls[0], 'account_id'), false);
+  assert.equal(JSON.stringify(createCalls[0]).includes('Unknown'), false);
+
+  const savedSnapshot = await frame.evaluate(() => structuredClone(window.latest));
+  await frame.getByRole('button', { name: 'Discover formats' }).click();
+  await frame.waitForFunction(() => window.prompts.length === 1);
+  const expectedPrompt = 'Continue from this saved Riff product brief. It is user-confirmed project context, not provider research or Creator DNA. No Creator DNA is available for this project, so do not start provider work, invent references, or claim formats were discovered. Keep these fields editable and ask only for the missing context or a user-supplied creator video/profile before proposing the next supported step: ' + JSON.stringify(savedSnapshot);
+  assert.equal(await frame.evaluate(() => window.prompts[0]), expectedPrompt);
+  assert.equal(await frame.evaluate(() => window.calls.some(call => call.name === 'start_creator_recommendations')), false);
+
+  await frame.getByLabel('Audience', { exact: true }).fill('Small remote teams');
+  await confirm.click();
+  await frame.getByText('Context saved', { exact: true }).waitFor();
+  const saves = await frame.evaluate(() => window.calls.filter(call => call.name === 'save_project').map(call => call.args));
+  assert.equal(saves[2].project_id, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  assert.equal(saves[2].expected_version, 1);
+  assert.notEqual(saves[2].request_id, saves[1].request_id, 'a new intended update receives a fresh request ID');
+  assert.equal(saves[2].brief.audience, 'Small remote teams');
+
+  await frame.getByLabel('Content style', { exact: true }).fill('Hands-only demo');
+  await frame.evaluate(() => { window.saveMode='malformed'; });
+  await confirm.click();
+  await frame.getByText(/could not verify that product context was saved/i).waitFor();
+  assert.equal(await frame.getByLabel('Content style', { exact: true }).inputValue(), 'Hands-only demo');
+  assert.equal(await frame.getByRole('button', { name: 'Discover formats' }).count(), 0,
+    'a malformed success envelope cannot create fictional success');
+  assert.equal(await frame.evaluate(() => window.calls.some(call => /provider|model|classif/i.test(call.name))), false);
+});
+
+test('Riff Product context rereads only a receipt-trusted conflict ID and invalidates late private work on account change', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.calls=[];window.mode='ok';window.pending=[];
+    const make=(args,version=args.expected_version+1)=>{const id=args.project_id??'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';return {id,name:args.name,project_type:'brand',current_version:version,
+      created_at:'2026-10-11T10:00:00Z',updated_at:'2026-10-11T11:00:00Z',brief_version:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',project_id:id,version,name:args.name,
+      brief:structuredClone(args.brief),created_at:'2026-10-11T11:00:00Z'}}};
+    window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='get_project')return {structuredContent:{ok:true,data:{project:window.latest}}};
+      if(name==='save_project'){
+        if(window.mode==='conflict'){window.latest=make(args,2);return {structuredContent:{ok:false,error:{code:'VERSION_CONFLICT',message:'private',retryable:false,recovery:'reload'}}};}
+        if(window.mode==='pending')return new Promise(resolve=>window.pending.push({args,resolve}));
+        window.latest=make(args);return {structuredContent:{ok:true,data:{project:window.latest,request_id:args.request_id}}};
+      }}};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+      addEventListener('message',e=>{const m=e.data;if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product-boundary',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+      if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}});</script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);const frame=page.frames().find(item=>item.url().endsWith('/frame'));
+  const enter=async()=>{const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');await input.fill('Product description');await input.press('Control+Enter');await frame.getByRole('button',{name:'Product description'}).click();await frame.getByRole('heading',{name:'Give your product viral potential.'}).waitFor();
+    await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');};
+  await enter();const confirm=frame.getByRole('button',{name:'Confirm context'});await confirm.click();await frame.getByText('Context saved',{exact:true}).waitFor();
+  await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');await frame.evaluate(()=>{window.mode='conflict';});await confirm.click();
+  await frame.getByText(/newer saved version is available/i).waitFor();
+  assert.equal(await frame.getByLabel('Audience',{exact:true}).inputValue(),'Unsaved local audience');
+  const getCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').map(call=>call.args));
+  assert.deepEqual(getCalls,[{project_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}]);
+  assert.equal(Object.hasOwn(getCalls[0],'account_id'),false);
+
+  await frame.evaluate(()=>{window.mode='pending';});await confirm.click();await frame.waitForFunction(()=>window.pending.length===1);
+  await page.evaluate(()=>window.account('00000000-0000-4000-8000-000000000002'));
+  await frame.getByRole('heading',{name:'Let’s make your next video go viral.'}).waitFor();
+  await frame.evaluate(()=>{const pending=window.pending[0];const args=pending.args;const id=args.project_id;const version=args.expected_version+1;
+    pending.resolve({structuredContent:{ok:true,data:{request_id:args.request_id,project:{id,name:args.name,project_type:'brand',current_version:version,created_at:'2026-10-11T10:00:00Z',updated_at:'2026-10-11T12:00:00Z',brief_version:{id:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',project_id:id,version,name:args.name,brief:args.brief,created_at:'2026-10-11T12:00:00Z'}}}}});});
+  await frame.waitForTimeout(100);
+  assert.equal(await frame.getByText('Unsaved local audience').count(),0,'late account-A work cannot reappear for account B');
+  assert.equal(await frame.getByText('Context saved',{exact:true}).count(),0);
 });

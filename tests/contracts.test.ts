@@ -19,6 +19,17 @@ test('description-only input is valid; ownership and unknown fields are rejected
   assert.equal(GetAccountStateInput.safeParse({ account_id: crypto.randomUUID() }).success, false);
   assert.equal(GetProjectInput.safeParse({ project_id: 'not-a-uuid' }).success, false);
 });
+test('product descriptions persist additively while historical strict briefs remain valid', () => {
+  const historical = createInput();
+  assert.ok(Brief.safeParse(historical.brief).success, 'historical briefs may omit description');
+  assert.ok(SaveProjectInput.safeParse({
+    ...historical,
+    brief: { ...historical.brief, description: 'A user-confirmed product description.' },
+  }).success);
+  assert.equal(Brief.safeParse({ ...historical.brief, description: ' ' }).success, false);
+  assert.equal(Brief.safeParse({ ...historical.brief, description: 'x'.repeat(4_001) }).success, false);
+  assert.equal(Brief.safeParse({ ...historical.brief, description: 'Valid', unknown: 'not allowed' }).success, false);
+});
 test('onboarding state is nullable and marking accepts no client-owned fields', () => {
   const account = {
     id: crypto.randomUUID(), display_name: 'Riff member', state: 'active', preferred_language: 'en',

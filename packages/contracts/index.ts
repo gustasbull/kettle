@@ -20,6 +20,7 @@ export const Fact = z.strictObject({
 });
 export const Brief = z.strictObject({
   product: text(4000),
+  description: text(4000).optional(),
   audience: text(1000),
   goal: text(1000),
   tone: text(200),

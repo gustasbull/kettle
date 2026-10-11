@@ -8,6 +8,14 @@ import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './r
 import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput } from './creator-pipeline-controller.ts';
 import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
+import {
+  parseProductGetResult,
+  parseProductSaveResult,
+  productFailureMessage,
+  validateProductDraft,
+  type ProductDraft,
+} from './riff-product-context-validation.ts';
+import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -116,6 +124,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   let workLoadEpoch = 0;
   let activeAccountId: string | undefined;
   let creatorRequest: { accountId: string | undefined; key: string; requestId: string } | undefined;
+  let productSaveRequest: { accountId: string | undefined; key: string; input: SaveProjectInput } | undefined;
+  let blockedProductIntentKey: string | undefined;
   let recommendationRequest: { key: string; requestId: string } | undefined;
   let actionEpoch = 0;
   const terminalWorkRefreshes = new Set<string>();
@@ -245,9 +255,84 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         actionEpoch++;
         creatorRequest = undefined;
       }
+      productSaveRequest = undefined;
+      blockedProductIntentKey = undefined;
+    },
+    async saveProduct(context: { draft: ProductDraft; project: Project | null }) {
+      const accountId = activeAccountId;
+      const intentKey = JSON.stringify({
+        accountId,
+        projectId: context.project?.id ?? null,
+        expectedVersion: context.project?.current_version ?? 0,
+        draft: context.draft,
+      });
+      if (blockedProductIntentKey === intentKey) return {
+        status: 'failed',
+        message: productFailureMessage('IDEMPOTENCY_CONFLICT'),
+      };
+      if (productSaveRequest?.accountId !== accountId || productSaveRequest?.key !== intentKey) {
+        const validation = validateProductDraft(context.draft, context.project, crypto.randomUUID());
+        if (!validation.ok) return { status: 'failed', message: 'Review the highlighted product brief fields, then confirm again.' };
+        productSaveRequest = { accountId, key: intentKey, input: validation.input };
+      }
+      const pending = productSaveRequest;
+      const epoch = ++actionEpoch;
+      const outcome = await callTool('save_project', pending.input);
+      if (disposed || epoch !== actionEpoch || activeAccountId !== accountId) return {
+        status: 'failed', message: 'A newer Riff account or action is already shown.',
+      };
+      if (outcome.status === 'response') {
+        const parsed = parseProductSaveResult(outcome.value, pending.input);
+        if (parsed.status === 'saved') {
+          if (productSaveRequest === pending) productSaveRequest = undefined;
+          blockedProductIntentKey = undefined;
+          return parsed;
+        }
+        if (parsed.status === 'failure') {
+          if (parsed.failure.code === 'IDEMPOTENCY_CONFLICT') {
+            if (productSaveRequest === pending) productSaveRequest = undefined;
+            blockedProductIntentKey = intentKey;
+          }
+          return { status: 'failed', message: productFailureMessage(parsed.failure.code) };
+        }
+        return { status: 'failed', message: productFailureMessage('MALFORMED') };
+      }
+      if (outcome.status !== 'application_error') {
+        return { status: 'failed', message: productFailureMessage('MALFORMED') };
+      }
+      const failure = outcome.failure;
+      if ((failure.code === 'VERSION_CONFLICT' || failure.code === 'NOT_FOUND') && context.project) {
+        if (productSaveRequest === pending) productSaveRequest = undefined;
+        const trustedProjectId = context.project.id;
+        const reread = await callTool('get_project', { project_id: trustedProjectId });
+        if (disposed || epoch !== actionEpoch || activeAccountId !== accountId) return {
+          status: 'failed', message: 'A newer Riff account or action is already shown.',
+        };
+        if (reread.status === 'response') {
+          const parsed = parseProductGetResult(reread.value, trustedProjectId);
+          if (parsed.status === 'loaded') return {
+            status: 'conflict', latest: parsed.project, message: productFailureMessage('VERSION_CONFLICT'),
+          };
+          if (parsed.status === 'failure') return { status: 'failed', message: productFailureMessage(parsed.failure.code) };
+        }
+        return { status: 'failed', message: productFailureMessage(failure.code) };
+      }
+      if (failure.code === 'IDEMPOTENCY_CONFLICT') {
+        if (productSaveRequest === pending) productSaveRequest = undefined;
+        blockedProductIntentKey = intentKey;
+      } else if (!retainRequestId(failure) && productSaveRequest === pending) {
+        productSaveRequest = undefined;
+      }
+      return { status: 'failed', message: productFailureMessage(failure.code) };
+    },
+    discoverProduct(project) {
+      actionEpoch++;
+      return send('Continue from this saved Riff product brief. It is user-confirmed project context, not provider research or Creator DNA. No Creator DNA is available for this project, so do not start provider work, invent references, or claim formats were discovered. Keep these fields editable and ask only for the missing context or a user-supplied creator video/profile before proposing the next supported step: ' + JSON.stringify(project));
     },
     async start(rawSource) {
       const epoch = ++actionEpoch;
+      productSaveRequest = undefined;
+      blockedProductIntentKey = undefined;
       const { trimmed, sourceUrl, parsed, key: intentKey } = creatorIntent(rawSource);
       if (creatorRequest?.accountId !== activeAccountId) creatorRequest = undefined;
       if (creatorRequest && creatorRequest.key !== intentKey) creatorRequest = undefined;
@@ -468,6 +553,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     if (disposed) return;
     actionEpoch++;
     creatorRequest = undefined;
+    productSaveRequest = undefined;
+    blockedProductIntentKey = undefined;
     recommendationRequest = undefined;
     workLoadEpoch++;
     controller.reset();sourceByJob.clear();catalogDeferred=undefined;catalogLoader.reset();
@@ -501,7 +588,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   app.ontoolresult = (params) => {
     const nextState = riffHomeStructuredOutput(params.structuredContent);
     const nextAccountId = nextState.status === 'ready' ? nextState.account.id : undefined;
-    const pendingAccountChanged = creatorRequest !== undefined && creatorRequest.accountId !== nextAccountId;
+    const pendingAccountChanged = (creatorRequest !== undefined && creatorRequest.accountId !== nextAccountId)
+      || (productSaveRequest !== undefined && productSaveRequest.accountId !== nextAccountId);
     if (pendingAccountChanged || (activeAccountId !== undefined && activeAccountId !== nextAccountId)) {
       invalidateAccountBoundary();
     }
