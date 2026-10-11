@@ -1,0 +1,56 @@
+import { z } from 'zod';
+import type { RiffCreatorRepository } from '../application/riff-creator.ts';
+import type {
+  CanonicalRiffCreatorSource, ListRiffWorkInput, StartRiffCreatorInput,
+} from '../contracts/riff-creator.ts';
+import { createSupabaseRepository } from './supabase.ts';
+import { observed, type CreatorLatencyObserver } from '../application/creator-observability.ts';
+
+export const RiffCreatorDevelopmentPolicy = z.strictObject({
+  maxProfilesPerAccount: z.number().int().min(1).max(10),
+  allowanceTtlSeconds: z.number().int().min(60).max(604_800),
+});
+export type RiffCreatorDevelopmentPolicy = z.infer<typeof RiffCreatorDevelopmentPolicy>;
+
+type RiffCreatorStorageOperation = 'get_riff_creator_start' | 'start_riff_creator' | 'list_riff_work';
+
+export function createRiffCreatorSupabaseRepository(
+  baseUrl: string,
+  serviceRoleKey: string,
+  rawPolicy: RiffCreatorDevelopmentPolicy,
+  fetcher: typeof fetch = fetch,
+  telemetry?: CreatorLatencyObserver,
+): RiffCreatorRepository {
+  createSupabaseRepository(baseUrl, serviceRoleKey, fetcher);
+  const policy = RiffCreatorDevelopmentPolicy.parse(rawPolicy);
+  const call = async (
+    operation: RiffCreatorStorageOperation,
+    accountId: string,
+    input: unknown,
+    operationTelemetry?: CreatorLatencyObserver,
+  ) => {
+    const response = await observed(operationTelemetry ?? telemetry, { stage: 'supabase_rpc', clock: 'monotonic',
+      operation: operation === 'get_riff_creator_start' ? 'find' : operation === 'list_riff_work' ? 'list' : 'start',
+      endpoint: operation === 'get_riff_creator_start' ? 'riff_creator_find'
+        : operation === 'list_riff_work' ? 'riff_creator_list' : 'riff_creator_start' }, () => fetcher(new URL(`/rest/v1/rpc/kettle_${operation}`, baseUrl), {
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10_000),
+      headers: { 'Content-Type': 'application/json', apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+      body: JSON.stringify({ p_account_id: accountId, p_input: input }),
+    }));
+    if (!response.ok) throw new Error('Riff creator storage unavailable');
+    return response.json();
+  };
+  return {
+    find: (accountId: string, input: StartRiffCreatorInput, operationTelemetry?: CreatorLatencyObserver) => call('get_riff_creator_start', accountId, input, operationTelemetry),
+    start: (accountId: string, input: StartRiffCreatorInput, source: CanonicalRiffCreatorSource,
+      operationTelemetry?: CreatorLatencyObserver) => call(
+      'start_riff_creator', accountId, {
+        input, source,
+        max_profiles_per_account: policy.maxProfilesPerAccount,
+        allowance_ttl_seconds: policy.allowanceTtlSeconds,
+      },
+      operationTelemetry,
+    ),
+    list: (accountId: string, input: ListRiffWorkInput, operationTelemetry?: CreatorLatencyObserver) => call('list_riff_work', accountId, input, operationTelemetry),
+  };
+}

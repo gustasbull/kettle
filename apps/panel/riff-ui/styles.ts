@@ -55,4 +55,3 @@ export const riffBaseStyles = `
   .riff-app :is(button, a, input, textarea, [tabindex]):focus-visible { outline-color: Highlight; }
 }
 `;
-

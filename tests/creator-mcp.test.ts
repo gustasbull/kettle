@@ -8,10 +8,25 @@ import { createCreatorOperations, createCreatorIngestion, projectCreatorDna, typ
 import { creatorContracts, StoredCreatorOutput, GetCreatorDnaOutput, CorrectCreatorDnaOutput } from '../packages/contracts/creator-operations.ts';
 import { creatorAnalysisFixture } from '../packages/contracts/fixtures/creator-profile.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
-import { handleMcp } from '../apps/worker/mcp.ts';
+import { selectMcpToolDescriptors, handleMcp } from '../apps/worker/mcp.ts';
 import { oauthScopes } from '../packages/auth/index.ts';
 import { fixtureAuth, config } from './auth-fixtures.ts';
 import { createInput, accountA } from './fixtures.ts';
+
+test('tool and security descriptor catalogs are fully hoisted, frozen, and reused per isolate', () => {
+  const availability={authenticated:true,creator:true,pipeline:true,riffCreator:true};
+  const first=selectMcpToolDescriptors(availability);
+  const second=selectMcpToolDescriptors({...availability});
+  assert.equal(second,first);assert.equal(Object.isFrozen(first),true);
+  for(const tool of first){
+    assert.equal(Object.isFrozen(tool),true);
+    assert.equal(Object.isFrozen(tool.securitySchemes),true);
+    assert.equal(Object.isFrozen(tool.annotations),true);
+  }
+  assert.ok(first.some(tool=>tool.name==='start_riff_creator'));
+  assert.deepEqual(selectMcpToolDescriptors({authenticated:false,creator:false,pipeline:false,riffCreator:false})
+    .map(tool=>tool.name),['kettle_diagnostic']);
+});
 
 test('Creator MCP reads, render and corrections use signed identity, real SQL and public projection', async t => {
   const db = new PGlite(); t.after(() => db.close());
@@ -50,7 +65,8 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const shown = (await call('render_creator_dna',input,token)).result;
   const view = GetCreatorDnaOutput.parse(shown.structuredContent); assert.ok(view.ok);
   assert.equal(view.data.dna.contains_fixture_data,true);
-  assert.deepEqual(JSON.parse(shown.content[0]!.text),shown.structuredContent);
+  assert.equal(shown.content[0]!.text,`Loaded Creator DNA version ${view.data.dna.version} with 1 claim, 1 evidence item, and 1 limitation.`);
+  assert.ok(!shown.content[0]!.text.includes(view.data.dna.dna_id));
   for (const secret of ['requested_cursor','permitted_uses','provider_endpoint','cost_attempts']) assert.ok(!JSON.stringify(shown).includes(secret));
   const before = calls;
   const denied = (await call('render_creator_dna',input)).result;
@@ -62,8 +78,10 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const foreign = await identity.token({sub:'user-b'});
   assert.deepEqual((await call('render_creator_dna',input,foreign)).result,(await call('render_creator_dna',{dna_id:crypto.randomUUID()},foreign)).result);
   const correction = {...input,expected_version:1,request_id:crypto.randomUUID(),corrections:view.data.dna.claims.map(c=>({claim_id:c.id,statement:'User corrected fictional context'}))};
-  const updated = CorrectCreatorDnaOutput.parse((await call('correct_creator_dna',correction,token)).result.structuredContent); assert.ok(updated.ok);
+  const updatedResponse=(await call('correct_creator_dna',correction,token)).result;
+  const updated = CorrectCreatorDnaOutput.parse(updatedResponse.structuredContent); assert.ok(updated.ok);
   assert.equal(updated.data.dna.version,2);
+  assert.equal(updatedResponse.content[0]!.text,`Saved Creator DNA version ${updated.data.dna.version} with 1 claim, 1 evidence item, and 1 limitation.`);
   assert.equal(updated.data.dna.contains_fixture_data,true,'fictional origin survives corrections');
   assert.deepEqual(updated.data.dna.evidence,view.data.dna.evidence,'correction preserves original evidence lineage');
   const hidden = structuredClone(stored.data);
@@ -74,12 +92,14 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   assert.deepEqual((await call('correct_creator_dna',correction,token)).result.structuredContent,updated);
   const reopened = GetCreatorDnaOutput.parse((await call('render_creator_dna',input,token)).result.structuredContent); assert.ok(reopened.ok); assert.equal(reopened.data.dna.version,2);
   const history = GetCreatorDnaOutput.parse((await call('get_creator_dna',{...input,version:1},token)).result.structuredContent); assert.deepEqual(history,view);
-  const stale = (await call('correct_creator_dna',{...correction,request_id:crypto.randomUUID()},token)).result; assert.equal(stale.isError,true); assert.match(stale.content[0]!.text,/VERSION_CONFLICT/);
+  const stale = (await call('correct_creator_dna',{...correction,request_id:crypto.randomUUID()},token)).result; assert.equal(stale.isError,true);
+  assert.equal(stale.content[0]!.text,'Riff request failed (VERSION_CONFLICT). Reload the latest saved state before trying again.');
   const resource = await (await rpc('resources/read',{uri:'ui://kettle/creator-review-v2.html'})).json() as {result:{contents:{text:string;_meta:Record<string,unknown>}[]}};
   assert.match(resource.result.contents[0]!.text,/ui\/initialize/);
   assert.ok(!resource.result.contents[0]!.text.includes(stored.data.dna_id));
   const unavailable = await (await rpc('tools/list',{},undefined,false)).json() as {result:{tools:{name:string}[]}};
   assert.deepEqual(unavailable.result.tools.map(t=>t.name),['kettle_diagnostic']);
   identity.block();
-  assert.equal((await rpc('tools/call',{name:'correct_creator_dna',arguments:correction},token)).status,401);
+  const blocked=await (await rpc('tools/call',{name:'correct_creator_dna',arguments:correction},token)).json() as any;
+  assert.equal(blocked.result.isError,true);assert.match(blocked.result._meta['mcp/www_authenticate'][0],/invalid_token/);
 });

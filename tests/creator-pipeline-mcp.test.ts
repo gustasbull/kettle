@@ -6,7 +6,7 @@ import { createOperations } from '../packages/application/operations.ts';
 import { createCreatorOperations, type CreatorRepository } from '../packages/application/creator-operations.ts';
 import { createPipelineOperations, runCreatorPipelineJob, canProcessCapturedDna, type PipelineRepository } from '../packages/application/creator-pipeline.ts';
 import { StoredCreatorAnalysis } from '../packages/contracts/creator-operations.ts';
-import { CreatorJobOutput, pipelineContracts, type CreatorJobView } from '../packages/contracts/creator-pipeline.ts';
+import { CreatorJobOutput, CreatorJobStatusOutput, pipelineContracts, type CreatorJobView } from '../packages/contracts/creator-pipeline.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
 import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipeline/provider.ts';
 import { providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
@@ -47,7 +47,9 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const call=async(name:string,args:unknown,credential:string|undefined=token)=>await (await rpc('tools/call',{name,arguments:args},credential)).json() as {result:{structuredContent:unknown;content:{text:string}[];isError?:boolean;_meta?:Record<string,string[]>};error?:unknown};
   function job(response:Awaited<ReturnType<typeof call>>):CreatorJobView {
     assert.ok(!response.error);const parsed=CreatorJobOutput.parse(response.result.structuredContent);assert.ok(parsed.ok,JSON.stringify(parsed));
-    assert.deepEqual(JSON.parse(response.result.content[0]!.text),response.result.structuredContent);
+    assert.match(response.result.content[0]!.text,new RegExp(`^Creator ${parsed.data.job.kind} job — state: ${parsed.data.job.state}; stage: ${parsed.data.job.stage}; revision: ${parsed.data.job.revision}; .+\\.$`));
+    assert.ok(!response.result.content[0]!.text.includes(parsed.data.job.id));
+    assert.ok(!response.result.content[0]!.text.trimStart().startsWith('{'));
     for(const secret of ['account_id','captured','permitted_uses','ceiling_microusd','synthetic-sc','synthetic-lr'])assert.ok(!JSON.stringify(response.result).includes(secret));
     return parsed.data.job;
   }
@@ -56,12 +58,17 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     providerConstructions++;
     const captured=stored.kind==='scan'?undefined:StoredCreatorAnalysis.parse((stored.captured as {stored:unknown}).stored);
     return createCreatorPipelineProvider({...f.options,...(stored.kind==='scan'?{seedUrl}:{}),credentials:{scrapeCreators:f.options.credentials.scrapeCreators,lightreel:f.options.credentials.lightreel},canProcessDna:view=>!!captured&&canProcessCapturedDna(captured,view)});
-  },{scrapecreators:0,lightreel:0,openai:0},async(_name,fn)=>fn());}
+  },{scrapecreators:0,lightreel:0,openai:0},async(_name,fn)=>fn(),undefined,{
+    async list(){throw new Error('provider workflow cannot list catalog');},
+    async ingest(owner,input){return sql('ingest_riff_videos',owner,input);},
+  });}
   const created=SaveProjectOutput.parse(await operations.execute('save_project',token,createInput()));assert.ok(created.ok);
   const projectId=created.data.project.id;
   await db.query("insert into public.creator_pipeline_allowances(account_id,profile_url,enabled,expires_at) values($1,$2,true,now()+interval '1 day')",[accountA,f.input.request.supplied_url]);
   await db.exec("insert into public.creator_provider_trials(provider,remaining_units,enabled,expires_at) values('scrapecreators',10,true,now()+interval '1 hour'),('lightreel',3,true,now()+interval '1 hour')");
   const listing=await (await rpc('tools/list',{})).json() as {result:{tools:any[]}};
+  assert.ok(!listing.result.tools.some(tool=>/outcome|reconcil|usage|attempt/i.test(tool.name)),
+    'attempt outcome writes and operator reconciliation stay outside public MCP');
   for(const name of ['start_creator_scan','start_creator_recommendations','save_creator_scripts','get_creator_job','render_creator_job']){
     const tool=listing.result.tools.find(t=>t.name===name);assert.ok(tool,name);
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
@@ -70,11 +77,34 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
       [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
+  const statusTool=listing.result.tools.find(t=>t.name==='get_creator_job_status');assert.ok(statusTool);
+  assert.deepEqual(statusTool.inputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.input),type:'object'});
+  assert.deepEqual(statusTool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
+    [['ok', 'data'], ['ok', 'error']]);
+  assert.deepEqual(statusTool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
+  assert.deepEqual(statusTool.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
+  assert.equal(statusTool._meta.ui.resourceUri,undefined);assert.match(statusTool.description,/provider-free/i);
+  const saveScriptsTool=listing.result.tools.find(t=>t.name==='save_creator_scripts');
+  assert.match(saveScriptsTool.description,/timed segments.*caption.*hashtags/i,
+    'ChatGPT receives the persisted Studio fields needed by the Paper flow');
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
+  const dispatchBeforeStatus=dispatches.length,dbBeforeStatus=dbCalls.length;
+  const queuedStatusResponse=(await call('get_creator_job_status',{job_id:scan.id})).result;
+  const queuedStatus=CreatorJobStatusOutput.parse(queuedStatusResponse.structuredContent);
+  assert.ok(queuedStatus.ok);assert.equal(queuedStatus.data.status.stage,'accepted');assert.equal(queuedStatus.data.status.terminal_result_available,false);
+  assert.equal(queuedStatusResponse.content[0]!.text,
+    'Creator scan job — state: queued; stage: accepted; revision: 1; videos: 0.');
+  assert.deepEqual(Object.keys(queuedStatus.data.status).sort(),['created_at','id','kind','progress','revision','stage','state','terminal_result_available','updated_at']);
+  assert.equal(dispatches.length,dispatchBeforeStatus);assert.equal(f.http.length,0);assert.equal(dbCalls.length,dbBeforeStatus+1);
   await run(scan.id);scan=job(await call('render_creator_job',{job_id:scan.id}));assert.equal(scan.state,'succeeded');assert.equal(scan.result?.kind,'scan');
   assert.equal(f.http.length,3);assert.equal(new URL(f.http[0]!.url).hostname,'api.lightreel.ai');assert.equal(scan.result!.kind,'scan');if(scan.result!.kind!=='scan')throw Error('scan');
+  const profileRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v1/tiktok/profile')!.url);
+  const feedRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v3/tiktok/profile/videos')!.url);
+  assert.equal(profileRequest.searchParams.get('cache_max_age'),'1d');
+  assert.equal(feedRequest.searchParams.get('user_id'),'9000000000000000001');
+  assert.equal(feedRequest.searchParams.has('cache_max_age'),false);
   const dna=scan.result!.dna;
   assert.equal(dna.seed_review?.url,seedUrl);assert.equal(dna.seed_review?.access_basis,'transcript_or_caption_only');
   assert.ok(!JSON.stringify(dna.seed_review).includes('conversation_id'));
@@ -82,6 +112,12 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   let rec=job(await call('start_creator_recommendations',recInput));await run(rec.id);rec=job(await call('render_creator_job',{job_id:rec.id}));
   assert.equal(rec.state,'succeeded');if(rec.result?.kind!=='recommendations')throw Error(JSON.stringify(rec));
   const batch=rec.result.batch;assert.equal(batch.ideas.length,1);assert.equal(f.http.length,5);
+  const detailRequest=new URL(f.http.find(({url})=>new URL(url).pathname==='/v2/tiktok/video')!.url);
+  assert.equal(detailRequest.searchParams.get('cache_max_age'),'7d');
+  assert.equal(detailRequest.searchParams.get('get_transcript'),'false');
+  assert.equal(detailRequest.searchParams.get('download_media'),'false');
+  assert.equal(batch.references[0]!.source_observed_at,'2026-10-08T14:30:00.000Z');
+  assert.notEqual(batch.references[0]!.retrieved_at,batch.references[0]!.source_observed_at);
   const variants=creatorScriptsFixture().variants.map(({id:_id,...v})=>({...v,reference_ids:batch.ideas[0]!.reference_ids}));
   const saveInput={batch_id:batch.id,idea_id:batch.ideas[0]!.id,request_id:crypto.randomUUID(),variants};
   let saved=job(await call('save_creator_scripts',saveInput));const constructions=providerConstructions,requests=f.http.length;
@@ -102,12 +138,23 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   assert.match(unauth.result._meta['mcp/www_authenticate'][0],/invalid_token/);
   const noScope=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},await identity.token({riff_permissions:['projects:read']}));
   assert.match(noScope.result._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);assert.equal(dbCalls.length,before);
+  const noRead=await call('get_creator_job_status',{job_id:saved.id},await identity.token({riff_permissions:['projects:write']}));
+  assert.match(noRead.result._meta!['mcp/www_authenticate']![0]!,/insufficient_scope/);assert.equal(dbCalls.length,before);
   const foreign=await identity.token({sub:'user-b'});
   assert.deepEqual((await call('render_creator_job',{job_id:saved.id},foreign)).result,(await call('render_creator_job',{job_id:crypto.randomUUID()},foreign)).result);
-  const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);assert.match(foreignSave.result.content[0]!.text,/NOT_FOUND/);
+  assert.deepEqual((await call('get_creator_job_status',{job_id:saved.id},foreign)).result,
+    (await call('get_creator_job_status',{job_id:crypto.randomUUID()},foreign)).result);
+  const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);
+  assert.equal(foreignSave.result.content[0]!.text,'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   assert.equal(dispatches.length,dispatchCount);assert.equal(f.http.length,requests);
-  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v2.html'})).json() as any;
+  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v3.html'})).json() as any;
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));
-  assert.deepEqual(content._meta.ui.csp,{connectDomains:[],resourceDomains:[],frameDomains:[],baseUriDomains:[]});
-  identity.block();assert.equal((await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}},token)).status,401);
+  assert.deepEqual(content._meta.ui.csp,{
+    connectDomains:[],
+    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com','https://tiktokcdn-us.com','https://*.tiktokcdn-us.com'],
+    frameDomains:[],baseUriDomains:[],
+  });
+  identity.block();
+  const blocked=await (await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}},token)).json() as any;
+  assert.equal(blocked.result.isError,true);assert.match(blocked.result._meta['mcp/www_authenticate'][0],/invalid_token/);
 });

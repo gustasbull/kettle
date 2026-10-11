@@ -1,19 +1,22 @@
 import {
   App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
   type McpUiHostContext,
-} from '@modelcontextprotocol/ext-apps';
-import { OpenAIExtensions } from '@openai/mcp-extensions/app';
+} from './mcp-app-lite.ts';
+import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
-import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
+import { createCreatorPipelineController, creatorJobStatusStructuredOutput, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
+import { panelPerformanceFromDocument } from './creator-performance.ts';
+import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
+import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 
 const WAIT_MS = 10_000;
 
 /** Read-only persisted job view. No provider calls, storage or start/generate capability. */
 export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPipelineLimits = {}) {
+  const localPerformance = panelPerformanceFromDocument(root.ownerDocument, performance);
   const timeoutMs = limits.timeoutMs ?? WAIT_MS;
   const app = new App({ name: 'kettle-creator-pipeline', version: '1.0.0' },
     { availableDisplayModes: ['inline', 'fullscreen'] }, { autoResize: false });
-  const extensions = new OpenAIExtensions(app);
   const doc = root.ownerDocument;
   const host = doc.createElement('section');
   host.setAttribute('aria-label', 'Riff creator job');
@@ -21,16 +24,17 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const message = doc.createElement('p');
   message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
   message.tabIndex = -1;
+  message.hidden = true;
+  message.style.cssText = 'margin:12px 20px;color:var(--color-text-secondary,#6d6d72);font-size:13px;line-height:20px';
   const card = doc.createElement('div');
-  const refresh = doc.createElement('button');
-  refresh.type = 'button'; refresh.textContent = 'Refresh job'; refresh.hidden = true;
-  refresh.style.cssText = 'font:inherit;padding:8px 12px;margin:8px;border:1px solid currentColor;border-radius:8px;color:inherit;background:transparent;cursor:pointer';
-  host.append(message, card, refresh); root.replaceChildren(host);
+  host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
+  let currentProjectId:string|undefined;
+  const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
     view?.dispose(); view = undefined; card.replaceChildren();
-    refresh.hidden = true; message.textContent = text;
+    message.hidden = false; message.textContent = text;
     if (hadFocus) message.focus({ preventScroll: true });
   }
   const messages = {
@@ -41,14 +45,17 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   } as const;
   let bridgeReady = false;
   const sendPrompt = async (prompt: string) => {
-    if (!bridgeReady || !app.getHostCapabilities()?.message?.text) return {
+    const capabilities = app.getHostCapabilities();
+    if (!bridgeReady || (capabilities?.experimental?.['openai/message'] == null && !capabilities?.message?.text)) return {
       status: 'unsupported' as const, message: 'Continue with this request in the ChatGPT composer.',
     };
     try {
-      const params = { role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] };
-      const result = extensions.message
-        ? await extensions.message.send({ ...params, _meta: { 'openai/message': { target: 'active', send: true } } })
-        : await app.sendMessage(params);
+      const params: OpenAIMessageParams = {
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+        _meta: { 'openai/message': { target: 'active', send: true } },
+      };
+      const result = await app.sendMessage(params as Parameters<typeof app.sendMessage>[0]);
       return result.isError
         ? { status: 'failed' as const, message: 'ChatGPT did not accept that handoff. Continue in the composer.' }
         : { status: 'sent' as const, message: 'Sent to ChatGPT. Continue there when you are ready.' };
@@ -71,22 +78,39 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
       return { status: 'failed' as const, message: 'Fullscreen could not open. Continue from the inline summary.' };
     }
   };
+  const catalogLoader=createRiffVideoCatalogLoader(
+    args=>app.callServerTool({name:'list_riff_videos',arguments:args},
+      {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}),
+    page=>view?.setCatalog(page),
+  );
+  const loadCatalog=(projectId=currentProjectId)=>{
+    if(!projectId||projectId!==currentProjectId||!bridgeReady)return;
+    return catalogLoader.load({ownerKey:projectId,projectId});
+  };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
-    job(job, status) {
+    job(snapshot, status) {
       view ??= mountCreatorPipeline(card, {
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
         sendPrompt, requestFullscreen,
+        onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
       });
-      view.render(job);
-      message.textContent = status.notice ?? (status.refreshing ? 'Checking saved job status…' : '');
-      refresh.hidden = !status.canRefresh; refresh.disabled = status.refreshing;
+      if(currentProjectId!==snapshot.job.project_id){
+        currentProjectId=snapshot.job.project_id;catalogLoader.reset();
+      }
+      view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{})});
+      if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length)sourceByJob.delete(snapshot.job.id);
+      message.textContent = status.notice ?? '';
+      message.hidden = !status.notice;
     },
+    notice(text){message.textContent=text;message.hidden=false;view?.setNotice(text);},
     cleared(reason) { clearCard(messages[reason]); },
-  }, async (input, signal) => creatorJobStructuredOutput(await app.callServerTool(
-    { name: 'get_creator_job', arguments: input },
-    { signal, timeout: timeoutMs + 1_000, maxTotalTimeout: timeoutMs + 1_000 })), limits);
-  refresh.addEventListener('click', () => { void controller.refresh(); });
+  }, {
+    readStatus:async(input,signal)=>creatorJobStatusStructuredOutput(await app.callServerTool({name:'get_creator_job_status',arguments:input},
+      {signal,timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000})),
+    readFull:async(input,signal)=>creatorJobStructuredOutput(await app.callServerTool({name:'get_creator_job',arguments:input},
+      {signal,timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000})),
+  }, { ...limits, performance: localPerformance });
   // Receiving a job before initialization must not cancel the handshake deadline.
   const initialTimer = setTimeout(() => controller.connectionFailed(), timeoutMs);
   const applyContext = (context: McpUiHostContext | undefined) => {
@@ -137,20 +161,33 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     view?.dispose(); view = undefined; host.remove();
     clearTimeout(initialTimer);
     window.removeEventListener('pagehide', dispose);
+    doc.removeEventListener('visibilitychange',visibilityChanged);
     app.ontoolinput = undefined;
     app.ontoolresult = undefined;
     app.ontoolcancelled = undefined;
     app.onhostcontextchanged = undefined;
     void app.close();
   }
-  app.ontoolinput = (params) => controller.receiveInput(params.arguments);
-  app.ontoolresult = (params) => controller.receiveResult(creatorJobStructuredOutput(params));
+  app.ontoolinput = (params) => {
+    // start_riff_creator has no job ID until its result arrives. Keep the
+    // loading state alive rather than rejecting a valid direct-start launch.
+    const start=parseStartRiffCreatorInput(params.arguments);
+    pendingSource=start&&/^https:\/\/www\.tiktok\.com\/@[\w.]+\/video\/\d{1,30}$/.test(start.source_url)?start.source_url:undefined;
+    if (!start) controller.receiveInput(params.arguments);
+  };
+  app.ontoolresult = (params) => {
+    const output = creatorJobStructuredOutput(params);
+    if (output?.ok){controller.receiveInput({ job_id: output.data.job.id });if(pendingSource)sourceByJob.set(output.data.job.id,pendingSource);pendingSource=undefined;}
+    controller.receiveResult(output);
+  };
   app.ontoolcancelled = () => controller.connectionFailed();
   app.onhostcontextchanged = applyContext;
   app.onclose = () => { bridgeReady = false; stopResize(); if (!disposed) controller.connectionFailed(); };
   // Acknowledge teardown before closing the transport, so the host receives its response.
   app.onteardown = async () => { setTimeout(dispose, 0); return {}; };
   window.addEventListener('pagehide', dispose, { once: true });
+  const visibilityChanged=()=>controller.visibilityChanged(doc.hidden);
+  doc.addEventListener('visibilitychange',visibilityChanged);
   if (window.parent === window) {
     controller.connectionFailed();
   } else {

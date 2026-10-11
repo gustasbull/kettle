@@ -1,37 +1,51 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { creatorPipelineScript } from '../panel/generated/creator-pipeline-bundle.ts';
+import { creatorPipelineScript, creatorPipelineFingerprint } from '../panel/generated/creator-pipeline-bundle.ts';
+import { TIKTOK_IMAGE_RESOURCE_DOMAINS } from '../../packages/contracts/tiktok-image-policy.ts';
 
-export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v2.html';
+export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v3.html';
+export const CREATOR_PIPELINE_V2_URI = 'ui://kettle/creator-pipeline-v2.html';
 export const CREATOR_PIPELINE_MIME = 'text/html;profile=mcp-app';
 export const CREATOR_PIPELINE_META = {
   'openai/ui': { availableDisplayModes: ['inline', 'fullscreen'], preferredDisplayMode: 'fullscreen' },
   ui: {
     prefersBorder: false,
-    csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
+    csp: {
+      connectDomains: [],
+      // The Paper discovery and analysis frames can render provider-observed
+      // TikTok cover images. No scripts, API calls, frames, or arbitrary image
+      // origins are permitted by this resource.
+      resourceDomains: [...TIKTOK_IMAGE_RESOURCE_DOMAINS],
+      frameDomains: [], baseUriDomains: [],
+    },
     permissions: {},
   },
 };
 
 /** Only a build-produced, static bundle belongs here; never interpolate tool data. */
-export function creatorPipelineHtml(script: string): string {
+export function creatorPipelineHtml(script: string, fingerprint?: {resource_version:string;bundle_version:string}): string {
   // Prevent HTML's raw-text parser from recognizing script end tags or legacy
   // comment openers inside JavaScript strings. No server data enters this HTML.
   const safeScript = script.replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+  const version = fingerprint && /^[a-z0-9][a-z0-9._:-]{0,63}$/.test(fingerprint.resource_version) && /^sha256:[a-f0-9]{64}$/.test(fingerprint.bundle_version)
+    ? `<meta name="riff-bundle-version" content="${fingerprint.bundle_version}" data-resource-version="${fingerprint.resource_version}">` : '';
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">${version}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Riff creator workflow</title></head>
 <body><div id="root"><p role="status">Loading your Riff creator workflow…</p></div>
 <script>${safeScript}</script></body></html>`;
 }
+export const CREATOR_PIPELINE_DOCUMENT = creatorPipelineHtml(creatorPipelineScript, creatorPipelineFingerprint);
 
 export function registerCreatorPipelineResource(server: McpServer): void {
-  server.registerResource('kettle-creator-pipeline', CREATOR_PIPELINE_URI, {
-    title: 'Riff creator workflow',
-    description: 'Read-only saved Riff creator jobs, ideas and filming variants. Status refresh never starts paid work.',
-    mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
-  }, async () => ({ contents: [{
-    uri: CREATOR_PIPELINE_URI, mimeType: CREATOR_PIPELINE_MIME,
-    text: creatorPipelineHtml(creatorPipelineScript), _meta: CREATOR_PIPELINE_META,
-  }] }));
+  const register = (name: string, uri: string) => server.registerResource(name, uri, {
+      title: 'Riff creator workflow',
+      description: 'Read-only saved Riff creator jobs, ideas and filming variants. Status refresh never starts paid work.',
+      mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
+    }, async () => ({ contents: [{
+      uri, mimeType: CREATOR_PIPELINE_MIME,
+      text: CREATOR_PIPELINE_DOCUMENT, _meta: CREATOR_PIPELINE_META,
+    }] }));
+  register('kettle-creator-pipeline', CREATOR_PIPELINE_URI);
+  register('kettle-creator-pipeline-v2-compat', CREATOR_PIPELINE_V2_URI);
 }

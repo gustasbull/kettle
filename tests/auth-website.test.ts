@@ -226,6 +226,36 @@ test('password signup preserves a signed consent return and confirmation callbac
   assert.ok(!setCookie.includes(session.refreshToken!));
 });
 
+test('signup confirmation page offers sign-in continuation to the validated consent return', async () => {
+  const h = harness();
+  const page = await h.form('/auth/sign-up?return_to=%2Foauth%2Fconsent%3Fauthorization_id%3Dauthorization-1');
+  const pending = await h.post('/auth/sign-up', page.cookie, {
+    csrf_token: page.csrf, email: 'creator@example.test', password: 'correct horse battery staple',
+  });
+
+  assert.equal(pending.status, 200);
+  const body = await pending.text();
+  assert.match(body, /href="\/auth\/sign-in\?return_to=%2Foauth%2Fconsent%3Fauthorization_id%3Dauthorization-1"/);
+  assert.match(body, />Continue to sign in<\/a>/);
+});
+
+test('failed confirmation callback links sign-in back to the pending consent return', async () => {
+  const h = harness();
+  const page = await h.form('/auth/sign-up?return_to=%2Foauth%2Fconsent%3Fauthorization_id%3Dauthorization-1');
+  const pending = await h.post('/auth/sign-up', page.cookie, {
+    csrf_token: page.csrf, email: 'creator@example.test', password: 'correct horse battery staple',
+  });
+  h.client.exchangeFailure = true;
+
+  const callback = await h.call('/auth/callback?code=confirmation-code', {
+    headers: { Cookie: cookieHeader(pending) },
+  });
+
+  assert.equal(callback.status, 401);
+  const body = await callback.text();
+  assert.match(body, /href="\/auth\/sign-in\?return_to=%2Foauth%2Fconsent%3Fauthorization_id%3Dauthorization-1"/);
+});
+
 test('password sign-in sanitizes return paths and same-origin CSRF protects sign-out', async () => {
   const h = harness();
   const signIn = await signedIn(h, 'https://evil.example/steal');

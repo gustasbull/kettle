@@ -74,14 +74,21 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   const home = listing.result.tools.find((tool) => tool.name === 'open_riff')!;
   assert.equal((home as { title?: string }).title, 'Riff Home');
   assert.deepEqual((home._meta as { 'openai/ui': { entrypoints: unknown[] } })['openai/ui'].entrypoints, [{ type: 'global' }, { type: 'thread' }]);
+  assert.deepEqual((home._meta as { ui: { visibility?: string[] } }).ui.visibility, ['model', 'app']);
+  assert.equal((home._meta as Record<string, unknown>)['openai/widgetAccessible'], true,
+    'ChatGPT compatibility hosts must allow the Home widget to invoke Riff tools directly');
   const denied = await (await rpc('tools/call', { name: 'save_project', arguments: createInput() })).json() as { result: { isError: boolean; structuredContent?: unknown; _meta: Record<string, string[]> } };
   assert.equal(denied.result.isError, true);
-  assert.equal('structuredContent' in denied.result, false, 'errors must not violate success-only output schemas');
+  assert.deepEqual(denied.result.structuredContent, failure('UNAUTHENTICATED'));
   assert.match(denied.result._meta['mcp/www_authenticate']![0]!, /resource_metadata=.*invalid_token/);
   assert.match(denied.result._meta['mcp/www_authenticate']![0]!, /Riff account/);
   const invalidHttp = await rpc('tools/list', {}, 'bad-token');
-  assert.equal(invalidHttp.status, 401);
-  assert.match(invalidHttp.headers.get('www-authenticate')!, /invalid_token/);
+  assert.equal(invalidHttp.status, 200, 'public discovery does not resolve or reject an attached credential');
+  const invalidInvocation = await (await rpc('tools/call', { name: 'open_riff', arguments: {} }, 'bad-token')).json() as {
+    result: { isError?: boolean; _meta?: Record<string, string[]> };
+  };
+  assert.equal(invalidInvocation.result.isError, true);
+  assert.match(invalidInvocation.result._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   const missingScope = await (await rpc('tools/call', { name: 'save_project', arguments: createInput() }, await auth.token({ riff_permissions: ['account:read'] }))).json() as { result: { _meta: Record<string, string[]> } };
   assert.match(missingScope.result._meta['mcp/www_authenticate']![0]!, /insufficient_scope/);
   assert.match(missingScope.result._meta['mcp/www_authenticate']![0]!, /scope="openid"/);
@@ -109,19 +116,50 @@ test('Riff profile and Home aliases each perform one verified account-state read
       ...(credential ? { Authorization: `Bearer ${credential}` } : {}),
     }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} } }) }),
     { config, verifier: identity.verifier, operations });
-    return (await response.json() as { result: { structuredContent: unknown; isError?: boolean; _meta?: Record<string, string[]> } }).result;
+    return (await response.json() as { result: { structuredContent: unknown; content?: { text: string }[]; isError?: boolean; _meta?: Record<string, string[]> } }).result;
   };
   const token = await identity.token();
   const profile = await invoke('get_riff_profile', token);
   assert.deepEqual(profile.structuredContent, { id: accountA, name: 'Fictional Riff Creator' });
   assert.deepEqual(calls, [{ name: 'get_account_state', owner: accountA, input: {} }]);
   calls.length = 0;
-  assert.deepEqual((await invoke('open_riff', token)).structuredContent, accountState);
+  const home = await invoke('open_riff', token);
+  assert.deepEqual(home.structuredContent, accountState);
+  assert.match(home.content?.[0]?.text ?? '', /Welcome to Riff.*Start.*Find.*make it yours.*open on the right/i);
   assert.deepEqual(calls, [{ name: 'get_account_state', owner: accountA, input: {} }]);
   calls.length = 0;
   const anonymous = await invoke('get_riff_profile');
   assert.equal(anonymous.isError, true);
   assert.match(anonymous._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   assert.ok(!JSON.stringify(anonymous).includes('00000000-0000-4000-8000-000000000000'));
+  const anonymousHome = await invoke('open_riff');
+  assert.equal(anonymousHome.isError, true);
+  assert.deepEqual(anonymousHome.structuredContent, failure('UNAUTHENTICATED'));
   assert.deepEqual(calls, []);
+});
+
+test('MCP discovery stays local while protected tool invocations verify identity', async () => {
+  const identity = await fixtureAuth();
+  const token = await identity.token();
+  const operations = createOperations(identity.verifier, { async call() {
+    return failure('NOT_FOUND');
+  } });
+  const rpc = async (method: string, params: unknown) => handleMcp(new Request(config.resource, {
+    method: 'POST', headers: {
+      'Content-Type': 'application/json', Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${token}`,
+    }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  }), { config, verifier: identity.verifier, operations });
+
+  const initialized = await (await rpc('initialize', {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'latency-test', version: '1' },
+  })).json() as { result: { instructions?: string } };
+  assert.match(initialized.result.instructions ?? '', /open Riff immediately with `open_riff`/i);
+  await rpc('tools/list', {});
+  await rpc('resources/read', { uri: 'ui://riff/home-v3.html' });
+  assert.equal(identity.resolutions.length, 0,
+    'public MCP discovery and static UI reads must not resolve an account merely because ChatGPT attached a token');
+
+  await rpc('tools/call', { name: 'open_riff', arguments: {} });
+  assert.equal(identity.resolutions.length, 1, 'the protected tool invocation still verifies and maps identity');
 });

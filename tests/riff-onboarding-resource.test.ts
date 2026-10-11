@@ -42,8 +42,11 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
 });
 
 test('Riff onboarding HTML escapes raw-text delimiters', () => {
-  const html = riffOnboardingHtml('const payload = "</ScRiPt><!--";');
+  const html = riffOnboardingHtml('const payload = "</ScRiPt><!--";', {
+    resource_version: 'riff-onboarding-v1', bundle_version: `sha256:${'a'.repeat(64)}`,
+  });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));
   assert.ok(!html.includes('<!--'));
+  assert.match(html, /name="riff-bundle-version"/);
 });

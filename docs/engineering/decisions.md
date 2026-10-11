@@ -1,5 +1,17 @@
 # Stage 1 decisions and open dependencies
 
+## ScrapeCreators cache policy — 2026-10-11
+
+The user approved the fast-video implementation plan, including a trusted runtime
+cache policy of `1d` for TikTok profile reads and `7d` for video-detail reads. The
+profile-feed endpoint receives the matched profile response's validated native
+`user.id` but no cache parameter. These values are compiled runtime policy, never
+public tool input, environment configuration, claimed headers, URL input, or another
+caller-controlled override. Cache hits preserve provider `cached_at` as source
+observation time separately from local retrieval time; a configured cache may still
+miss or be disabled by the provider and therefore does not imply zero cost or a live
+fetch. Transcript and media download remain disabled.
+
 ## Full-product roadmap and creator-loop proposal — 2026-10-09
 
 The user relayed Generation's profile-analysis and recommendation-loop context for

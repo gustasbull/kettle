@@ -1,5 +1,5 @@
 export type RiffActionResult = {
-  status: 'sent' | 'unsupported' | 'failed';
+  status: 'sent' | 'pending' | 'unsupported' | 'failed';
   message: string;
 };
 
@@ -23,4 +23,3 @@ export function formatRiffDate(value: string | null): string {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
   }).format(date);
 }
-

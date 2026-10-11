@@ -20,22 +20,33 @@ export function projectCreatorDna(stored: StoredCreatorAnalysis): CreatorDnaView
   const reviewVisible=review && review.provenance.permission.status!=='needs_review' && review.provenance.permission.permitted_uses.includes('display');
   const observations = [...scan.profile_observations, ...scan.video_observations];
   const displayable = observations.filter(o => o.provenance.permission.status !== 'needs_review' && o.provenance.permission.permitted_uses.includes('display'));
+  const profileObservation = scan.profile_observations.find(o => displayable.some(candidate => candidate.id === o.id));
   const allowed = new Set(displayable.map(o => o.id));
   // Withhold a whole derived claim when any of its supporting evidence is restricted.
   const claims = dna.claims.filter(c => c.evidence.every(e => allowed.has(e.observation_id)));
   const referenced = new Set(claims.flatMap(c => c.evidence.map(e => e.observation_id)));
+  if(reviewVisible&&review){
+    const seedObservation=scan.video_observations.find(observation=>observation.canonical_url===review.url&&allowed.has(observation.id));
+    if(seedObservation)referenced.add(seedObservation.id);
+  }
   return CreatorDnaView.parse({
     dna_id: stored.dna_id, project_id: stored.project_id, snapshot_id: dna.id, profile: dna.profile,
     version: dna.version, created_at: dna.created_at, source_scan_id: scan.id, scan_status: scan.status,
     coverage: { unique_videos: scan.coverage.unique_videos, oldest_published_at: scan.coverage.oldest_published_at, newest_published_at: scan.coverage.newest_published_at },
     contains_fixture_data: observations.some(o => o.provenance.origin === 'fixture') || review?.provenance.origin==='fixture',
+    ...(profileObservation?{profile_summary:{handle:profileObservation.handle,display_name:profileObservation.display_name,
+      follower_count:profileObservation.follower_count,...(profileObservation.avatar_url?{avatar_url:profileObservation.avatar_url}:{})}}:{}),
     ...(reviewVisible?{seed_review:{url:review.url,provider:review.provider,summary:review.summary,access_basis:review.access_basis,
+      ...(review.dimensions?{dimensions:review.dimensions}:{}),
       limitations:review.limitations,retrieved_at:review.provenance.retrieved_at,origin:review.provenance.origin}}:{}),
     requested_videos: scan.request.max_videos, coverage_limited: true,
     claims, evidence: displayable.filter(o => referenced.has(o.id)).map(o => ({
       observation_id: o.id, url: o.canonical_url, retrieved_at: o.provenance.retrieved_at,
       source_observed_at: o.provenance.source_observed_at, origin: o.provenance.origin,
-      published_at: 'published_at' in o ? o.published_at : null, metrics: 'metrics' in o ? o.metrics : null,
+      published_at: 'published_at' in o ? o.published_at : null,
+      ...('thumbnail_url' in o && o.thumbnail_url ? {thumbnail_url:o.thumbnail_url} : {}),
+      ...('duration_seconds' in o ? {duration_seconds:o.duration_seconds} : {}),
+      metrics: 'metrics' in o ? o.metrics : null,
     })),
     withheld_claim_count: dna.claims.length - claims.length,
     // Provider-generated free text is not safe merely because it is called a limitation.

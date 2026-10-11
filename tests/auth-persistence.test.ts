@@ -111,7 +111,8 @@ test('website and MCP Supabase credentials share SQL ownership while other subje
   const denied = await result(await mcp(otherToken, 'get_project', { project_id: projectId }));
   const missing = await result(await mcp(otherToken, 'get_project', { project_id: crypto.randomUUID() }));
   assert.equal(denied.isError, true);
-  assert.equal('structuredContent' in denied, false);
+  const deniedRead = GetProjectOutput.parse(denied.structuredContent);
+  assert.ok(!deniedRead.ok && deniedRead.error.code === 'NOT_FOUND');
   assert.deepEqual(denied, missing);
 
   const callsBeforeDenial = storageCalls;
@@ -120,16 +121,22 @@ test('website and MCP Supabase credentials share SQL ownership while other subje
   assert.equal(scopeDenied.isError, true);
   assert.match(scopeDenied._meta!['mcp/www_authenticate']![0]!, /insufficient_scope.*scope="openid"/);
   assert.equal(storageCalls, callsBeforeDenial);
-  assert.equal((await mcp(await token('fictional-a', 'mcp', { exp: issued + 1 }), 'get_project', { project_id: projectId })).status, 401);
+  const expired = await result(await mcp(await token('fictional-a', 'mcp', { exp: issued + 1 }), 'get_project', { project_id: projectId }));
+  assert.equal(expired.isError, true);
+  assert.match(expired._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
 
   await db.query('update public.account_identities set tokens_valid_after=to_timestamp($1) where account_id=$2', [issued, websiteAccount.data.account.id]);
-  assert.equal((await mcp(mcpToken, 'get_project', { project_id: projectId })).status, 401);
+  const revoked = await result(await mcp(mcpToken, 'get_project', { project_id: projectId }));
+  assert.equal(revoked.isError, true);
+  assert.match(revoked._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   assert.deepEqual(await websiteOperations.execute('get_account_state', websiteToken, {}), failure('UNAUTHENTICATED'));
   const freshWebsite = await token('fictional-a', 'website', { iat: issued + 1 });
   const freshMcp = await token('fictional-a', 'mcp', { iat: issued + 1 });
   assert.ok((await websiteOperations.execute('get_account_state', freshWebsite, {})).ok);
   await db.query('update public.account_identities set blocked=true where account_id=$1', [websiteAccount.data.account.id]);
-  assert.equal((await mcp(freshMcp, 'get_project', { project_id: projectId })).status, 401);
+  const blocked = await result(await mcp(freshMcp, 'get_project', { project_id: projectId }));
+  assert.equal(blocked.isError, true);
+  assert.match(blocked._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   assert.ok((await mcpOperations.execute('get_account_state', otherToken, {})).ok, 'other account remains usable');
   await db.query('update public.account_identities set blocked=false where account_id=$1', [websiteAccount.data.account.id]);
   const recovered = GetProjectOutput.parse((await result(await mcp(freshMcp, 'get_project', { project_id: projectId }))).structuredContent);

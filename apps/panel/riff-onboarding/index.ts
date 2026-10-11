@@ -11,9 +11,21 @@ html, body { margin: 0; padding: 0; background: transparent; }
 .riff-onboarding__eyebrow { color: var(--riff-primary); font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .riff-onboarding__headline { margin-top: 6px; font-size: clamp(24px, 7cqi, 34px); font-weight: 750; line-height: 1.08; letter-spacing: -.035em; }
 .riff-onboarding__promise { margin-top: 10px; color: var(--riff-muted); }
-.riff-onboarding__tabs { display: flex; gap: 8px; margin-top: 22px; }
-.riff-onboarding__tab { width: 32px; height: 8px; padding: 0; border: 0; border-radius: 999px; background: var(--riff-line); cursor: pointer; }
-.riff-onboarding__tab[aria-selected="true"] { width: 52px; background: var(--riff-primary); }
+.riff-onboarding__tabs {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px;
+  margin-top: 22px; padding: 4px; border: 1px solid var(--riff-line);
+  border-radius: var(--riff-radius-control); background: var(--riff-canvas);
+}
+.riff-onboarding__tab {
+  min-width: 0; padding: 7px 8px; border: 0; border-radius: var(--riff-radius-control);
+  background: transparent; color: var(--riff-muted); cursor: pointer;
+  font-size: 13px; font-weight: 700; line-height: 18px;
+  transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+.riff-onboarding__tab:hover { color: var(--riff-ink); }
+.riff-onboarding__tab[aria-selected="true"] {
+  background: var(--riff-surface); color: var(--riff-ink); box-shadow: 0 1px 3px rgb(0 0 0 / .09);
+}
 .riff-onboarding__panel { min-height: 128px; padding-top: 22px; }
 .riff-onboarding__number { color: var(--riff-muted); font-size: 13px; font-weight: 650; }
 .riff-onboarding__panel h2 { margin-top: 4px; font-size: 22px; line-height: 1.18; letter-spacing: -.025em; }
@@ -23,9 +35,9 @@ html, body { margin: 0; padding: 0; background: transparent; }
 `;
 
 const steps = [
-  { title: 'Start with what you have.', body: 'Share a creator profile, video link, or the idea already in your head.' },
-  { title: 'Find your breakout idea.', body: 'Riff turns creator evidence into focused directions you can actually make.' },
-  { title: 'Make it yours.', body: 'Choose a direction, then shape the hook, main content, showcase, and call to action in Studio.' },
+  { label: 'Start', title: 'Start with what you have.', body: 'Share a creator profile, video link, or the idea already in your head.' },
+  { label: 'Find', title: 'Find your breakout idea.', body: 'Riff turns creator evidence into focused directions you can actually make.' },
+  { label: 'Make', title: 'Make it yours.', body: 'Choose a direction, then shape the hook, main content, showcase, and call to action in Studio.' },
 ] as const;
 
 export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
@@ -69,8 +81,8 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
     tab.className = 'riff-onboarding__tab';
     tab.id = `riff-onboarding-tab-${index + 1}`;
     tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-label', `Step ${index + 1}: ${step.title}`);
     tab.setAttribute('aria-controls', `riff-onboarding-panel-${index + 1}`);
+    tab.textContent = step.label;
     tab.addEventListener('click', () => select(index));
     tab.addEventListener('keydown', (event) => {
       const next = event.key === 'ArrowRight' ? (active + 1) % steps.length

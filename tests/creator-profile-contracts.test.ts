@@ -1,7 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CreatorAnalysis, ProfileScanRequest, ProfileScanResult, CorrectCreatorDnaInput } from '../packages/contracts/creator-profile.ts';
+import { CreatorAnalysis, ProfileScanRequest, ProfileScanResult, CorrectCreatorDnaInput, TikTokImageUrl } from '../packages/contracts/creator-profile.ts';
 import { creatorAnalysisFixture, partialScanFixture, unavailableScanFixture } from '../packages/contracts/fixtures/creator-profile.ts';
+
+test('TikTok image policy admits only exact com and us CDN families with signed queries', () => {
+  for (const value of [
+    'https://tiktokcdn.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://p16-sign-va.tiktokcdn.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture',
+    'https://p19-sign.tiktokcdn-us.com/cover.jpeg?x-expires=1&x-signature=fixture',
+  ]) assert.equal(TikTokImageUrl.safeParse(value).success, true, value);
+  for (const value of [
+    'http://p16-sign.tiktokcdn-us.com/cover.jpeg',
+    'https://user:secret@p16-sign.tiktokcdn-us.com/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com:443/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com:444/cover.jpeg',
+    'https://p16-sign.tiktokcdn-us.com/cover.jpeg#fragment',
+    'https://eviltiktokcdn.com/cover.jpeg',
+    'https://tiktokcdn.com.evil.test/cover.jpeg',
+    'https://eviltiktokcdn-us.com/cover.jpeg',
+    'https://tiktokcdn-us.com.evil.test/cover.jpeg',
+  ]) assert.equal(TikTokImageUrl.safeParse(value).success, false, value);
+});
 
 const reject = (edit: (v: ReturnType<typeof creatorAnalysisFixture>) => void) => {
   const v = creatorAnalysisFixture(); edit(v); assert.equal(CreatorAnalysis.safeParse(v).success, false);
@@ -23,6 +43,46 @@ test('metrics retain zero vs unknown; unsafe counts, dates and duration fail', (
   for (const n of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) reject(v => { v.scan.video_observations[0]!.metrics.views = n; });
   reject(v => { v.scan.video_observations[0]!.published_at = 'yesterday'; });
   reject(v => { v.scan.video_observations[0]!.duration_seconds = 0; });
+});
+test('optional provider media facts and six Paper review dimensions remain evidence bounded', () => {
+  const v = creatorAnalysisFixture();
+  const video = v.scan.video_observations[0]!;
+  const profile = v.scan.profile_observations[0]!;
+  video.thumbnail_url = 'https://p16-sign-va.tiktokcdn.com/tos-maliva-p-0068/cover.jpeg?x-expires=1';
+  video.metrics.saves = 7;
+  profile.avatar_url = 'https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/avatar.jpeg';
+  const dimensionStatuses = [
+    ['hook', 'needs_attention'], ['content', 'working_well'], ['style_pacing', 'needs_rework'],
+    ['voice_language', 'working_well'], ['script', 'needs_attention'], ['cta', 'unknown'],
+  ] as const;
+  const dimensions = dimensionStatuses.map(([dimension, status]) => ({ dimension, status,
+    summary: `${dimension} is bounded to the supplied video evidence.`,
+    ...(status === 'unknown' ? {} : { recommendation: `Proposed ${dimension} change.` }) }));
+  v.seed_review = {
+    url: `${v.scan.request.supplied_url}/video/9000000000000000011`, provider: 'lightreel',
+    conversation_id: 'review-1', summary: 'Review of the supplied video only.', access_basis: 'video_access_reported',
+    dimensions, limitations: ['Provider-authored review.'],
+    provenance: { ...structuredClone(video.provenance), provider: 'lightreel', endpoint: '/v1/chat' },
+  };
+  v.seed_review!.provenance.source_url = v.seed_review!.url;
+  assert.equal(CreatorAnalysis.parse(v).seed_review?.dimensions?.length, 6);
+
+  for (const unsafe of [
+    'http://p16-sign-va.tiktokcdn.com/cover.jpeg',
+    'https://user:secret@p16-sign-va.tiktokcdn.com/cover.jpeg',
+    'https://p16-sign-va.tiktokcdn.com:444/cover.jpeg',
+    'https://p16-sign-va.tiktokcdn.com/cover.jpeg#fragment',
+    'https://images.example.test/cover.jpeg',
+  ]) reject(value => { value.scan.video_observations[0]!.thumbnail_url = unsafe; });
+  reject(value => { value.scan.video_observations[0]!.metrics.saves = -1; });
+  reject(value => {
+    value.seed_review = structuredClone(v.seed_review);
+    value.seed_review!.dimensions = value.seed_review!.dimensions!.slice(0, 5);
+  });
+  reject(value => {
+    value.seed_review = structuredClone(v.seed_review);
+    value.seed_review!.dimensions![5]!.dimension = 'hook';
+  });
 });
 test('dated conflicting provider observations survive while duplicate IDs and false coverage fail', () => {
   const v = creatorAnalysisFixture(); const o = structuredClone(v.scan.video_observations[0]!);

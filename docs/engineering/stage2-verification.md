@@ -174,3 +174,52 @@ are not measured or included in the reported zero provider spend.
 
 Release audience, Paper exports, quality thresholds and good/bad script examples
 remain product inputs. Billing and public distribution remain separate later work.
+
+## Fixture browsing benchmark — 2026-10-11
+
+Task 9 added a strict, import-safe creator-latency benchmark. The final combined
+source revision passed these local commands:
+
+- `npm run check`: TypeScript, 520 Node tests, the dry-run Worker build, local
+  workerd smoke, and 78 real-browser tests.
+- `npm run test:db`: 13/13 tests against the actual migrations in PGlite.
+- `npm run benchmark:creator -- --fixture`: one validated fixture/local-process
+  report with 57 observations and exact zero durable deltas for all six
+  provider-free read scenarios.
+- `git diff --check`: clean.
+
+The final generated resource fingerprints were
+`sha256:8ae3a246856030f9d044f8dee68e376511d782391a4b50dcb57024646ced51cd`
+for Riff Home (142,001 raw / 40,250 gzip),
+`sha256:be5f152b760a00734ced2710941a52ef0473c24ac4785b59d96ae969a0bef801`
+for the creator pipeline (114,004 / 31,770), and
+`sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0`
+for onboarding (382,496 / 80,543). All remain inside their local budgets.
+
+The fixture report uses current local manifest fingerprints, retains raw synthetic
+observations, and applies nearest-rank thresholds of five observations for p50,
+twenty for p95, and one hundred for p99. Its six catalog/reopen/status/result/render
+scenarios have exact synthetic zero deltas for provider calls, attempts, provider-
+trial units, and cash reservations. This is fixture/reporting evidence only; it is
+not hosted counter evidence.
+
+No network request, provider call, hosted Supabase call, deployment, allocation,
+refill, canary, ChatGPT session, or remote database operation was performed by
+these final verification runs. No current-live p50/p95/p99, provider permission,
+billing, production-readiness, or SLA claim follows from them. The local
+controller evidence covers terminal-status-observed-to-render scheduling only,
+not persisted-result-to-visible-paint under three seconds. The guarded `--live`
+benchmark correctly remains unavailable until a pre-provisioned development
+allocation, approved canonical inputs, and a trusted operator endpoint are
+separately authorized.
+
+| External proof or action | Status |
+| --- | --- |
+| Fresh current-live development sample | Blocked pending an available account-bound allocation, approved canonical inputs, trusted operator preflight/readback, and explicit maximum-call approval. |
+| Provision or refill | Not authorized; the benchmark has no provisioning dependency. |
+| Hosted development deployment and served fingerprint | Not performed; a local or dry-run fingerprint is not hosted evidence. |
+| ChatGPT install/onboarding in both fresh and existing conversations | Unverified. |
+| Dedicated `_meta.ui.domain` for UI submission | Missing; remains a submission gate outside Task 9. |
+| Local manifest/MCP wire and schema validation | Complete: all-capability `tools/list` is 43,828 bytes against a 65,536-byte ceiling; all 22 tools advertise output schemas, with compact success/failure discovery envelopes for operation tools and complete tool-specific validation retained at runtime. |
+| Official hosted/submission validation | Unverified; the local compatibility audit is not a hosted ChatGPT submission result. |
+| Development canary or production promotion | Not authorized; O01, O05, and O06 remain open gates. |

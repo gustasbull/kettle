@@ -109,6 +109,38 @@ test('display projection withholds restricted derived claims and strips raw prov
   raw.video_observations[0]!.provenance.permission.permitted_uses=['store','model_processing'];
   const restricted=projectCreatorDna(stored); assert.equal(restricted.claims.length,0); assert.equal(restricted.evidence.length,0); assert.equal(restricted.withheld_claim_count,1);
 });
+test('display projection exposes only allowlisted profile and media facts needed by Paper', async () => {
+  const {stored}=await seedAnalysis();
+  const profile=stored.analysis.scan.profile_observations[0]!;
+  const video=stored.analysis.scan.video_observations[0]!;
+  profile.avatar_url='https://p16-sign-va.tiktokcdn.com/avatar.jpeg';
+  video.thumbnail_url='https://p16-sign-va.tiktokcdn.com/cover.jpeg';
+  video.metrics.saves=4;
+  const view=projectCreatorDna(stored);
+  assert.deepEqual(view.profile_summary,{handle:profile.handle,display_name:profile.display_name,
+    follower_count:profile.follower_count,avatar_url:profile.avatar_url});
+  assert.equal(view.evidence[0]!.thumbnail_url,video.thumbnail_url);
+  assert.equal(view.evidence[0]!.duration_seconds,video.duration_seconds);
+  assert.equal(view.evidence[0]!.metrics?.saves,4);
+});
+test('display projection retains only the exact display-approved seed video when no claim cites it', async () => {
+  const {stored}=await seedAnalysis(),video=stored.analysis.scan.video_observations[0]!,review=stored.analysis.seed_review!;
+  stored.analysis.dna.claims=[];
+  review.url=video.canonical_url;review.provenance.source_url=video.canonical_url;
+  video.thumbnail_url='https://p16-sign-va.tiktokcdn.com/seed-cover.jpeg';
+  const visible=projectCreatorDna(stored);
+  assert.deepEqual(visible.evidence.map(evidence=>evidence.observation_id),[video.id]);
+  assert.equal(visible.evidence[0]!.thumbnail_url,video.thumbnail_url);
+
+  const restricted=structuredClone(stored);
+  restricted.analysis.scan.video_observations[0]!.provenance.permission.permitted_uses=['store','model_processing'];
+  assert.deepEqual(projectCreatorDna(restricted).evidence,[]);
+
+  const unrelated=structuredClone(stored);
+  unrelated.analysis.seed_review!.url=`${unrelated.analysis.scan.request.supplied_url}/video/9999999999999999999`;
+  unrelated.analysis.seed_review!.provenance.source_url=unrelated.analysis.seed_review!.url;
+  assert.deepEqual(projectCreatorDna(unrelated).evidence,[]);
+});
 test('ingestion rejects absent storage permission before SQL; service-role history is append only and clients have no access', async () => {
   const analysis=creatorAnalysisFixture(); analysis.dna.id=crypto.randomUUID();
   analysis.scan.video_observations[0]!.provenance.permission.permitted_uses=['model_processing'];

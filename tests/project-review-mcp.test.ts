@@ -9,7 +9,12 @@ import { handleMcp, type McpAuth } from '../apps/worker/mcp.ts';
 import { oauthScopes } from '../packages/auth/index.ts';
 import { PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME, PROJECT_REVIEW_META, projectReviewHtml } from '../apps/worker/project-review-resource.ts';
 import { RIFF_ONBOARDING_MIME, RIFF_ONBOARDING_URI } from '../apps/worker/riff-onboarding-resource.ts';
-import { RIFF_HOME_MIME, RIFF_HOME_URI } from '../apps/worker/riff-home-resource.ts';
+import {
+  RIFF_HOME_LEGACY_URI,
+  RIFF_HOME_MIME,
+  RIFF_HOME_URI,
+  RIFF_HOME_V2_URI,
+} from '../apps/worker/riff-home-resource.ts';
 import { config, fixtureAuth } from './auth-fixtures.ts';
 import { createInput } from './fixtures.ts';
 
@@ -61,13 +66,16 @@ test('project-review render tool uses signed identity, exact read contract and r
   const input = createInput();
   input.brief.facts = [{ id: crypto.randomUUID(), statement: 'Fictional supplied fact',
     source: { kind: 'url', url: 'https://example.com/lamp', captured_at: '2026-10-06T00:00:00Z' }, user_confirmed: false }];
-  const saved = SaveProjectOutput.parse((await call('save_project', input, token)).result.structuredContent);
+  const savedResponse = (await call('save_project', input, token)).result;
+  const saved = SaveProjectOutput.parse(savedResponse.structuredContent);
   assert.ok(saved.ok);
+  assert.equal(savedResponse.content[0]!.text, 'Saved Riff project at version 1.');
   const args = { project_id: saved.data.project.id };
   const shown = (await call('show_project_brief', args, token)).result;
   assert.notEqual(shown.isError, true);
   assert.deepEqual(GetProjectOutput.parse(shown.structuredContent), { ok: true, data: { project: saved.data.project } });
-  assert.deepEqual(JSON.parse(shown.content[0]!.text), { project: saved.data.project }, 'complete text fallback includes every brief field, fact and version');
+  assert.equal(shown.content[0]!.text, 'Opened Riff project at version 1.');
+  assert.ok(!shown.content[0]!.text.includes(input.brief.product), 'full brief stays in structuredContent only');
   const count = calls;
   const anonymous = (await call('show_project_brief', args)).result;
   assert.equal(anonymous.isError, true);
@@ -80,15 +88,19 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.equal(calls, count, 'anonymous, scope-denied and malformed requests cannot touch storage');
   const expired = await rpc('tools/call', { name: 'show_project_brief', arguments: args }, auth,
     await identity.token({ exp: Math.floor(Date.now() / 1000) - 1 }));
-  assert.equal(expired.status, 401);
-  assert.match(expired.headers.get('www-authenticate')!, /invalid_token/);
+  assert.equal(expired.status, 200);
+  const expiredResult = (await expired.json() as { result: { isError?: boolean; _meta?: Record<string, string[]> } }).result;
+  assert.equal(expiredResult.isError, true);
+  assert.match(expiredResult._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   const otherToken = await identity.token({ sub: 'user-b' });
   const other = (await call('show_project_brief', args, otherToken)).result;
   const absent = (await call('show_project_brief', { project_id: crypto.randomUUID() }, otherToken)).result;
   assert.deepEqual(other, absent, 'another account cannot distinguish owned from missing IDs');
   assert.equal(other.isError, true);
-  assert.equal('structuredContent' in other, false, 'errors must not violate success-only output schemas');
-  assert.equal(other.content[0]!.text, 'This project is unavailable.');
+  const denied = GetProjectOutput.parse(other.structuredContent);
+  assert.ok(!denied.ok && denied.error.code === 'NOT_FOUND');
+  assert.equal(other.content[0]!.text,
+    'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   assert.ok(!JSON.stringify(other).includes(input.brief.product));
 
   const updated = SaveProjectOutput.parse((await call('save_project', { ...input, ...args,
@@ -104,7 +116,9 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.deepEqual(resources.result.resources.map((r) => [r.name, r.uri, r.mimeType]),
     [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
       ['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME],
-      ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME]]);
+      ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME],
+      ['riff-home-v2-compat', RIFF_HOME_V2_URI, RIFF_HOME_MIME],
+      ['riff-home-v1-compat', RIFF_HOME_LEGACY_URI, RIFF_HOME_MIME]]);
   assert.equal(resources.result.resources.find((r) => r.uri === PROJECT_REVIEW_URI)!.title, 'Riff project brief');
   const read = await (await rpc('resources/read', { uri: PROJECT_REVIEW_URI }, auth)).json() as {
     result: { contents: { uri: string; mimeType: string; text: string; _meta: unknown }[] };

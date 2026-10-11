@@ -1,4 +1,4 @@
-import { RecommendationBatch, CreatorScriptSet, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
+import { RecommendationBatch, CreatorScriptSet, CreatorJobView, emptyCreatorJobProgress } from '../../packages/contracts/creator-pipeline.ts';
 import { creatorDnaViewFixture } from './dna-view-fixtures.ts';
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 export function recommendationBatchFixture(){
@@ -15,6 +15,6 @@ export function creatorScriptsFixture(){
 }
 export function creatorJobFixture(kind:'scan'|'recommendations'|'scripts'='recommendations'){
  const dna=creatorDnaViewFixture();
- return CreatorJobView.parse({id:id(620),project_id:dna.project_id,revision:2,kind,state:'succeeded',created_at:dna.created_at,updated_at:dna.created_at,message:null,
+ return CreatorJobView.parse({id:id(620),project_id:dna.project_id,revision:2,kind,state:'succeeded',stage:'saving',progress:emptyCreatorJobProgress(kind),created_at:dna.created_at,updated_at:dna.created_at,message:null,
  result:kind==='scan'?{kind,dna}:kind==='recommendations'?{kind,batch:recommendationBatchFixture()}:{kind,scripts:creatorScriptsFixture()}});
 }

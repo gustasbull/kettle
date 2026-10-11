@@ -1,12 +1,17 @@
 /** D0 internal contracts. No public tools, authorization, persistence or spending authority. */
 import { z } from 'zod';
 import { Id, Timestamp, HttpUrl } from './index.ts';
+import { isAllowedTikTokImageUrl } from './tiktok-image-policy.ts';
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const CreatorPlatform = z.enum(['tiktok', 'instagram']);
 const identity = z.strictObject({ platform: CreatorPlatform, native_id: text(200) });
 export const CreatorIdentity = identity;
+/** Display-only TikTok image URL. Provider media is untrusted, so only TikTok's
+ * HTTPS image CDN is admitted; playback/download URLs are never represented. */
+export const TikTokImageUrl = z.url().max(4096).refine(isAllowedTikTokImageUrl,
+  'Use a credential-free HTTPS TikTok image CDN URL without port or fragment');
 export const CreatorUrl = HttpUrl.refine(value => {
   const u = new URL(value);
   return u.protocol === 'https:' && !u.port && !u.search && !u.hash &&
@@ -36,14 +41,14 @@ export const ObservationProvenance = z.strictObject({
 export const ProfileObservation = z.strictObject({
   id: Id, profile: identity, canonical_url: CreatorUrl, handle: text(100),
   display_name: z.string().max(500).nullable(), bio: z.string().max(10000).nullable(),
-  follower_count: count.nullable(), provenance: ObservationProvenance,
+  follower_count: count.nullable(), avatar_url: TikTokImageUrl.optional(), provenance: ObservationProvenance,
 });
 export const VideoObservation = z.strictObject({
   id: Id, video: identity, creator: identity, canonical_url: CreatorUrl,
   caption: z.string().max(10000).nullable(), published_at: Timestamp.nullable(),
-  duration_seconds: z.number().positive().finite().nullable(),
+  duration_seconds: z.number().positive().finite().nullable(), thumbnail_url: TikTokImageUrl.optional(),
   metrics: z.strictObject({ views: count.nullable(), likes: count.nullable(),
-    comments: count.nullable(), shares: count.nullable() }),
+    comments: count.nullable(), shares: count.nullable(), saves: count.nullable().optional() }),
   provenance: ObservationProvenance,
 });
 export const ScanCostEvidence = z.strictObject({
@@ -137,14 +142,45 @@ export const CreatorDnaSnapshot = z.strictObject({
   claims: z.array(DnaClaim).max(100), limitations: z.array(text(1000)).max(30),
 }).refine(d => new Set(d.claims.map(c => c.id)).size === d.claims.length, 'Claim IDs must be unique');
 /** Provider-authored review of the supplied video, not verified profile-wide DNA. */
+export const PaperAnalysisDimension = z.enum(['hook', 'content', 'style_pacing', 'voice_language', 'script', 'cta']);
+export const PaperAnalysisAssessment = z.strictObject({
+  dimension: PaperAnalysisDimension,
+  status: z.enum(['working_well', 'needs_attention', 'needs_rework', 'unknown']),
+  summary: text(3000),
+  recommendation: text(2000).optional(),
+});
+const PaperAnalysisAssessments = z.array(PaperAnalysisAssessment).length(6).superRefine((items, ctx) => {
+  const dimensions = new Set(items.map(item => item.dimension));
+  if (dimensions.size !== PaperAnalysisDimension.options.length ||
+      PaperAnalysisDimension.options.some(dimension => !dimensions.has(dimension))) {
+    ctx.addIssue({ code: 'custom', message: 'Structured review must contain each Paper analysis dimension exactly once' });
+  }
+});
 export const LightreelSeedReview = z.strictObject({
   url: CreatorUrl.refine(v => /^\/@[\w.]+\/video\/\d{1,30}$/.test(new URL(v).pathname)),
   provider: z.literal('lightreel'), conversation_id: text(200),
   summary: text(8000),
   access_basis: z.enum(['video_access_reported','transcript_or_caption_only','unavailable','unknown']),
+  dimensions: PaperAnalysisAssessments.optional(),
   limitations: z.array(text(1000)).max(20), provenance: ObservationProvenance,
-}).refine(r => r.provenance.provider === 'lightreel' && r.provenance.source_url === r.url,
-  'Seed review must retain its Lightreel source attribution');
+}).superRefine((review, ctx) => {
+  const issue = (message: string, path: PropertyKey[] = []) => ctx.addIssue({ code: 'custom', message, path });
+  if (review.provenance.provider !== 'lightreel' || review.provenance.source_url !== review.url) {
+    issue('Seed review must retain its Lightreel source attribution');
+  }
+  if (!review.dimensions) return;
+  if (review.dimensions.some(item => item.status === 'unknown' && item.recommendation !== undefined)) {
+    issue('Unknown assessments cannot carry unsupported recommendations', ['dimensions']);
+  }
+  if (['unavailable', 'unknown'].includes(review.access_basis) &&
+      review.dimensions.some(item => item.status !== 'unknown')) {
+    issue('Unavailable or unknown access requires unknown dimension statuses', ['dimensions']);
+  }
+  if (review.access_basis === 'transcript_or_caption_only' &&
+      review.dimensions.find(item => item.dimension === 'style_pacing')?.status !== 'unknown') {
+    issue('Text-only access cannot assess style and pacing', ['dimensions']);
+  }
+});
 /** Validate this envelope at the adapter/application boundary, not snapshot alone. */
 export const CreatorAnalysis = z.strictObject({ scan: ProfileScanResult, dna: CreatorDnaSnapshot, seed_review: LightreelSeedReview.optional() })
   .superRefine(({ scan, dna, seed_review }, ctx) => {
