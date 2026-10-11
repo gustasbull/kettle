@@ -19,7 +19,7 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
       makeMine: async ({job,batch,idea})=>{ window.events.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id}); return {status:'sent',message:'Continue in ChatGPT.'}; },
       onDiscoveryOpen: ()=>{ window.events.push({kind:'catalog-open'}); },
     });
-    window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fictional Creator',onboarding_seen_at:null}});
+    window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fictional Creator',onboarding_seen_at:'2026-10-11T12:00:00Z'}});
     window.fixture=scenario=>pipelineFixture(scenario);
   ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
   const browser = await chromium.launch({ headless: true });
@@ -168,8 +168,20 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
       {job_id:'00000000-0000-4000-8000-000000000102',title:'FocusNest',stage:'Ideas saved',state:'succeeded',updated_at:'2026-10-11T11:00:00Z',platform:'tiktok',handle:'focusnest'},
     ]);
   });
+  assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 0,
+    'an explicit null marker is first use, so Home does not compete with the chat welcome by showing recents');
+
+  await page.evaluate(() => window.renderError());
+  assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1,
+    'an unreadable marker fails open to normal Home rather than leaving recents blocked');
+
+  await page.evaluate(() => window.renderAccount('2026-10-11T12:00:00Z'));
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1);
   assert.equal(await page.getByText('No recent work yet.').count(), 0);
+
+  await page.evaluate(() => window.renderAccount(undefined, false));
+  assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1,
+    'historical account payloads that omit the marker fail open to normal Home recents');
   await page.getByRole('button', { name: /Open @alex.focus/ }).click();
   assert.equal((await page.evaluate(() => window.events.at(-1))).kind, 'recent');
 

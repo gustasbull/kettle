@@ -23,7 +23,7 @@ const manifest = {
       gzip_bytes: 5, budget: { raw_bytes: 250_000, gzip_bytes: 75_000 }, bundle_version: bundle('a') },
     { panel: 'riff-home', resource_version: 'riff-home-v3', sha256: 'b'.repeat(64), raw_bytes: 20,
       gzip_bytes: 8, budget: { raw_bytes: 500_000, gzip_bytes: 110_000 }, bundle_version: bundle('b') },
-    { panel: 'riff-onboarding', resource_version: 'riff-onboarding-v1', sha256: 'c'.repeat(64), raw_bytes: 30,
+    { panel: 'riff-onboarding', resource_version: 'riff-onboarding-v2', sha256: 'c'.repeat(64), raw_bytes: 30,
       gzip_bytes: 9, budget: { raw_bytes: 400_000, gzip_bytes: 85_000 }, bundle_version: bundle('c') },
   ],
 };

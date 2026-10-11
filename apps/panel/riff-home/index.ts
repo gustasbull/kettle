@@ -400,8 +400,14 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     render(state) {
       if (disposed) return;
       if (state.status === 'loading') { account.textContent = 'Connecting…'; return; }
-      if (state.status === 'error') { account.textContent = 'Account unavailable'; status.textContent = state.message; return; }
+      if (state.status === 'error') {
+        account.textContent = 'Account unavailable';
+        status.textContent = state.message;
+        recentSection.hidden = false;
+        return;
+      }
       account.textContent = `Ready, ${state.account.name}`;
+      recentSection.hidden = state.account.onboarding_seen_at === null;
       if (/Reconnect|incomplete|could not/i.test(status.textContent)) status.textContent = '';
     },
     setRecents(items) { if (!disposed) renderRecentsState({ status: 'ready', items }); },

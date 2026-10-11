@@ -12,6 +12,7 @@ import {
 } from '../apps/worker/riff-onboarding-resource.ts';
 
 test('Riff onboarding is one static, inline-only, empty-network MCP App', async (t) => {
+  assert.equal(RIFF_ONBOARDING_URI, 'ui://riff/onboarding-v2.html');
   const server = new McpServer({ name: 'riff-onboarding-fixture', version: '1' });
   registerRiffOnboardingResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -43,7 +44,7 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
 
 test('Riff onboarding HTML escapes raw-text delimiters', () => {
   const html = riffOnboardingHtml('const payload = "</ScRiPt><!--";', {
-    resource_version: 'riff-onboarding-v1', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-onboarding-v2', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));

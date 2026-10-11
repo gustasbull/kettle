@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OpenAIUiResourceMetadata } from '@openai/mcp-extensions/server';
 import { riffOnboardingScript, riffOnboardingFingerprint } from '../panel/generated/riff-onboarding-bundle.ts';
 
-export const RIFF_ONBOARDING_URI = 'ui://riff/onboarding-v1.html';
+export const RIFF_ONBOARDING_URI = 'ui://riff/onboarding-v2.html';
 export const RIFF_ONBOARDING_MIME = 'text/html;profile=mcp-app';
 const openaiUi = {
   availableDisplayModes: ['inline'], preferredDisplayMode: 'inline',

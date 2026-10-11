@@ -27,7 +27,7 @@ test('Riff onboarding stays static after a real mounted handshake and never call
     res.setHeader('Content-Type', 'text/html');
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
-      window.calls=[]; window.methods=[]; window.ready=false;
+      window.calls=[]; window.methods=[]; window.sizes=[]; window.ready=false;
       const frame=()=>document.querySelector('iframe').contentWindow;
       addEventListener('message',event=>{const message=event.data;
         window.methods.push(message.method||('response:'+message.id));
@@ -37,6 +37,7 @@ test('Riff onboarding stays static after a real mounted handshake and never call
         }},'*');
         if(message.method==='ui/notifications/initialized') window.ready=true;
         if(message.method==='tools/call') window.calls.push(message.params);
+        if(message.method==='ui/notifications/size-changed') window.sizes.push(message.params);
       });
     </script><iframe src="/frame"></iframe>`);
   });
@@ -52,7 +53,10 @@ test('Riff onboarding stays static after a real mounted handshake and never call
   await page.waitForTimeout(80);
   const frame = page.frames().find((item) => item.url().endsWith('/frame'));
   assert.equal(await frame.getByRole('heading', { name: 'Welcome to Riff' }).count(), 1);
-  const trace = await page.evaluate(() => ({ calls: window.calls, methods: window.methods }));
+  const trace = await page.evaluate(() => ({ calls: window.calls, methods: window.methods, sizes: window.sizes }));
   assert.deepEqual(trace.calls, [], JSON.stringify(trace.methods));
   assert.equal(trace.methods.includes('tools/call'), false, JSON.stringify(trace.methods));
+  assert.equal(trace.methods.includes('ui/notifications/size-changed'), true,
+    'the dependency-light bridge still reports the inline Paper card size to its host');
+  assert.ok(trace.sizes.some(size => size.width > 0 && size.height >= 647), JSON.stringify(trace.sizes));
 });

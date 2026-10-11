@@ -38,8 +38,9 @@ export interface McpAuth {
 const MCP_INSTRUCTIONS = [
   'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
   'Do not call the diagnostic, profile, or account-state tools before `open_riff`.',
+  'After `open_riff` succeeds, inspect `data.account.onboarding_seen_at`: when it is null, call `show_riff_welcome` immediately in the same conversation, then call `mark_riff_onboarding_seen` only after the welcome succeeds.',
+  'When `onboarding_seen_at` is already set, do not replay onboarding unless the user explicitly asks to see the welcome again.',
   'When the user explicitly asks to analyze a public TikTok profile or video URL, call `start_riff_creator` directly.',
-  'Use `show_riff_welcome` only for first-use onboarding or when the user asks to replay it.',
 ].join(' ');
 
 const RECOVERY_SUMMARIES: Record<Failure['error']['recovery'], string> = {

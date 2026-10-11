@@ -155,6 +155,9 @@ test('MCP discovery stays local while protected tool invocations verify identity
     protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'latency-test', version: '1' },
   })).json() as { result: { instructions?: string } };
   assert.match(initialized.result.instructions ?? '', /open Riff immediately with `open_riff`/i);
+  assert.match(initialized.result.instructions ?? '', /onboarding_seen_at.*null.*show_riff_welcome.*mark_riff_onboarding_seen/is,
+    'raw MCP clients receive the complete first-open sequence even when no packaged setup skill is installed');
+  assert.match(initialized.result.instructions ?? '', /mark.*only after.*welcome.*succeeds/is);
   await rpc('tools/list', {});
   await rpc('resources/read', { uri: 'ui://riff/home-v3.html' });
   assert.equal(identity.resolutions.length, 0,
