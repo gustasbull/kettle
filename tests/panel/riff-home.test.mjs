@@ -17,6 +17,7 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
       refreshJob: async job=>{ window.events.push({kind:'refresh-job',jobId:job.id}); return {status:'sent',message:'Saved job refreshed.'}; },
       startRecommendations: async ({job,dna})=>{ window.events.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id}); return {status:'sent',message:'Discovery started.'}; },
       makeMine: async ({job,batch,idea})=>{ window.events.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id}); return {status:'sent',message:'Continue in ChatGPT.'}; },
+      proposeCatalogReference: async proposal=>{ window.events.push({kind:'catalog-proposal',proposal}); return {status:'sent',message:'Proposal sent.'}; },
       onDiscoveryOpen: ()=>{ window.events.push({kind:'catalog-open'}); },
     });
     window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fictional Creator',onboarding_seen_at:'2026-10-11T12:00:00Z'}});
@@ -98,6 +99,24 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
       assert.equal(await page.locator('.riff-home__hero-mark').evaluate(node => getComputedStyle(node).width), '104px');
       assert.equal(await page.getByRole('heading', { name: 'Let’s make your next video go viral.' }).evaluate(node => getComputedStyle(node).fontSize), '40px');
       assert.equal(await page.locator('.riff-home__composer').evaluate(node => getComputedStyle(node).width), '760px');
+      await page.evaluate(()=>{
+        window.studioJob=window.fixture('scripts');window.view.showJob(window.studioJob);
+        window.homeRefreshCard={id:'00000000-0000-4000-8000-000000000966',platform:'tiktok',native_id:'9000000000000000966',
+          canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000966',caption:'Home boundary reference',thumbnail_url:null,
+          published_at:null,duration_seconds:null,metrics:{views:0,likes:null,comments:null,shares:null,saves:null},
+          retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',role:'discovered_reference',
+          permission_basis:'Authored Home boundary fixture.',limitations:[]};
+      });
+      await page.getByRole('tab',{name:'Hook',exact:true}).click();await page.getByRole('button',{name:'Explore hooks'}).click();
+      await page.evaluate(()=>window.view.setCatalogState({status:'ready',page:{cards:[window.homeRefreshCard],next_cursor:null,coverage:'Saved only.',freshness:'As observed.'}}));
+      await page.evaluate(()=>{window.view.showHome();window.view.showJob(window.studioJob);});
+      assert.equal(await page.getByRole('tab',{name:'Hook',exact:true}).count(),1,'Home navigation clears the prior Studio catalog screen');
+      await page.evaluate(()=>window.view.showCatalog('hooks'));
+      await page.evaluate(()=>window.view.setCatalogState({status:'ready',page:{cards:[window.homeRefreshCard],next_cursor:null,coverage:'Saved only.',freshness:'As observed.'}}));
+      await page.getByRole('button',{name:'Use this hook'}).click();
+      assert.equal((await page.evaluate(()=>window.events.filter(event=>event.kind==='catalog-proposal').at(-1).proposal)).studioExplore,undefined,
+        'reopening the same job/catalog after Home cannot restore stale Studio context');
+      await page.evaluate(()=>window.view.showHome());
     }
 
     await page.evaluate(() => window.view.showJob(window.fixture('queued')));

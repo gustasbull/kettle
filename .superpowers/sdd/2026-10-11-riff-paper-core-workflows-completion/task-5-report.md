@@ -114,3 +114,52 @@ The fresh complete rerun above then passed without a code change.
 ## Concerns
 
 None within Task 5 scope.
+
+## Fix round 1/5 — preserve Studio Discovery context across trusted refresh
+
+Fix base: `6fc3d17ac33f6683cb00a867a9d854c0c0437dbb`.
+
+The review found that every pipeline `render(job)` call cleared `studioExplore` and
+then replaced the catalog screen, even when a compact status refresh described the
+same trusted job. The renderer now preserves the catalog only when all of these
+remain true: the account/project/job identity matches, the catalog is still open,
+the Studio context names the active library, and the trusted catalog scope remains
+the same project. It updates the current job and presentation status before
+rerendering the retained catalog. A different account, project, job, library, or
+stale scope cannot restore that context.
+
+Intentional navigation now uses an explicit `leaveCatalog()` boundary. Home,
+Create, recent-job navigation, and non-Discovery menu navigation clear both the
+catalog screen and its Studio context, so reopening the same job after leaving does
+not revive stale UI. Existing Discovery shortcuts continue to establish their own
+trusted library and scope.
+
+### Regression-first TDD record
+
+- RED — the new creator-pipeline regression passed 14/16 checks; the same-job
+  status refresh removed the expected Hook catalog (`Stop the scroll.` count was
+  zero). After the narrow preservation change, existing tests exposed their former
+  reliance on `render(job)` as an implicit navigation boundary, leading to the
+  explicit leave API.
+- RED — the new Home boundary check passed 0/1; Home followed by reopening the same
+  job incorrectly restored the catalog instead of the Studio Hook tab.
+- GREEN — `node --test tests/panel/creator-pipeline.test.mjs` passed 16/16.
+- GREEN — the targeted Paper Home regression passed 1/1.
+- GREEN — the creator-pipeline and Riff Home bridge suites passed 29/29, and the
+  focused TypeScript check passed.
+
+### Fix verification
+
+- `npm run check` — PASS:
+  - 536/536 Node tests;
+  - dry-run Worker build at 4,031.00 KiB / 817.97 KiB gzip;
+  - local workerd smoke test;
+  - 93/93 real-browser tests.
+- Creator-pipeline bundle: 146,662 bytes raw / 40,806 bytes gzip,
+  `sha256:ef3313b5d4f753d660e7bf98712798d1c3d72af4e60562f5e87a8be31093a2d4`.
+- Riff Home bundle: 208,453 bytes raw / 59,265 bytes gzip,
+  `sha256:48fa9ad86ab9282557080777cdf58800e4c2e04a3063a5b1a954679dd878a2cc`.
+- `git diff --check` — PASS.
+
+Fix commit: this commit (`fix: preserve Studio discovery context`); its final hash
+is returned in the agent handoff because a Git object cannot contain its own hash.

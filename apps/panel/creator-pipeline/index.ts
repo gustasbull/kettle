@@ -113,6 +113,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   render(job: CreatorJobView, presentation?:CreatorPipelinePresentation): void;
   setCatalogState(state:RiffVideoCatalogState):void;
   showCatalog(library?:RiffDiscoveryLibrary,scope?:{accountWide?:boolean;projectId?:string},studioExplore?:RiffStudioExploreIntent):void;
+  leaveCatalog():void;
   setNotice(message:string):void;
   setDisplayMode(mode: RiffCreatorDisplayMode): void;
   dispose(): void;
@@ -246,6 +247,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let catalogActiveId:string|undefined;
   let catalogScopeKey:string|undefined;
   let studioExplore:RiffStudioExploreIntent|undefined;
+  const leaveCatalog=()=>{showingCatalog=false;studioExplore=undefined;};
 
   const enterDiscovery=(loadCatalog=false,projectId?:string,explicit=false)=>{
     screenKind='discovery';
@@ -267,14 +269,17 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         discoveryLibrary='videos';discoveryFilter='For you';catalogIndex=0;catalogActiveId=undefined;studioExplore=undefined;
         enterDiscovery(true,current?.project_id,true);renderCatalogDiscovery();return;
       }
+      leaveCatalog();
       if(options.menu?.onHome)options.menu.onHome();
       else void runMenu(()=>sendPrompt('Open Riff Home in this app so I can start or resume work.'));
     },
     onOpenRecent(recent){
+      leaveCatalog();
       if(options.menu?.onOpenRecent)options.menu.onOpenRecent(recent);
       else void runMenu(()=>sendPrompt(`Open my saved Riff work, “${recent.title}”.`));
     },
     onCreate(){
+      leaveCatalog();
       if(options.menu?.onCreate)options.menu.onCreate();
       else void runMenu(()=>sendPrompt('Start a fresh Riff video from Home without changing the saved work currently open.'));
     },
@@ -898,9 +903,9 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   function render(job: CreatorJobView,presentation:CreatorPipelinePresentation={}) {
     if (disposed) return;
-    studioExplore=undefined;
     const nextIdentity = `${job.project_id}:${job.id}`;
     const same = identity === nextIdentity;
+    const preserveStudioCatalog=same&&showingCatalog&&studioExplore?.library===discoveryLibrary&&catalogScopeKey===job.project_id;
     const active = doc.activeElement as HTMLElement | null;
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
@@ -908,9 +913,12 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       ideaIndex = 0; catalogIndex=0;catalogActiveId=undefined;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;studioExplore=undefined;
       if(current?.project_id!==job.project_id){catalogState={status:'loading'};catalogScopeKey=undefined;}
     }
+    if(!preserveStudioCatalog)studioExplore=undefined;
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
-    identity = nextIdentity; current = job;currentStatus=presentation.status;showingCatalog=false; wrapper.dataset.mode = mode; content.replaceChildren();
+    identity = nextIdentity; current = job;currentStatus=presentation.status;wrapper.dataset.mode = mode;
+    if(preserveStudioCatalog){renderCatalogDiscovery();return;}
+    showingCatalog=false;content.replaceChildren();
     let heading: HTMLElement;
     const observedState=presentation.status?.state??job.state;
     location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
@@ -937,6 +945,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     showCatalog(library='videos',scope={},explore){if(disposed)return;
       const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(true,projectId,true);
       discoveryLibrary=library;discoveryFilter=discoveryLibraryViews[library].filters[0];studioExplore=explore?.library===library?structuredClone(explore):undefined;renderCatalogDiscovery();},
+    leaveCatalog,
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
     dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalogState={status:'loading'};sourceUrl=undefined;catalogScopeKey=undefined;catalogActiveId=undefined;studioExplore=undefined;root.replaceChildren(); },

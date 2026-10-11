@@ -344,6 +344,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const showHome = () => {
     if (disposed) return;
     invocationEpoch++;
+    pipeline?.leaveCatalog();
     if (product) { product.dispose(); product = undefined; workflowRoot.replaceChildren(); }
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
     menu?.render({ activeRoute: 'home' });

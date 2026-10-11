@@ -737,7 +737,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       ['CTA','Explore CTAs','CTAs','Use this CTA','cta','ctas'],
     ];
     for(const [studioTab,explore,library,action,part,libraryKey] of mappings){
-      await page.evaluate(()=>{window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
+      await page.evaluate(()=>{window.view.leaveCatalog();window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
       await root.getByRole('tab',{name:studioTab,exact:true}).click();
       await root.getByRole('button',{name:explore,exact:true}).click();
       assert.equal(await root.getByRole('tab',{name:library,exact:true}).getAttribute('aria-selected'),'true');
@@ -747,10 +747,45 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         {part,library:libraryKey,unchanged:true});
       assert.equal('job' in proposal||'batch' in proposal||'idea' in proposal,false);
     }
-    await page.evaluate(()=>{window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
+    await page.evaluate(()=>{window.view.leaveCatalog();window.view.render(window.job);window.view.setCatalogState({status:'ready',page:{cards:window.catalogCards,next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});});
     await root.getByRole('tab',{name:'Hook',exact:true}).click();await root.getByRole('button',{name:'Explore hooks'}).click();
     await root.getByRole('tab',{name:'CTAs',exact:true}).click();await root.getByRole('button',{name:'Use this CTA'}).click();
     assert.equal((await page.evaluate(()=>window.catalogProposals.at(-1))).studioExplore,undefined,'switching libraries clears an unrelated Studio intent');
+  });
+
+  await t.test('same-job refresh preserves matching Studio catalog context while identity changes clear it', async () => {
+    await page.evaluate(()=>{
+      boot('scripts','fullscreen');
+      window.refreshCard={
+        id:'00000000-0000-4000-8000-000000000955',platform:'tiktok',native_id:'9000000000000000955',
+        canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000955',caption:'Refresh-safe Studio reference',
+        thumbnail_url:null,published_at:null,duration_seconds:null,metrics:{views:0,likes:null,comments:null,shares:null,saves:null},
+        retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',
+        role:'discovered_reference',permission_basis:'Authored refresh fixture.',limitations:[],
+      };
+      window.view.setCatalogState({status:'ready',page:{cards:[window.refreshCard],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}});
+    });
+    await root.getByRole('tab',{name:'Hook',exact:true}).click();
+    await root.getByRole('button',{name:'Explore hooks'}).click();
+    await page.evaluate(()=>{
+      window.job.revision+=1;window.job.updated_at='2026-10-11T12:01:00Z';
+      window.view.render(window.job,{status:{id:window.job.id,kind:'scripts',state:'succeeded',stage:window.job.stage,revision:window.job.revision,
+        created_at:window.job.created_at,updated_at:window.job.updated_at,progress:structuredClone(window.job.progress),terminal_result_available:true}});
+    });
+    assert.equal(await root.getByRole('heading',{name:'Stop the scroll.'}).count(),1,'same trusted refresh keeps the matching catalog open');
+    await root.getByRole('button',{name:'Use this hook'}).click();
+    assert.deepEqual(await page.evaluate(()=>{
+      const context=window.catalogProposals.at(-1).studioExplore;return context&&{source:context.source,part:context.part,library:context.library,unchanged:context.currentScriptUnchanged};
+    }),{source:'studio',part:'hook',library:'hooks',unchanged:true});
+
+    await page.evaluate(()=>{
+      const different=structuredClone(window.job);different.id='00000000-0000-4000-8000-000000000956';window.view.render(different);
+      window.view.render(window.job);
+    });
+    assert.equal(await root.locator('[data-catalog-card]').count(),0,'different and late stale identities cannot restore Studio catalog state');
+    await page.evaluate(()=>window.view.showCatalog('hooks'));
+    await root.getByRole('button',{name:'Use this hook'}).click();
+    assert.equal((await page.evaluate(()=>window.catalogProposals.at(-1))).studioExplore,undefined,'catalog re-entry after an identity change has no stale Studio context');
   });
 
   await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {
@@ -829,6 +864,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       variant.timed_segments = [
         { part: 'hook', start_seconds: 0, end_seconds: 3, spoken_text: 'A persisted timed hook.', filming_direction: 'Open on the finished result.' },
       ];
+      window.view.leaveCatalog();
       window.view.render(window.job);
     });
     await root.getByRole('tab', { name: 'Full video', exact: true }).click();
