@@ -20,6 +20,18 @@ export const StoredCreatorJob = z.object({
 });
 export type StoredCreatorJob = z.infer<typeof StoredCreatorJob>;
 export const StoredCreatorJobOutput = result(z.object({job:StoredCreatorJob}));
+export type CreatorDispatch = (jobId:string,accountId:string,telemetry?:CreatorLatencyObserver)=>Promise<void>;
+export type CreatorTaskDefer = (task:Promise<void>)=>void;
+export type CreatorDispatchScheduler = (jobId:string,accountId:string,telemetry?:CreatorLatencyObserver)=>void;
+export function createCreatorDispatchScheduler(dispatch:CreatorDispatch,defer:CreatorTaskDefer):CreatorDispatchScheduler {
+  return (jobId,accountId,telemetry) => {
+    try {
+      const task=observed(telemetry,{stage:'application_operation',clock:'monotonic',operation:'dispatch'},
+        ()=>dispatch(jobId,accountId,telemetry)).catch(()=>undefined);
+      defer(task);
+    } catch { /* committed queued intent remains the outbox authority */ }
+  };
+}
 const CapturedCreatorScan = z.strictObject({scan:ProfileScanRequest,seed_url:CreatorUrl.optional()})
   .refine(captured=>!captured.seed_url||new URL(captured.seed_url).hostname.replace(/^www\./,'')==='tiktok.com'
     &&new URL(captured.seed_url).pathname.startsWith(new URL(captured.scan.supplied_url).pathname.replace(/\/$/,'')+'/video/')
@@ -34,7 +46,7 @@ export function publicCreatorJob(job:StoredCreatorJob):CreatorJobView {
       job.state==='failed'?'This job could not complete. Check the research allowance and source permissions before starting a new request.':null});
 }
 export function createPipelineOperations(verifier:IdentityVerifier, repository:PipelineRepository,
-  dispatch:(jobId:string,accountId:string,telemetry?:CreatorLatencyObserver)=>Promise<void>,isEnabled:(operation:PipelineOperation)=>boolean=()=>true,
+  schedule:CreatorDispatchScheduler,isEnabled:(operation:PipelineOperation)=>boolean=()=>true,
   telemetry?:CreatorLatencyObserver) {
   return {async execute(operation:PipelineOperation, credential:string|null, raw:unknown) {
     if(!credential)return failure('UNAUTHENTICATED');
@@ -59,9 +71,7 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
       const publicOutput=CreatorJobOutput.parse({ok:true,data:{job:publicCreatorJob(job)}});
       const jobTelemetry=operationTelemetry?.scope?.({job_id:job.id})??operationTelemetry;
       // Intent is already durable. A dispatch gap is reconciled by the scheduled outbox.
-      if(operation!=='get_creator_job'&&job.state==='queued')try{await observed(jobTelemetry,
-        {stage:'application_operation',clock:'monotonic',operation:'dispatch'},
-        ()=>dispatch(job.id,job.account_id,jobTelemetry));}catch{/* durable queued intent */}
+      if(operation!=='get_creator_job'&&job.state==='queued')try{schedule(job.id,job.account_id,jobTelemetry);}catch{/* durable queued intent */}
       return publicOutput;
     }catch{return failure('UNAVAILABLE');}
   }};

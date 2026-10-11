@@ -1,8 +1,7 @@
-import type { z } from 'zod';
-import { CreatorJobOutput, GetCreatorJobInput, type CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
-import { StartRiffCreatorOutput } from '../../packages/contracts/riff-creator.ts';
+import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
+import { creatorJobStructuredOutput, creatorJobText, parseCreatorJobOutput, parseGetCreatorJobInput } from './creator-pipeline-validation.ts';
 
-type Selection = z.infer<typeof GetCreatorJobInput>;
+type Selection = {job_id:string};
 export interface CreatorPipelineObserver {
   loading(): void;
   job(job: CreatorJobView, status: { refreshing: boolean; canRefresh: boolean; notice?: string }): void;
@@ -18,17 +17,7 @@ export interface CreatorPipelineLimits {
 }
 
 /** Structured public data only. Neither model text nor private metadata is a fallback. */
-export function creatorJobStructuredOutput(raw: unknown): z.infer<typeof CreatorJobOutput> | undefined {
-  const envelope = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-  const job = CreatorJobOutput.safeParse(envelope.structuredContent);
-  if (job.success) return envelope.isError === true && job.data.ok ? undefined : job.data;
-  const started = StartRiffCreatorOutput.safeParse(envelope.structuredContent);
-  if (!started.success || !started.data.ok || envelope.isError === true) return undefined;
-  return CreatorJobOutput.parse({ ok: true, data: { job: started.data.data.job } });
-}
-export function creatorJobText(raw: unknown): string {
-  return JSON.stringify(CreatorJobOutput.parse(raw));
-}
+export { creatorJobStructuredOutput, creatorJobText } from './creator-pipeline-validation.ts';
 const active = (job: CreatorJobView) => job.state === 'queued' || job.state === 'running';
 
 /** Read-only observation of persisted jobs. No start/provider/generation capability. */
@@ -88,9 +77,8 @@ export function createCreatorPipelineController(
     }, Math.min(delay, Math.max(1, pollWindowMs - (Date.now() - started))));
   }
   function apply(raw: unknown, refreshing: boolean): 'ok' | 'error' | 'rejected' {
-    const parsed = CreatorJobOutput.safeParse(raw);
-    if (!parsed.success) { clear('invalid'); return 'rejected'; }
-    const result = parsed.data;
+    const result = parseCreatorJobOutput(raw);
+    if (!result) { clear('invalid'); return 'rejected'; }
     if (!result.ok) {
       if (result.error.code === 'UNAVAILABLE' && refreshing && job) {
         paused = true; publish('Updates paused. Refresh or reopen in chat to try again.'); return 'error';
@@ -147,13 +135,13 @@ export function createCreatorPipelineController(
     },
     receiveInput(raw: unknown) {
       if (disposed || blocked) return;
-      const parsed = GetCreatorJobInput.safeParse(raw);
-      if (!parsed.success) { clear('invalid'); return; }
+      const parsed = parseGetCreatorJobInput(raw);
+      if (!parsed) { clear('invalid'); return; }
       invalidate();
-      if (selection?.job_id !== parsed.data.job_id) {
+      if (selection?.job_id !== parsed.job_id) {
         job = undefined; polls = 0; started = Date.now(); paused = false;
       }
-      selection = parsed.data;
+      selection = parsed;
       if (job) { publish(); schedule(); } else loading();
     },
     receiveResult(raw: unknown) {

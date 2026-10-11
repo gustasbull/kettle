@@ -1,6 +1,6 @@
 import { createRiffCreatorOperations, type RiffCreatorDispatch } from '../../packages/application/riff-creator.ts';
 import type { IdentityVerifier } from '../../packages/application/operations.ts';
-import { resolveTikTokCreatorSource } from '../../packages/adapters/creator-pipeline/tiktok-source.ts';
+import { classifyTikTokCreatorSource, resolveTikTokCreatorSource } from '../../packages/adapters/creator-pipeline/tiktok-source.ts';
 import {
   createRiffCreatorSupabaseRepository,
   type RiffCreatorDevelopmentPolicy,
@@ -32,5 +32,6 @@ export function createRiffCreatorRuntime(
     dispatch,
     isEnabled,
     telemetry,
+    classifyTikTokCreatorSource,
   );
 }

@@ -1,12 +1,12 @@
 import {
   App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
   type McpUiHostContext,
-} from '@modelcontextprotocol/ext-apps';
+} from './mcp-app-lite.ts';
 import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
-import { StartRiffCreatorInput } from '../../packages/contracts/riff-creator.ts';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
 import { panelPerformanceFromDocument } from './creator-performance.ts';
+import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
 
 const WAIT_MS = 10_000;
 
@@ -149,7 +149,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   app.ontoolinput = (params) => {
     // start_riff_creator has no job ID until its result arrives. Keep the
     // loading state alive rather than rejecting a valid direct-start launch.
-    if (!StartRiffCreatorInput.safeParse(params.arguments).success) controller.receiveInput(params.arguments);
+    if (!parseStartRiffCreatorInput(params.arguments)) controller.receiveInput(params.arguments);
   };
   app.ontoolresult = (params) => {
     const output = creatorJobStructuredOutput(params);

@@ -11,7 +11,7 @@ const repository = fileURLToPath(new URL('../', import.meta.url));
 export const PANEL_BUDGETS = Object.freeze({
   'riff-home': Object.freeze({ raw_bytes: 500_000, gzip_bytes: 110_000 }),
   'riff-onboarding': Object.freeze({ raw_bytes: 400_000, gzip_bytes: 85_000 }),
-  pipeline: Object.freeze({ raw_bytes: 650_000, gzip_bytes: 145_000 }),
+  pipeline: Object.freeze({ raw_bytes: 250_000, gzip_bytes: 75_000 }),
 });
 
 const panels = {
@@ -64,6 +64,10 @@ export async function buildPanel(root = repository, kind = 'project') {
   }
   const componentInput = Object.keys(result.metafile.inputs).some(path => resolve(root, path) === component);
   if (!componentInput) throw new Error(`Bridge must import the real ${name} component.`);
+  if (kind === 'pipeline') {
+    const forbidden = Object.keys(result.metafile.inputs).find(path => /(?:^|\/)(?:packages\/(?:contracts|application)|node_modules\/zod)\//.test(path));
+    if (forbidden) throw new Error(`Creator pipeline browser bundle crosses server runtime boundary: ${forbidden}`);
+  }
   const bytes = result.outputFiles[0].contents;
   const budget = PANEL_BUDGETS[kind];
   const fingerprint = panel.resourceVersion && budget ? Object.freeze({

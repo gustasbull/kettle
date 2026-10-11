@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRiffCreatorRuntime } from '../apps/worker/riff-creator-runtime.ts';
 import { failure } from '../packages/application/operations.ts';
+import { createCreatorDispatchScheduler } from '../packages/application/creator-pipeline.ts';
 import { accountA } from './fixtures.ts';
 
 test('runtime factory composes verified identity, service storage, canonicalization and dispatch without MCP globals', async () => {
@@ -44,18 +45,13 @@ test('runtime factory composes verified identity, service storage, canonicalizat
     supabaseUrl: 'https://example.supabase.co', serviceRoleKey: 'fixture-service-role',
     maxProfilesPerAccount: 1, allowanceTtlSeconds: 604800,
   }, { async verify() { return { account_id: accountA, scopes: ['projects:write'] }; } },
-  async id => { dispatched.push(id); }, () => true, fetcher, telemetry);
+  createCreatorDispatchScheduler(async id => { dispatched.push(id); },task=>{void task;}), () => true, fetcher, telemetry);
 
   const response = await operations.execute('start_riff_creator', 'token', { request_id: requestId, source_url: sourceUrl });
   assert.equal(response.ok, true);
-  assert.deepEqual(calls, [
-    'https://example.supabase.co/rest/v1/rpc/kettle_get_riff_creator_start',
-    'https://example.supabase.co/rest/v1/rpc/kettle_start_riff_creator',
-  ]);
+  assert.deepEqual(calls, ['https://example.supabase.co/rest/v1/rpc/kettle_start_riff_creator']);
   assert.deepEqual(dispatched, [jobId]);
   assert.deepEqual(observed.map(event => [event.stage, event.operation]), [
-    ['supabase_rpc', 'find'],
-    ['application_operation', 'find'],
     ['application_operation', 'start'],
     ['supabase_rpc', 'start'],
     ['application_operation', 'dispatch'],

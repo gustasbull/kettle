@@ -1,4 +1,4 @@
-import { createPipelineOperations } from '../../packages/application/creator-pipeline.ts';
+import { createCreatorDispatchScheduler, createPipelineOperations, type CreatorTaskDefer } from '../../packages/application/creator-pipeline.ts';
 import { createPipelineSupabaseRepository } from '../../packages/database/creator-pipeline-supabase.ts';
 import { dispatchCreatorJob, pipelineConfigured } from './creator-pipeline-runtime.ts';
 import { createRiffCreatorRuntime } from './riff-creator-runtime.ts';
@@ -12,7 +12,7 @@ import { createMcpVerifierForRequest, createWebsiteVerifierForRequest } from './
 import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 export { authConfig } from './auth-config.ts';
 
-export async function authServices(env: Env, config: RuntimeAuthConfig, telemetry?: CreatorLatencyObserver) {
+export async function authServices(env: Env, config: RuntimeAuthConfig, defer:CreatorTaskDefer, telemetry?: CreatorLatencyObserver) {
   const verifier = createMcpVerifierForRequest(
     config.mcp,
     createSupabaseIdentityResolver(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry),
@@ -20,11 +20,12 @@ export async function authServices(env: Env, config: RuntimeAuthConfig, telemetr
   );
   const operations = createOperations(verifier, createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
   const creatorOperations = createCreatorOperations(verifier, createCreatorSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
-  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry), (id, accountId, operationTelemetry)=>dispatchCreatorJob(env,id,accountId,operationTelemetry??telemetry),operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts',telemetry);
+  const schedule=createCreatorDispatchScheduler((id,accountId,operationTelemetry)=>dispatchCreatorJob(env,id,accountId,operationTelemetry??telemetry),defer);
+  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry), schedule,operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts',telemetry);
   const riffCreatorOperations = createRiffCreatorRuntime({
     supabaseUrl: env.SUPABASE_URL!, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
     maxProfilesPerAccount: 1, allowanceTtlSeconds: 604_800,
-  }, verifier, (id, accountId, operationTelemetry) => dispatchCreatorJob(env, id, accountId, operationTelemetry ?? telemetry), () => pipelineConfigured(env), fetch, telemetry);
+  }, verifier, schedule, () => pipelineConfigured(env), fetch, telemetry);
   return { config: config.mcp, verifier, operations, creatorOperations, pipelineOperations, riffCreatorOperations };
 }
 

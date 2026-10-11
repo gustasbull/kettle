@@ -9,9 +9,10 @@ import { protectedResource } from '../../packages/auth/index.ts';
 import { createSupabaseWebsiteAuthClient, handleWebsiteAuth, websiteAuthUnavailable } from '../../packages/auth/website.ts';
 import { createCreatorTelemetry } from './creator-telemetry.ts';
 import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
+import { createExecutionContextDefer } from './deferred-dispatch.ts';
 export { FoundationWorkflow } from './workflow.ts';
 
-async function routeRequest(request: Request, env: Env, telemetry: CreatorLatencyObserver): Promise<Response> {
+async function routeRequest(request: Request, env: Env, ctx:ExecutionContext, telemetry: CreatorLatencyObserver): Promise<Response> {
   const url = new URL(request.url);
   const config = authConfig(env);
   if (request.method === 'GET' && url.pathname === '/health') {
@@ -31,7 +32,7 @@ async function routeRequest(request: Request, env: Env, telemetry: CreatorLatenc
     return withMcpCors(request, env.MCP_CORS_ORIGINS, async () => {
       try {
         if (config && url.origin !== new URL(config.mcp.resource).origin) return new Response('Invalid resource origin', { status: 400 });
-        return await handleMcp(request, config ? await authServices(env, config, telemetry) : undefined, telemetry);
+        return await handleMcp(request, config ? await authServices(env, config, createExecutionContextDefer(ctx), telemetry) : undefined, telemetry);
       } catch { return new Response('Authentication service unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } }); }
     });
   }
@@ -49,12 +50,12 @@ async function routeRequest(request: Request, env: Env, telemetry: CreatorLatenc
 
 export default {
   async scheduled(_event: ScheduledController, env: Env) { await reconcileCreatorDispatches(env, createCreatorTelemetry()); },
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx:ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const endpoint = url.pathname === '/mcp' ? 'worker_mcp' : url.pathname === '/' ? 'worker_home'
       : url.pathname === '/health' ? 'worker_health' : isWebsiteAuthPath(url) ? 'worker_oauth' : 'worker_not_found';
     const telemetry = createCreatorTelemetry().scope({ trace_id: crypto.randomUUID() });
     return telemetry.measure({ stage: 'request_receipt', clock: 'monotonic', operation: 'read', endpoint },
-      () => routeRequest(request, env, telemetry));
+      () => routeRequest(request, env, ctx, telemetry));
   },
 };

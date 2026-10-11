@@ -21,7 +21,8 @@ export interface RiffCreatorRepository {
   list(accountId: string, input: ListRiffWorkInput, telemetry?: CreatorLatencyObserver): Promise<unknown>;
 }
 export type RiffCreatorSourceResolver = (value: string) => Promise<CanonicalSource>;
-export type RiffCreatorDispatch = (jobId: string, accountId: string, telemetry?: CreatorLatencyObserver) => Promise<void>;
+export type RiffCreatorSourceClassifier = (value: string) => 'canonical' | 'short' | 'invalid';
+export type RiffCreatorDispatch = (jobId: string, accountId: string, telemetry?: CreatorLatencyObserver) => void;
 
 const StoredRiffCreatorOutput = result(z.strictObject({
   project: Project,
@@ -52,6 +53,7 @@ export function createRiffCreatorOperations(
   dispatch: RiffCreatorDispatch,
   isEnabled: () => boolean = () => true,
   telemetry?: CreatorLatencyObserver,
+  classifySource: RiffCreatorSourceClassifier = () => 'short',
 ) {
   return { async execute(
     operation: RiffCreatorOperation,
@@ -92,18 +94,20 @@ export function createRiffCreatorOperations(
     if (!isEnabled()) return failure('UNAVAILABLE');
 
     try {
-      const existing = StoredRiffCreatorOutput.parse(await observed(requestTelemetry,
-        { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
-        () => repository.find(identity.account_id, parsed.data, requestTelemetry)));
-      if (existing.ok || existing.error.code !== 'NOT_FOUND') {
-        const projected = projectStored(existing, identity.account_id, parsed.data);
-        if (projected.ok && projected.data.job.state === 'queued') {
-          const jobTelemetry = requestTelemetry?.scope?.({ job_id: projected.data.job.id }) ?? requestTelemetry;
-          try { await observed(jobTelemetry,
-            { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
-            () => dispatch(projected.data.job.id, identity.account_id, jobTelemetry)); } catch { /* durable queued intent */ }
+      const classification = classifySource(parsed.data.source_url);
+      if (classification === 'invalid') return failure('VALIDATION_ERROR');
+      if (classification === 'short') {
+        const existing = StoredRiffCreatorOutput.parse(await observed(requestTelemetry,
+          { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
+          () => repository.find(identity.account_id, parsed.data, requestTelemetry)));
+        if (existing.ok || existing.error.code !== 'NOT_FOUND') {
+          const projected = projectStored(existing, identity.account_id, parsed.data);
+          if (projected.ok && projected.data.job.state === 'queued') {
+            const jobTelemetry = requestTelemetry?.scope?.({ job_id: projected.data.job.id }) ?? requestTelemetry;
+            try { dispatch(projected.data.job.id, identity.account_id, jobTelemetry); } catch { /* durable queued intent */ }
+          }
+          return projected;
         }
-        return projected;
       }
 
       let source: CanonicalSource;
@@ -118,9 +122,7 @@ export function createRiffCreatorOperations(
       if (projected.ok && JSON.stringify(projected.data.source) !== JSON.stringify(source)) return failure('UNAVAILABLE');
       if (projected.ok && projected.data.job.state === 'queued') {
         const jobTelemetry = requestTelemetry?.scope?.({ job_id: projected.data.job.id }) ?? requestTelemetry;
-        try { await observed(jobTelemetry,
-          { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
-          () => dispatch(projected.data.job.id, identity.account_id, jobTelemetry)); } catch { /* reconciler retries durable intent */ }
+        try { dispatch(projected.data.job.id, identity.account_id, jobTelemetry); } catch { /* reconciler retries durable intent */ }
       }
       return projected;
     } catch {

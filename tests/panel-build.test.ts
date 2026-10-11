@@ -21,6 +21,14 @@ test('Riff Home keeps its first-paint browser bundle below 500 KB', async () => 
   assert.ok(bytes < 500_000, `Riff Home browser bundle is ${bytes} bytes; keep launch-critical code below 500 KB`);
 });
 
+test('creator pipeline excludes server contract graphs and stays within launch budgets', async () => {
+  const result = await buildPanel(process.cwd(), 'pipeline');
+  assert.equal(result.status, 'built');
+  assert.ok(result.fingerprint.raw_bytes <= 250_000, `${result.fingerprint.raw_bytes} raw bytes`);
+  assert.ok(result.fingerprint.gzip_bytes <= 75_000, `${result.fingerprint.gzip_bytes} gzip bytes`);
+  assert.deepEqual(PANEL_BUDGETS.pipeline, { raw_bytes: 250_000, gzip_bytes: 75_000 });
+});
+
 for (const kind of ['project', 'creator', 'riff-onboarding', 'riff-home']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'kettle-panel-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));

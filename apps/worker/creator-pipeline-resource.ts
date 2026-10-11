@@ -34,6 +34,7 @@ export function creatorPipelineHtml(script: string, fingerprint?: {resource_vers
 <body><div id="root"><p role="status">Loading your Riff creator workflow…</p></div>
 <script>${safeScript}</script></body></html>`;
 }
+export const CREATOR_PIPELINE_DOCUMENT = creatorPipelineHtml(creatorPipelineScript, creatorPipelineFingerprint);
 
 export function registerCreatorPipelineResource(server: McpServer): void {
   const register = (name: string, uri: string) => server.registerResource(name, uri, {
@@ -42,7 +43,7 @@ export function registerCreatorPipelineResource(server: McpServer): void {
       mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
     }, async () => ({ contents: [{
       uri, mimeType: CREATOR_PIPELINE_MIME,
-      text: creatorPipelineHtml(creatorPipelineScript, creatorPipelineFingerprint), _meta: CREATOR_PIPELINE_META,
+      text: CREATOR_PIPELINE_DOCUMENT, _meta: CREATOR_PIPELINE_META,
     }] }));
   register('kettle-creator-pipeline', CREATOR_PIPELINE_URI);
   register('kettle-creator-pipeline-v2-compat', CREATOR_PIPELINE_V2_URI);

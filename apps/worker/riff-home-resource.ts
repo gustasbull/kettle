@@ -32,13 +32,14 @@ export function riffHomeHtml(script: string, fingerprint?: {resource_version:str
     ? `<meta name="riff-bundle-version" content="${fingerprint.bundle_version}" data-resource-version="${fingerprint.resource_version}">` : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">${version}<meta name="viewport" content="width=device-width,initial-scale=1"><title>Riff Home</title></head><body><div id="root"><p role="status">Loading Riff Home…</p></div><script>${safeScript}</script></body></html>`;
 }
+export const RIFF_HOME_DOCUMENT = riffHomeHtml(riffHomeScript, riffHomeFingerprint);
 
 export function registerRiffHomeResource(server: McpServer): void {
   const register = (name: string, uri: string) => server.registerResource(name, uri, {
     description: 'Riff Home for creator input, discovery shortcuts, and honest saved-work handoffs.',
     mimeType: RIFF_HOME_MIME, _meta: RIFF_HOME_META,
   }, async () => ({ contents: [{
-    uri, mimeType: RIFF_HOME_MIME, text: riffHomeHtml(riffHomeScript, riffHomeFingerprint), _meta: RIFF_HOME_META,
+    uri, mimeType: RIFF_HOME_MIME, text: RIFF_HOME_DOCUMENT, _meta: RIFF_HOME_META,
   }] }));
   register('riff-home', RIFF_HOME_URI);
   // Existing ChatGPT turns keep the resource URI from their original tool

@@ -44,6 +44,15 @@ function shortUrl(value: string): URL {
   return url;
 }
 
+export type TikTokSourceClassification = 'canonical' | 'short' | 'invalid';
+
+/** Pure classification seam. This module remains the single owner of TikTok URL grammar. */
+export function classifyTikTokCreatorSource(value: string): TikTokSourceClassification {
+  if (canonical(value)) return 'canonical';
+  try { shortUrl(value); return 'short'; }
+  catch { return 'invalid'; }
+}
+
 /** Resolve TikTok share links without reading bodies, forwarding credentials, or following a redirect automatically. */
 export async function resolveTikTokCreatorSource(
   value: string,

@@ -5,7 +5,7 @@ import { runCreatorTransportRuntimeCheck } from './creator-transport-runtime-che
 export { FoundationWorkflow } from '../apps/worker/workflow.ts';
 export { CreatorPipelineWorkflow } from '../apps/worker/creator-pipeline-runtime.ts';
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/__fixture/creator-transport' && request.method === 'POST') {
       return Response.json(await runCreatorTransportRuntimeCheck());
@@ -22,6 +22,6 @@ export default {
       const instance = await env.FOUNDATION_WORKFLOW.get(url.pathname.split('/').at(-1)!);
       return Response.json(await instance.status());
     }
-    return worker.fetch(request, env);
+    return worker.fetch(request, env, ctx);
   },
 };

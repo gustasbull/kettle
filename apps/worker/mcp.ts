@@ -30,6 +30,13 @@ export interface McpAuth {
   creatorOperations?: ReturnType<typeof createCreatorOperations>;
   riffCreatorOperations?: ReturnType<typeof createRiffCreatorOperations>;
 }
+type AuthTool = Tool & { securitySchemes: ({ type: string; scopes?: string[] })[] };
+const descriptorCatalog = new Map<string, readonly AuthTool[]>();
+export function cachedMcpToolDescriptors(key:string, build:()=>AuthTool[]):readonly AuthTool[] {
+  const existing=descriptorCatalog.get(key);if(existing)return existing;
+  const created=Object.freeze(build().map(tool=>Object.freeze({...tool})));
+  descriptorCatalog.set(key,created);return created;
+}
 const MCP_INSTRUCTIONS = [
   'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
   'Do not call the diagnostic, profile, or account-state tools before `open_riff`.',
@@ -306,7 +313,6 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
   }
   // SDK 1.32's high-level registration only serializes _meta. Publish the
   // standard top-level securitySchemes as well, using its public list handler API.
-  type AuthTool = Tool & { securitySchemes: ({ type: string; scopes?: string[] })[] };
   const publishedOutputSchema = (schema: z.ZodType) => {
     const output = ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
     // Large nested output schemas are repeated once per tool and are injected
@@ -329,6 +335,8 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     securitySchemes: welcomeSecurity, _meta: welcomeMeta,
   };
+  const descriptorKey=[Boolean(auth),Boolean(auth?.creatorOperations),Boolean(auth?.pipelineOperations),Boolean(auth?.riffCreatorOperations)].map(Number).join('');
+  const descriptors = cachedMcpToolDescriptors(descriptorKey,()=>{
   const descriptors: AuthTool[] = [diagnostic];
   if (auth) descriptors.push(welcomeDescriptor);
   if (auth) for (const tool of productTools) {
@@ -379,7 +387,9 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
       securitySchemes: riffSecurity, _meta: homeMeta,
     });
   }
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: descriptors }));
+  return descriptors;
+  });
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...descriptors] }));
   // A new stateless transport per request works across Worker isolates. Product
   // state will live in Postgres, not an MCP session or an isolate global.
   const transport = new WebStandardStreamableHTTPServerTransport({

@@ -94,6 +94,17 @@ test('canonical TikTok sources avoid network and short links follow only bounded
   assert.deepEqual(visited, ['https://vt.tiktok.com/ZSFictional/', 'https://vm.tiktok.com/ZSTwo/']);
 });
 
+test('TikTok source classification distinguishes canonical, short and invalid without network I/O', async () => {
+  const module = await import('../packages/adapters/creator-pipeline/tiktok-source.ts');
+  const classify = (module as unknown as { classifyTikTokCreatorSource?: (value: string) => string }).classifyTikTokCreatorSource;
+  assert.equal(typeof classify, 'function');
+  assert.equal(classify?.(source.canonical_url), 'canonical');
+  assert.equal(classify?.('https://www.tiktok.com/@creator.one'), 'canonical');
+  assert.equal(classify?.('https://vm.tiktok.com/ZN8kT85EE/'), 'short');
+  assert.equal(classify?.('https://evil.test/@creator.one'), 'invalid');
+  assert.equal(classify?.('https://user:secret@vm.tiktok.com/ZN8kT85EE/'), 'invalid');
+});
+
 test('TikTok short-link resolution rejects foreign, insecure and overlong redirect chains without following them', async () => {
   let calls = 0;
   await assert.rejects(resolveTikTokCreatorSource('https://vt.tiktok.com/ZSFictional/', async () => {
@@ -112,7 +123,7 @@ test('TikTok short-link resolution rejects foreign, insecure and overlong redire
   }
 });
 
-test('authenticated creator start derives ownership, prepares once and dispatches the existing queued scan', async () => {
+test('canonical creator start skips preflight and schedules one queued dispatch', async () => {
   const calls: Array<{ method: string; accountId: string; value: unknown }> = [];
   const repository: RiffCreatorRepository = {
     async find(accountId, value) { calls.push({ method: 'find', accountId, value }); return failure('NOT_FOUND'); },
@@ -125,6 +136,7 @@ test('authenticated creator start derives ownership, prepares once and dispatche
   const operations = createRiffCreatorOperations(
     { async verify() { return { account_id: accountA, scopes: ['projects:write'] }; } }, repository,
     async () => source, async (id, owner) => { dispatches.push([id, owner]); }, () => true,
+    undefined, () => 'canonical',
   );
 
   const result = StartRiffCreatorOutput.parse(await operations.execute('start_riff_creator', 'fixture-token', input));
@@ -139,14 +151,13 @@ test('authenticated creator start derives ownership, prepares once and dispatche
     source,
   });
   assert.deepEqual(calls, [
-    { method: 'find', accountId: accountA, value: input },
     { method: 'start', accountId: accountA, value: { value: input, canonical: source } },
   ]);
   assert.deepEqual(dispatches, [[jobId, accountA]]);
   assert.ok(!JSON.stringify(result).includes('account_id'));
 });
 
-test('creator start replays stored work before URL resolution and rejects untrusted identity or input', async () => {
+test('short-link replay returns before redirect resolution and rejects untrusted identity or input', async () => {
   let resolutions = 0; let starts = 0; let finds = 0;
   const repository: RiffCreatorRepository = {
     async find() { finds++; return storedSuccess; },
@@ -158,6 +169,7 @@ test('creator start replays stored work before URL resolution and rejects untrus
       if (token === 'expired') return null;
       return { account_id: accountA, scopes: token === 'read-only' ? ['projects:read'] : ['projects:write'] };
     } }, repository, async () => { resolutions++; return source; }, async () => {}, () => true,
+    undefined, () => 'short',
   );
   assert.equal((await operations.execute('start_riff_creator', 'valid', input) as {ok:boolean}).ok, true);
   assert.equal(resolutions, 0); assert.equal(starts, 0); assert.equal(finds, 1);
@@ -166,6 +178,27 @@ test('creator start replays stored work before URL resolution and rejects untrus
   assert.deepEqual(await operations.execute('start_riff_creator', 'read-only', input), failure('FORBIDDEN'));
   assert.deepEqual(await operations.execute('start_riff_creator', 'valid', { ...input, account_id: accountA }), failure('VALIDATION_ERROR'));
   assert.equal(finds, 1);
+});
+
+test('invalid source classification reaches neither repository nor scheduler', async () => {
+  let calls = 0;
+  const operations = createRiffCreatorOperations(
+    { async verify() { return { account_id: accountA, scopes: ['projects:write'] }; } },
+    {
+      async find() { calls++; return storedSuccess; },
+      async start() { calls++; return storedSuccess; },
+      async list() { calls++; return workSuccess; },
+    },
+    async () => { calls++; return source; },
+    () => { calls++; },
+    () => true,
+    undefined,
+    () => 'invalid',
+  );
+  assert.deepEqual(await operations.execute('start_riff_creator', 'valid', {
+    request_id: requestId, source_url: 'https://evil.test/@creator.one',
+  }), failure('VALIDATION_ERROR'));
+  assert.equal(calls, 0);
 });
 
 test('creator start lookup is a provider-free authenticated exact read', async () => {

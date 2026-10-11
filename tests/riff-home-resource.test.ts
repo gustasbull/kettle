@@ -8,6 +8,7 @@ import {
   RIFF_HOME_MIME,
   RIFF_HOME_URI,
   registerRiffHomeResource,
+  RIFF_HOME_DOCUMENT,
   riffHomeHtml,
 } from '../apps/worker/riff-home-resource.ts';
 
@@ -38,6 +39,7 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
     'existing ChatGPT threads can reload their cached v2 resource with the current safe bundle');
   assert.equal(legacy.text, content.text,
     'existing ChatGPT threads can reload their cached v1 resource with the current safe bundle');
+  assert.equal(content.text, RIFF_HOME_DOCUMENT);
   assert.deepEqual(content._meta, RIFF_HOME_META);
   assert.deepEqual(RIFF_HOME_META['openai/ui'], {
     availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen',

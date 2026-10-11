@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { creatorPipelineHtml, registerCreatorPipelineResource, CREATOR_PIPELINE_URI,
-  CREATOR_PIPELINE_MIME, CREATOR_PIPELINE_META } from '../apps/worker/creator-pipeline-resource.ts';
+  CREATOR_PIPELINE_MIME, CREATOR_PIPELINE_META, CREATOR_PIPELINE_DOCUMENT } from '../apps/worker/creator-pipeline-resource.ts';
 
 test('Creator pipeline resource is a static bundled MCP App with narrowly scoped media metadata', async t => {
   const server = new McpServer({name:'resource-fixture',version:'1'});
@@ -34,6 +34,7 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
     availableDisplayModes:['inline','fullscreen'],preferredDisplayMode:'fullscreen',
   });
   assert.ok('text' in content);
+  assert.equal(content.text, CREATOR_PIPELINE_DOCUMENT);
   const html = content.text as string;
   assert.match(html,/id="root"/);
   assert.match(html,/<title>Riff creator workflow<\/title>/);

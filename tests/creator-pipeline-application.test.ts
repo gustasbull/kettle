@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPipelineOperations, publicCreatorJob, createGuardedProviderContext, canProcessCapturedDna,
+import { createCreatorDispatchScheduler, createPipelineOperations, publicCreatorJob, createGuardedProviderContext, canProcessCapturedDna,
   runCreatorPipelineJob, PipelineRunError, type PipelineRepository, type StoredCreatorJob, type DurableStep } from '../packages/application/creator-pipeline.ts';
 import { failure, type IdentityVerifier } from '../packages/application/operations.ts';
 import { projectCreatorDna, type CreatorRepository } from '../packages/application/creator-operations.ts';
@@ -28,7 +28,8 @@ function input(kind:PipelineOperation='start_creator_recommendations') {
 function harness(job=stored(), verifier=identity) {
   const calls:{op:string;owner:string;input:unknown}[]=[],dispatches:string[][]=[];
   const repository:PipelineRepository={async call(op,owner,raw){calls.push({op,owner,input:raw});return wrapped(job);}};
-  const operations=createPipelineOperations(verifier,repository,async(jobId,accountId)=>{dispatches.push([jobId,accountId]);});
+  const operations=createPipelineOperations(verifier,repository,createCreatorDispatchScheduler(
+    async(jobId,accountId)=>{dispatches.push([jobId,accountId]);},task=>{void task;}));
   return {calls,dispatches,operations};
 }
 function code(result:Awaited<ReturnType<ReturnType<typeof createPipelineOperations>['execute']>>) {
@@ -75,8 +76,25 @@ test('reads never dispatch; repeated durable queued start retains job identity; 
   assert.deepEqual(h.dispatches,[[id(620),account],[id(620),account]]);
   assert.ok(h.calls.every(c=>c.owner===account));
   await h.operations.execute('get_creator_job','token',input('get_creator_job'));assert.equal(h.dispatches.length,2);
-  const ops=createPipelineOperations(identity,{async call(){return wrapped(stored());}},async()=>{throw Error('dispatch gap');});
+  const ops=createPipelineOperations(identity,{async call(){return wrapped(stored());}},createCreatorDispatchScheduler(
+    async()=>{throw Error('dispatch gap');},task=>{void task;}));
   assert.equal((await ops.execute('start_creator_recommendations','token',input())).ok,true);
+});
+
+test('queued start returns while deferred workflow create is unresolved', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const background:Promise<void>[]=[];
+  const operations = createPipelineOperations(identity, { async call() { return wrapped(stored()); } },
+    createCreatorDispatchScheduler(async () => gate,task=>background.push(task)));
+  const outcome = await Promise.race([
+    operations.execute('start_creator_recommendations', 'token', input()),
+    new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 25)),
+  ]);
+  release();
+  await Promise.all(background);
+  assert.notEqual(outcome, 'blocked', 'durable acknowledgement must not await Workflow creation');
+  assert.equal((outcome as { ok: boolean }).ok, true);
 });
 
 test('start observations use the validated logical request then the returned durable job',async()=>{
@@ -90,14 +108,16 @@ test('start observations use the validated logical request then the returned dur
     },
   });
   let dispatchTelemetry:unknown;
+  const background:Promise<void>[]=[];
   const operations=createPipelineOperations(identity,
     {async call(_operation,_owner,_input,telemetry){
       assert.equal(telemetry === undefined, false, 'the RPC boundary receives logical request scope');
       return wrapped(stored());
     }},
-    async(_jobId,_accountId,telemetry?:unknown)=>{dispatchTelemetry=telemetry;},()=>true,scoped());
+    createCreatorDispatchScheduler(async(_jobId,_accountId,telemetry)=>{dispatchTelemetry=telemetry;},task=>background.push(task)),()=>true,scoped());
 
   assert.equal((await operations.execute('start_creator_recommendations','token',input())).ok,true);
+  await Promise.all(background);
   assert.deepEqual(correlations,[{request_id:request},{job_id:id(620)}]);
   assert.ok(dispatchTelemetry);
   assert.deepEqual(events.map(event=>[event.correlation,event.stage,event.operation]),[
