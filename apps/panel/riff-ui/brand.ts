@@ -60,4 +60,3 @@ export function riffLockup(document: Document): SVGSVGElement {
   svg.append(symbol, wordmark);
   return svg;
 }
-
