@@ -99,10 +99,10 @@ test('repository failure and rejection are sanitized',async()=>{
   }
 });
 
-function guarded(reserve:unknown,complete:unknown={ok:true,data:{status:'completed',receipt:{allowed:'saved'}}}) {
+function guarded(reserve:unknown,complete:unknown={ok:true,data:{status:'completed',receipt:{allowed:'saved'}}},telemetry?:any) {
   const events:string[]=[],calls:{op:string;raw:any}[]=[];
   const repository:PipelineRepository={async call(op,owner,raw){assert.equal(owner,account);calls.push({op,raw});events.push(op);if(op==='reserve_creator_attempt')return reserve;if(complete instanceof Error)throw complete;return complete;}};
-  return {events,calls,context:createGuardedProviderContext(repository,stored(),ceilings,step)};
+  return {events,calls,context:createGuardedProviderContext(repository,stored(),ceilings,step,telemetry)};
 }
 const reservation=(status:string,receipt?:unknown)=>({ok:true,data:{status,...(receipt===undefined?{}:{receipt})}});
 
@@ -279,6 +279,31 @@ test('guard retains only enum-only provider diagnostics and redacts arbitrary ex
     });
     assert.equal(new PipelineRunError('needs_reconciliation',unsafe).diagnostic,undefined);
   }
+});
+
+test('application, provider guard, queue wall time, and terminal save expose only allowlisted observation fields',async()=>{
+  const events:Array<Record<string,unknown>>=[];
+  const telemetry={
+    record(fields:Record<string,unknown>){events.push({...fields});},
+    async measure<T>(fields:Record<string,unknown>,run:()=>Promise<T>){events.push({...fields,status:'measured'});return run();},
+  };
+  const h=harness();
+  const operations=createPipelineOperations(identity,
+    {call:(...args)=>h.operations.execute('get_creator_job','token',input('get_creator_job')).then(()=>wrapped(stored()))},
+    async()=>{},()=>true,telemetry);
+  await operations.execute('get_creator_job','token',input('get_creator_job'));
+
+  const g=guarded(reservation('acquired'),undefined,telemetry);
+  await g.context.call('profile','scrapecreators','profile',async()=>({allowed:'received'}));
+
+  const r=runner();
+  await runCreatorPipelineJob(r.repository,r.creatorRepository,account,r.job.id,()=>r.provider,ceilings,step,telemetry);
+  assert.ok(events.some(event=>event.stage==='application_operation'&&event.operation==='read'));
+  assert.ok(events.some(event=>event.stage==='provider_reservation'&&event.operation==='reserve'));
+  assert.ok(events.some(event=>event.stage==='receipt_persistence'&&event.operation==='persist'));
+  assert.ok(events.some(event=>event.stage==='queue_to_running'&&event.clock==='wall'));
+  assert.ok(events.some(event=>event.stage==='terminal_save'&&event.operation==='persist'));
+  assert.doesNotMatch(JSON.stringify(events),/private_input|private_snapshot|provider diagnostics|account_id|source_url/i);
 });
 
 test('runner preserves sanitized diagnostic through Workflow error wrapping but public results remain generic',async()=>{

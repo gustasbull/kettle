@@ -16,6 +16,7 @@ import { profileRequest, feedRequest, detailRequest, researchBody, historyReques
 import { readLightreelSeedReview, seedReviewBody } from './seed-review.ts';
 import { receiptIds } from './ids.ts';
 import { sanitizedScrape, sourceObservedAt } from './sanitize.ts';
+import { observed, type CreatorLatencyObserver } from '../../application/creator-observability.ts';
 
 // Durable success receipt, not a parallel business/result schema.
 const receipt = z.object({ id: z.uuid(), status: z.number().int().min(200).max(299),
@@ -43,6 +44,7 @@ export type CreatorPipelineAdapterOptions = {
   /** Upper bound on known-ID history reads in this invocation; no retry of research POST. */
   maxHistoryReads?: number;
   timeouts?: { scrapeMs?: number; researchMs?: number; seedReviewMs?: number; modelMs?: number };
+  telemetry?: CreatorLatencyObserver;
 };
 const seedReviewCaveat = 'Supplied video review, not whole-profile DNA. Reported access is a Lightreel claim, not independently verified video evidence.';
 // Persisted legacy variants may omit these fields, while a new strict model
@@ -107,10 +109,21 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       { maxBytes: provider === 'scrapecreators' && operation === 'feed' ? 2_097_152 : 262_144,
         timeoutMs: timeoutMs ?? (operation === 'poll' ? Math.min(timeouts.research, 30_000) :
         provider === 'scrapecreators' ? timeouts.scrape : provider === 'lightreel' ? timeouts.research : timeouts.model) });
+      const endpoint = provider === 'scrapecreators'
+        ? operation === 'profile' ? 'scrapecreators_profile' : operation === 'feed' ? 'scrapecreators_feed' : 'scrapecreators_video'
+        : provider === 'lightreel' ? operation === 'poll' ? 'lightreel_poll' : 'lightreel_research' : 'openai_responses';
+      options.telemetry?.record({ stage: 'provider_http', clock: 'monotonic',
+        status: r.failure === null ? 'ok' : r.failure === 'timeout' ? 'timeout' : 'error',
+        duration_ms: r.latency_ms, provider, operation, endpoint,
+        ...(r.status === null ? {} : { http_status: r.status }),
+        request_bytes: body === undefined ? 0 : new TextEncoder().encode(body).length,
+        response_bytes: new TextEncoder().encode(r.body).length });
       if (r.failure !== null) throw new CreatorProviderError('transport', r.status, r.failure);
       try {
         const source_observed_at = provider === 'scrapecreators' ? sourceObservedAt(r.body) : null;
-        return receipt.parse({ ...r, id: context.newId(), source_observed_at, body: decode(r.body) });
+        const sanitized = await observed(options.telemetry,
+          { stage: 'sanitization', clock: 'monotonic', provider, operation }, async () => decode(r.body));
+        return receipt.parse({ ...r, id: context.newId(), source_observed_at, body: sanitized });
       } catch { throw new CreatorProviderError('malformed', r.status, 'malformed'); }
     });
     try { return receipt.parse(raw); } catch { throw new CreatorProviderError('malformed'); }

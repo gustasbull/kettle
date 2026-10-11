@@ -18,12 +18,13 @@ export async function boundedJson(fetcher: Fetch, url: URL, init: RequestInit,
   const maxBytes = limits.maxBytes ?? 262_144;
   if (!Number.isInteger(limits.timeoutMs) || limits.timeoutMs < 1 || limits.timeoutMs > 600_000 ||
       !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > (url.hostname === 'api.scrapecreators.com' && url.pathname === '/v3/tiktok/profile/videos' ? 2_097_152 : 262_144)) throw new Error('Invalid transport limits');
-  const started = Date.now();
+  const started = performance.now();
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let status: number | null = null;
   const evidence = (failure: HttpEvidence['failure'], body = ''): HttpEvidence => ({
-    status, failure, body, retrieved_at: new Date().toISOString(), latency_ms: Date.now() - started,
+    status, failure, body, retrieved_at: new Date().toISOString(),
+    latency_ms: Math.max(0, Math.round(performance.now() - started)),
   });
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<HttpEvidence>(resolve => {

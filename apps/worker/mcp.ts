@@ -20,6 +20,7 @@ import { registerRiffHomeResource, RIFF_HOME_URI } from './riff-home-resource.ts
 
 import type { createOperations, IdentityVerifier } from '../../packages/application/operations.ts';
 import { bearer, challenge, oauthScopes, type AuthConfig } from '../../packages/auth/index.ts';
+import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 
 export interface McpAuth {
   config: AuthConfig;
@@ -36,7 +37,7 @@ const MCP_INSTRUCTIONS = [
   'Use `show_riff_welcome` only for first-use onboarding or when the user asks to replay it.',
 ].join(' ');
 
-export async function handleMcp(request: Request, auth?: McpAuth): Promise<Response> {
+export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: CreatorLatencyObserver): Promise<Response> {
   const token = bearer(request);
   // MCP discovery and UI resources contain no account data. Authentication is
   // enforced inside every protected tool invocation, which avoids resolving a
@@ -385,6 +386,8 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
     enableJsonResponse: true, maxRequestBodySize: 128 * 1024,
   });
   await server.connect(transport);
-  try { return await transport.handleRequest(request); }
+  try { return await (telemetry ? telemetry.measure(
+    { stage: 'mcp_route', clock: 'monotonic', operation: 'read', endpoint: 'mcp_transport' },
+    () => transport.handleRequest(request)) : transport.handleRequest(request)); }
   finally { await server.close(); }
 }

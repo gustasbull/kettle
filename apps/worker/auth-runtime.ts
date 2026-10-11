@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { IdentityVerifier } from '../../packages/application/operations.ts';
+import { observed, type CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 import {
   createMcpJwtVerifier,
   createWebsiteSessionVerifier,
@@ -27,7 +28,7 @@ interface RemoteAuthInputsCacheOptions {
 }
 
 interface RemoteAuthInputsCache {
-  get(config: AuthConfig, fetcher?: typeof fetch): Promise<RemoteAuthInputs>;
+  get(config: AuthConfig, fetcher?: typeof fetch, telemetry?: CreatorLatencyObserver): Promise<RemoteAuthInputs>;
 }
 
 /**
@@ -37,6 +38,7 @@ interface RemoteAuthInputsCache {
  */
 export function createRemoteAuthInputsCache(
   options: RemoteAuthInputsCacheOptions = {},
+  defaultTelemetry?: CreatorLatencyObserver,
 ): RemoteAuthInputsCache {
   const ttlMilliseconds = options.ttlMilliseconds ?? DEFAULT_CACHE_TTL_MILLISECONDS;
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
@@ -51,7 +53,8 @@ export function createRemoteAuthInputsCache(
   }>();
 
   return {
-    get(rawConfig, fetcher = fetch) {
+    get(rawConfig, fetcher = fetch, requestTelemetry) {
+      const telemetry = requestTelemetry ?? defaultTelemetry;
       const config = validateConfig(rawConfig);
       const timestamp = now();
       for (const [key, entry] of entries) {
@@ -59,9 +62,15 @@ export function createRemoteAuthInputsCache(
       }
       const cacheKey = JSON.stringify([config.issuer, config.resource]);
       const existing = entries.get(cacheKey);
-      if (existing) return existing.value;
+      if (existing) {
+        telemetry?.record({ stage: 'auth_metadata', clock: 'monotonic', status: 'ok',
+          duration_ms: 0, cache_state: 'hit' });
+        return existing.value;
+      }
 
-      const value = discover(config, fetcher).then((metadata) => ({
+      const value = observed(telemetry,
+        { stage: 'auth_metadata', clock: 'monotonic', cache_state: 'miss', endpoint: 'auth_discovery' },
+        () => discover(config, fetcher)).then((metadata) => ({
         metadata,
         verificationKey: createRemoteJWKSet(new URL(metadata.jwks_uri), {
           timeoutDuration: 5_000,
@@ -112,14 +121,17 @@ function lazyVerifierForRequest(
   resolve: IdentityResolver,
   cache: RemoteAuthInputsCache,
   policy: 'mcp' | 'website',
+  telemetry?: CreatorLatencyObserver,
 ): IdentityVerifier {
   let verifier: Promise<IdentityVerifier> | undefined;
   const lazy: IdentityVerifier = {
     async verify(token) {
-      verifier ??= cache.get(config).then(({ verificationKey }) => policy === 'mcp'
+      verifier ??= cache.get(config, fetch, telemetry).then(({ verificationKey }) => policy === 'mcp'
         ? createMcpJwtVerifier(config, resolve, verificationKey)
         : createWebsiteSessionVerifier(config, resolve, verificationKey));
-      return (await verifier).verify(token);
+      return observed(telemetry,
+        { stage: 'auth_jwks', clock: 'monotonic', endpoint: 'auth_jwks' },
+        () => verifier!.then(value => value.verify(token)));
     },
   };
   return memoizeVerifierForRequest(lazy);
@@ -129,14 +141,16 @@ export function createMcpVerifierForRequest(
   config: AuthConfig,
   resolve: IdentityResolver,
   cache: RemoteAuthInputsCache = remoteAuthInputs,
+  telemetry?: CreatorLatencyObserver,
 ): IdentityVerifier {
-  return lazyVerifierForRequest(config, resolve, cache, 'mcp');
+  return lazyVerifierForRequest(config, resolve, cache, 'mcp', telemetry);
 }
 
 export function createWebsiteVerifierForRequest(
   config: AuthConfig,
   resolve: IdentityResolver,
   cache: RemoteAuthInputsCache = remoteAuthInputs,
+  telemetry?: CreatorLatencyObserver,
 ): IdentityVerifier {
-  return lazyVerifierForRequest(config, resolve, cache, 'website');
+  return lazyVerifierForRequest(config, resolve, cache, 'website', telemetry);
 }

@@ -6,11 +6,13 @@ import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { StartRiffCreatorInput } from '../../packages/contracts/riff-creator.ts';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
+import { panelPerformanceFromDocument } from './creator-performance.ts';
 
 const WAIT_MS = 10_000;
 
 /** Read-only persisted job view. No provider calls, storage or start/generate capability. */
 export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPipelineLimits = {}) {
+  const localPerformance = panelPerformanceFromDocument(root.ownerDocument, performance);
   const timeoutMs = limits.timeoutMs ?? WAIT_MS;
   const app = new App({ name: 'kettle-creator-pipeline', version: '1.0.0' },
     { availableDisplayModes: ['inline', 'fullscreen'] }, { autoResize: false });
@@ -87,7 +89,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     cleared(reason) { clearCard(messages[reason]); },
   }, async (input, signal) => creatorJobStructuredOutput(await app.callServerTool(
     { name: 'get_creator_job', arguments: input },
-    { signal, timeout: timeoutMs + 1_000, maxTotalTimeout: timeoutMs + 1_000 })), limits);
+    { signal, timeout: timeoutMs + 1_000, maxTotalTimeout: timeoutMs + 1_000 })), { ...limits, performance: localPerformance });
   // Receiving a job before initialization must not cancel the handshake deadline.
   const initialTimer = setTimeout(() => controller.connectionFailed(), timeoutMs);
   const applyContext = (context: McpUiHostContext | undefined) => {

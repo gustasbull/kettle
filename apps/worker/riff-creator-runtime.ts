@@ -5,6 +5,7 @@ import {
   createRiffCreatorSupabaseRepository,
   type RiffCreatorDevelopmentPolicy,
 } from '../../packages/database/riff-creator-supabase.ts';
+import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 
 export interface RiffCreatorRuntimeConfig extends RiffCreatorDevelopmentPolicy {
   supabaseUrl: string;
@@ -18,16 +19,18 @@ export function createRiffCreatorRuntime(
   dispatch: RiffCreatorDispatch,
   isEnabled: () => boolean,
   fetcher: typeof fetch = fetch,
+  telemetry?: CreatorLatencyObserver,
 ) {
   const repository = createRiffCreatorSupabaseRepository(config.supabaseUrl, config.serviceRoleKey, {
     maxProfilesPerAccount: config.maxProfilesPerAccount,
     allowanceTtlSeconds: config.allowanceTtlSeconds,
-  }, fetcher);
+  }, fetcher, telemetry);
   return createRiffCreatorOperations(
     verifier,
     repository,
     sourceUrl => resolveTikTokCreatorSource(sourceUrl, fetcher),
     dispatch,
     isEnabled,
+    telemetry,
   );
 }

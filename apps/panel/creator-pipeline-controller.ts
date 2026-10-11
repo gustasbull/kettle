@@ -14,6 +14,7 @@ export interface CreatorPipelineLimits {
   maxPollIntervalMs?: number;
   maxPolls?: number;
   pollWindowMs?: number;
+  performance?: { start(stage: 'poll_observation' | 'panel_render'): (status: 'ok' | 'error' | 'timeout') => void };
 }
 
 /** Structured public data only. Neither model text nor private metadata is a fallback. */
@@ -60,8 +61,11 @@ export function createCreatorPipelineController(
     invalidate(); stopInitial(); job = undefined; blocked = true; observer.cleared(reason);
   }
   function publish(notice?: string) {
-    if (job && connected) observer.job(job, { refreshing: !!pending, canRefresh: tools,
-      ...(notice ? { notice } : {}) });
+    if (job && connected) {
+      const finish = limits.performance?.start('panel_render');
+      observer.job(job, { refreshing: !!pending, canRefresh: tools, ...(notice ? { notice } : {}) });
+      finish?.('ok');
+    }
   }
   function loading() {
     stopInitial(); observer.loading();
@@ -113,6 +117,7 @@ export function createCreatorPipelineController(
     const abort = new AbortController(); pending = abort; publish();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
+    const finishObservation = limits.performance?.start('poll_observation');
     try {
       const output = await Promise.race([
         readJob(input, abort.signal),
@@ -123,11 +128,12 @@ export function createCreatorPipelineController(
       ]);
       if (disposed || requestEpoch !== epoch) return;
       pending = undefined; apply(output, true);
+      finishObservation?.('ok');
     } catch {
       if (disposed || requestEpoch !== epoch) return;
       pending = undefined;
-      if (timedOut) { paused = true; publish('Updates timed out. Refresh or reopen in chat to try again.'); }
-      else clear('connection');
+      if (timedOut) { finishObservation?.('timeout'); paused = true; publish('Updates timed out. Refresh or reopen in chat to try again.'); }
+      else { finishObservation?.('error'); clear('connection'); }
     } finally { clearTimeout(timer); }
   }
   loading();

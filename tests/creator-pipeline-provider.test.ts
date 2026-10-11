@@ -59,6 +59,22 @@ test('offline full adapter chain uses guarded calls and validates shared envelop
   const records = JSON.stringify([...guard.successes.values(), ...recommendations.successes.values(), ...generation.successes.values()]);
   for (const key of Object.values(f.options.credentials)) assert.ok(!records.includes(key));
 });
+test('provider observation records endpoint enums, sizes, HTTP and sanitization timing without raw content', async () => {
+  const f = providerHttpFixture();
+  const events: Array<Record<string, unknown>> = [];
+  const telemetry = {
+    record(fields: Record<string, unknown>) { events.push({ ...fields }); },
+    async measure<T>(fields: Record<string, unknown>, run: () => Promise<T>) {
+      const result = await run(); events.push({ ...fields }); return result;
+    },
+  };
+  const provider = createCreatorPipelineProvider({ ...f.options, telemetry });
+  await provider.scan(f.input.request, fakeGuard().context);
+  assert.ok(events.some(event => event.stage === 'provider_http' && event.endpoint === 'scrapecreators_profile'
+    && event.http_status === 200 && Number(event.response_bytes) > 0));
+  assert.ok(events.some(event => event.stage === 'sanitization' && event.provider === 'scrapecreators'));
+  assert.doesNotMatch(JSON.stringify(events), /fictional_kettle_creator|supplied_url|caption|api-key|body/i);
+});
 test('Lightreel-selected references remain grounded candidates when English lexical overlap misses', async () => {
   const { dna } = await setup();
   const f = providerHttpFixture(); const fallback=f.options.fetch;

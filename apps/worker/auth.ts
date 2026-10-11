@@ -9,34 +9,37 @@ import type { SupabaseWebsiteAccountReader } from '../../packages/auth/website.t
 import { createSupabaseIdentityResolver, createSupabaseRepository } from '../../packages/database/supabase.ts';
 import type { RuntimeAuthConfig } from './auth-config.ts';
 import { createMcpVerifierForRequest, createWebsiteVerifierForRequest } from './auth-runtime.ts';
+import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 export { authConfig } from './auth-config.ts';
 
-export async function authServices(env: Env, config: RuntimeAuthConfig) {
+export async function authServices(env: Env, config: RuntimeAuthConfig, telemetry?: CreatorLatencyObserver) {
   const verifier = createMcpVerifierForRequest(
     config.mcp,
-    createSupabaseIdentityResolver(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!),
+    createSupabaseIdentityResolver(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry),
+    undefined, telemetry,
   );
-  const operations = createOperations(verifier, createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!));
-  const creatorOperations = createCreatorOperations(verifier, createCreatorSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!));
-  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!), (id, accountId)=>dispatchCreatorJob(env,id,accountId),operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts');
+  const operations = createOperations(verifier, createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
+  const creatorOperations = createCreatorOperations(verifier, createCreatorSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry));
+  const pipelineOperations = createPipelineOperations(verifier, createPipelineSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry), (id, accountId)=>dispatchCreatorJob(env,id,accountId,telemetry),operation=>pipelineConfigured(env)&&operation!=='start_creator_scripts',telemetry);
   const riffCreatorOperations = createRiffCreatorRuntime({
     supabaseUrl: env.SUPABASE_URL!, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
     maxProfilesPerAccount: 1, allowanceTtlSeconds: 604_800,
-  }, verifier, (id, accountId) => dispatchCreatorJob(env, id, accountId), () => pipelineConfigured(env));
+  }, verifier, (id, accountId) => dispatchCreatorJob(env, id, accountId, telemetry), () => pipelineConfigured(env), fetch, telemetry);
   return { config: config.mcp, verifier, operations, creatorOperations, pipelineOperations, riffCreatorOperations };
 }
 
 /** Resolve a password session through the same trusted issuer/subject mapping
  * used by MCP, without accepting account identity from website input. */
-export function websiteAccountReader(env: Env, config: RuntimeAuthConfig): SupabaseWebsiteAccountReader {
+export function websiteAccountReader(env: Env, config: RuntimeAuthConfig, telemetry?: CreatorLatencyObserver): SupabaseWebsiteAccountReader {
   return async (session) => {
     const verifier = createWebsiteVerifierForRequest(
       config.mcp,
-      createSupabaseIdentityResolver(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!),
+      createSupabaseIdentityResolver(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry),
+      undefined, telemetry,
     );
     const operations = createOperations(
       verifier,
-      createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!),
+      createSupabaseRepository(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, fetch, telemetry),
     );
     const result = await operations.execute('get_account_state', session.accessToken, {});
     if (!result.ok) throw new Error('Verified Riff account unavailable');

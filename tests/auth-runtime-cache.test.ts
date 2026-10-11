@@ -60,6 +60,25 @@ test('remote auth inputs coalesce concurrent reads, expire, and stay bounded by 
     'expired discovery and key material is rebuilt');
 });
 
+test('remote auth cache observation reports only hit or miss without issuer, token, or key data', async () => {
+  const config = configFor('observed-cache');
+  const events: Array<Record<string, unknown>> = [];
+  const telemetry = {
+    record(fields: Record<string, unknown>) { events.push({ ...fields }); },
+    async measure<T>(fields: Record<string, unknown>, run: () => Promise<T>) {
+      const result = await run(); events.push({ ...fields }); return result;
+    },
+  };
+  const cache = createRemoteAuthInputsCache({}, telemetry);
+  const fetcher = (async () => Response.json(metadataFor(config))) as typeof fetch;
+  await cache.get(config, fetcher);
+  await cache.get(config, fetcher);
+  assert.deepEqual(events.map(event => [event.stage, event.cache_state]), [
+    ['auth_metadata', 'miss'], ['auth_metadata', 'hit'],
+  ]);
+  assert.doesNotMatch(JSON.stringify(events), /observed-cache|issuer|jwks|token|key/i);
+});
+
 test('failed or foreign discovery is never retained in the remote auth cache', async () => {
   const config = configFor('cache-failure');
   const cache = createRemoteAuthInputsCache();

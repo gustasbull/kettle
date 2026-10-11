@@ -6,6 +6,7 @@ import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
 import { isCreatorJobView } from './riff-home-validation.ts';
+import { panelPerformanceFromDocument } from './creator-performance.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -100,6 +101,7 @@ function pickLocalVideo(doc: Document): Promise<File | undefined> {
 }
 
 export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = {}) {
+  const localPerformance = panelPerformanceFromDocument(root.ownerDocument, performance);
   const timeoutMs = options.timeoutMs ?? 10_000;
   const toolTimeoutMs = options.toolTimeoutMs ?? 45_000;
   const pollIntervalMs = options.pollIntervalMs ?? 1_500;
@@ -132,7 +134,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     promise.then(value => finish({ status: 'resolved', value }), reason => finish({ status: 'rejected', reason }));
   });
 
-  const callTool = async (name: string, args: Record<string, unknown>, deadlineMs = toolTimeoutMs): Promise<ToolCallOutcome> => {
+  const callToolUnmeasured = async (name: string, args: Record<string, unknown>, deadlineMs = toolTimeoutMs): Promise<ToolCallOutcome> => {
     if (!connected) return { status: 'transport_error', diagnostic: 'transport_error' };
     try {
       let value: unknown;
@@ -161,6 +163,12 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         ? { status: 'timeout', diagnostic: 'timeout' }
         : { status: 'transport_error', diagnostic: 'transport_error' };
     }
+  };
+  const callTool = async (name: string, args: Record<string, unknown>, deadlineMs = toolTimeoutMs): Promise<ToolCallOutcome> => {
+    const finish = localPerformance.start('tool_call');
+    const outcome = await callToolUnmeasured(name, args, deadlineMs);
+    finish(outcome.status === 'timeout' ? 'timeout' : outcome.status === 'response' ? 'ok' : 'error');
+    return outcome;
   };
 
   const send = async (prompt: string) => {
@@ -363,7 +371,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return send(`${intent} Create two or three evidence-grounded filming variants with timed hook, main-content, and CTA sections, concrete filming directions, a platform caption, and hashtags. Save them in Studio only if Riff confirms the write; otherwise show them in chat and say they are not saved.`);
     },
   });
-  view.render(homeState);
+  const render = (state: RiffHomeState) => { const finish = localPerformance.start('panel_render'); view.render(state); finish('ok'); };
+  render(homeState);
 
   function observe(job: CreatorJobView) {
     const epoch = ++pollEpoch; clearTimeout(pollTimer);
@@ -375,16 +384,19 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       pollTimer = setTimeout(() => void poll(), delay);
     };
     const poll = async () => {
+      const finishObservation = localPerformance.start('poll_observation');
       if (disposed || epoch !== pollEpoch || polls >= maxPolls) return;
       polls++;
       const outcome = await callTool('get_creator_job', { job_id: job.id });
       if (disposed || epoch !== pollEpoch) return;
       const next = outcome.status === 'response' ? readJob(outcome.value) : undefined;
       if (!next || next.id !== job.id || next.project_id !== job.project_id || next.kind !== job.kind) {
+        finishObservation('error');
         if (polls < maxPolls) schedule();
         return;
       }
       view.showJob(next);
+      finishObservation('ok');
       if (active(next)) { if (polls < maxPolls) schedule(); }
       else refreshTerminalWork(next);
     };
@@ -467,7 +479,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   };
   const handshake = new AbortController();
   const timer = setTimeout(() => {
-    if (!connected && !disposed) view.render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' });
+    if (!connected && !disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' });
   }, timeoutMs);
   function dispose() {
     if (disposed) return;
@@ -484,10 +496,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       invalidateAccountBoundary();
     }
     activeAccountId = nextAccountId;
-    homeState = nextState; view.render(homeState);
+    homeState = nextState; render(homeState);
     ensureInitialWork();
   };
-  app.ontoolcancelled = () => view.render({ status: 'error', message: 'Riff Home was cancelled. Reopen it from ChatGPT.' });
+  app.ontoolcancelled = () => render({ status: 'error', message: 'Riff Home was cancelled. Reopen it from ChatGPT.' });
   app.onhostcontextchanged = applyContext;
   app.onteardown = async () => { setTimeout(dispose, 0); return {}; };
   app.onclose = () => {
@@ -497,7 +509,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   };
   window.addEventListener('pagehide', dispose, { once: true });
   if (window.parent === window) {
-    clearTimeout(timer); view.render({ status: 'error', message: 'Preview mode. Open Riff from ChatGPT to connect your account.' });
+    clearTimeout(timer); render({ status: 'error', message: 'Preview mode. Open Riff from ChatGPT to connect your account.' });
   } else {
     void app.connect(new PostMessageTransport(window.parent, window.parent), {
       signal: handshake.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
@@ -505,7 +517,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (disposed) return;
       connected = true; clearTimeout(timer); applyContext(app.getHostContext());
       ensureInitialWork();
-    }).catch(() => { if (!disposed) view.render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' }); });
+    }).catch(() => { if (!disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' }); });
   }
   return { dispose };
 }

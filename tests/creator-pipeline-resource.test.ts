@@ -46,8 +46,9 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
 });
 
 test('resource escapes closing script tags and legacy HTML comment openers',()=>{
-  const html=creatorPipelineHtml('const untrusted = "</ScRiPt><!--";');
+  const html=creatorPipelineHtml('const untrusted = "</ScRiPt><!--";',{resource_version:'creator-pipeline-v3',bundle_version:`sha256:${'a'.repeat(64)}`});
   assert.equal((html.match(/<\/script>/gi)||[]).length,1);
   assert.ok(!html.includes('<!--'));
   assert.ok(html.includes('<\\/script>'));
+  assert.match(html,/name="riff-bundle-version"/);
 });

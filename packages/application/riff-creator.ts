@@ -13,6 +13,7 @@ import {
   type StartRiffCreatorInput as CreatorStartInput,
 } from '../contracts/riff-creator.ts';
 import { Id, Project, result } from '../contracts/index.ts';
+import { observed, type CreatorLatencyObserver } from './creator-observability.ts';
 
 export interface RiffCreatorRepository {
   find(accountId: string, input: CreatorStartInput): Promise<unknown>;
@@ -50,6 +51,7 @@ export function createRiffCreatorOperations(
   resolveSource: RiffCreatorSourceResolver,
   dispatch: RiffCreatorDispatch,
   isEnabled: () => boolean = () => true,
+  telemetry?: CreatorLatencyObserver,
 ) {
   return { async execute(
     operation: RiffCreatorOperation,
@@ -66,7 +68,9 @@ export function createRiffCreatorOperations(
     if (operation === 'list_riff_work') {
       const parsedList = riffCreatorContracts.list_riff_work.input.safeParse(rawInput);
       if (!parsedList.success) return failure('VALIDATION_ERROR');
-      try { return ListRiffWorkOutput.parse(await repository.list(identity.account_id, parsedList.data)); }
+      try { return ListRiffWorkOutput.parse(await observed(telemetry,
+        { stage: 'application_operation', clock: 'monotonic', operation: 'list' },
+        () => repository.list(identity.account_id, parsedList.data))); }
       catch { return failure('UNAVAILABLE'); }
     }
     const parsed = StartRiffCreatorInput.safeParse(rawInput);
@@ -74,7 +78,9 @@ export function createRiffCreatorOperations(
     if (operation === 'get_riff_creator_start') {
       try {
         return projectStored(
-          StoredRiffCreatorOutput.parse(await repository.find(identity.account_id, parsed.data)),
+          StoredRiffCreatorOutput.parse(await observed(telemetry,
+            { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
+            () => repository.find(identity.account_id, parsed.data))),
           identity.account_id,
           parsed.data,
         );
@@ -85,17 +91,23 @@ export function createRiffCreatorOperations(
     if (!isEnabled()) return failure('UNAVAILABLE');
 
     try {
-      const existing = StoredRiffCreatorOutput.parse(await repository.find(identity.account_id, parsed.data));
+      const existing = StoredRiffCreatorOutput.parse(await observed(telemetry,
+        { stage: 'application_operation', clock: 'monotonic', operation: 'find' },
+        () => repository.find(identity.account_id, parsed.data)));
       if (existing.ok || existing.error.code !== 'NOT_FOUND') {
         const projected = projectStored(existing, identity.account_id, parsed.data);
         if (projected.ok && projected.data.job.state === 'queued') {
-          try { await dispatch(projected.data.job.id, identity.account_id); } catch { /* durable queued intent */ }
+          try { await observed(telemetry,
+            { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
+            () => dispatch(projected.data.job.id, identity.account_id)); } catch { /* durable queued intent */ }
         }
         return projected;
       }
 
       let source: CanonicalSource;
-      try { source = CanonicalRiffCreatorSource.parse(await resolveSource(parsed.data.source_url)); }
+      try { source = CanonicalRiffCreatorSource.parse(await observed(telemetry,
+        { stage: 'application_operation', clock: 'monotonic', operation: 'start' },
+        () => resolveSource(parsed.data.source_url))); }
       catch (error) {
         return failure((error as { code?: string })?.code === 'SOURCE_UNAVAILABLE' ? 'UNAVAILABLE' : 'VALIDATION_ERROR');
       }
@@ -103,7 +115,9 @@ export function createRiffCreatorOperations(
       const projected = projectStored(stored, identity.account_id, parsed.data);
       if (projected.ok && JSON.stringify(projected.data.source) !== JSON.stringify(source)) return failure('UNAVAILABLE');
       if (projected.ok && projected.data.job.state === 'queued') {
-        try { await dispatch(projected.data.job.id, identity.account_id); } catch { /* reconciler retries durable intent */ }
+        try { await observed(telemetry,
+          { stage: 'application_operation', clock: 'monotonic', operation: 'dispatch' },
+          () => dispatch(projected.data.job.id, identity.account_id)); } catch { /* reconciler retries durable intent */ }
       }
       return projected;
     } catch {

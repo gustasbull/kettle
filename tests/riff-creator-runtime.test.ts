@@ -33,11 +33,18 @@ test('runtime factory composes verified identity, service storage, canonicalizat
     } });
   };
   const dispatched: string[] = [];
+  const observed: Array<Record<string, unknown>> = [];
+  const telemetry = {
+    record(fields: Record<string, unknown>) { observed.push({ ...fields }); },
+    async measure<T>(fields: Record<string, unknown>, run: () => Promise<T>) {
+      const result = await run(); observed.push({ ...fields, status: 'measured' }); return result;
+    },
+  };
   const operations = createRiffCreatorRuntime({
     supabaseUrl: 'https://example.supabase.co', serviceRoleKey: 'fixture-service-role',
     maxProfilesPerAccount: 1, allowanceTtlSeconds: 604800,
   }, { async verify() { return { account_id: accountA, scopes: ['projects:write'] }; } },
-  async id => { dispatched.push(id); }, () => true, fetcher);
+  async id => { dispatched.push(id); }, () => true, fetcher, telemetry);
 
   const response = await operations.execute('start_riff_creator', 'token', { request_id: requestId, source_url: sourceUrl });
   assert.equal(response.ok, true);
@@ -46,4 +53,12 @@ test('runtime factory composes verified identity, service storage, canonicalizat
     'https://example.supabase.co/rest/v1/rpc/kettle_start_riff_creator',
   ]);
   assert.deepEqual(dispatched, [jobId]);
+  assert.deepEqual(observed.map(event => [event.stage, event.operation]), [
+    ['supabase_rpc', 'find'],
+    ['application_operation', 'find'],
+    ['application_operation', 'start'],
+    ['supabase_rpc', 'start'],
+    ['application_operation', 'dispatch'],
+  ]);
+  assert.doesNotMatch(JSON.stringify(observed), /source_url|service-role|creator\.one|account_id/i);
 });

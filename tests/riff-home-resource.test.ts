@@ -55,8 +55,11 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
 });
 
 test('Riff Home HTML escapes raw-text delimiters', () => {
-  const html = riffHomeHtml('const payload = "</ScRiPt><!--";');
+  const html = riffHomeHtml('const payload = "</ScRiPt><!--";', {
+    resource_version: 'riff-home-v3', bundle_version: `sha256:${'a'.repeat(64)}`,
+  });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));
   assert.ok(!html.includes('<!--'));
+  assert.match(html, new RegExp(`name="riff-bundle-version" content="sha256:${'a'.repeat(64)}" data-resource-version="riff-home-v3"`));
 });
