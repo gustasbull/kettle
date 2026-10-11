@@ -535,6 +535,23 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       'a different project gets its own provider-free catalog request');
   });
 
+  await t.test('explicit same-scope Discovery re-entry notifies the catalog loader for recovery', async () => {
+    await page.evaluate(() => {
+      boot('ideas', 'fullscreen');
+      window.discoveryLoads.length = 0;
+      window.view.render(window.job);
+      window.view.render(window.job);
+    });
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), 0,
+      'ordinary same-scope result renders never create an automatic retry loop');
+    await page.evaluate(() => {
+      window.view.showCatalog();
+      window.view.showCatalog();
+    });
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), 2,
+      'each explicit re-entry reaches the loader, which deduplicates cached and in-flight reads');
+  });
+
   await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {
     await page.evaluate(() => boot('scripts', 'fullscreen'));
     const heading = root.getByRole('heading', { name: 'Your script, ready to film.' });

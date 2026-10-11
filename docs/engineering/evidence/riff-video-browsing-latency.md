@@ -43,9 +43,9 @@ entry can be tied to deployed bytes.
 
 | Panel/resource | SHA-256 bundle version | Raw bytes / budget | Gzip bytes / budget |
 | --- | --- | ---: | ---: |
-| Riff Home `riff-home-v3` | `sha256:f70b423132a9ab54a95a237e75562d4a14e1f17dd13a4ae065732a674052b8e8` | 141,946 / 500,000 | 40,217 / 110,000 |
+| Riff Home `riff-home-v3` | `sha256:8ae3a246856030f9d044f8dee68e376511d782391a4b50dcb57024646ced51cd` | 142,001 / 500,000 | 40,250 / 110,000 |
 | Onboarding `riff-onboarding-v1` | `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0` | 382,496 / 400,000 | 80,543 / 85,000 |
-| Pipeline `creator-pipeline-v3` | `sha256:f27c7a9380afd7ddeab4475dd29c30ad75576174ad99138d6f09d2b2bf88b5da` | 113,949 / 250,000 | 31,737 / 75,000 |
+| Pipeline `creator-pipeline-v3` | `sha256:be5f152b760a00734ced2710941a52ef0473c24ac4785b59d96ae969a0bef801` | 114,004 / 250,000 | 31,770 / 75,000 |
 
 Evidence class: `fixture`; proof surface: `local-process`. These are the values
 consumed from the generated local manifest by the Task 9 fixture benchmark. They
@@ -59,12 +59,12 @@ current-live ChatGPT, Cloudflare, Supabase, or provider percentiles.
 ### Browser
 
 Headless Chromium loaded the exact final Home artifact above,
-`sha256:f70b423132a9ab54a95a237e75562d4a14e1f17dd13a4ae065732a674052b8e8`:
+`sha256:8ae3a246856030f9d044f8dee68e376511d782391a4b50dcb57024646ced51cd`:
 
-- `first-paint`: 36.0 ms from navigation start.
-- `first-contentful-paint`: 36.0 ms from navigation start.
+- `first-paint`: 40.0 ms from navigation start.
+- `first-contentful-paint`: 40.0 ms from navigation start.
 - twelve local tab clicks measured from click through two animation frames:
-  `7.4, 15.9, 16.1, 16.0, 16.0, 16.1, 16.1, 16.3, 16.1, 15.7, 16.1, 15.8 ms`.
+  `6.3, 15.7, 16.0, 16.0, 15.9, 16.0, 16.1, 16.0, 16.1, 15.8, 15.8, 15.8 ms`.
 
 The click sample exercises already-loaded local state only; it performs no MCP,
 database, or provider call.
@@ -90,8 +90,8 @@ made no provider or hosted-database call, and performed no deployment.
 
 The final combined local gate also passed on the same source revision:
 
-- `npm run check`: typecheck, 518 Node tests, dry-run Worker build, local
-  workerd smoke, and 77 real-browser tests.
+- `npm run check`: typecheck, 520 Node tests, dry-run Worker build, local
+  workerd smoke, and 78 real-browser tests.
 - `npm run test:db`: 13/13 migration and database tests in PGlite.
 - `git diff --check`: clean.
 

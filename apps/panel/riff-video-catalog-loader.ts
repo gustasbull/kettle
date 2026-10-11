@@ -66,11 +66,16 @@ export function createRiffVideoCatalogLoader(
     };
     try {
       const result = riffVideosStructuredOutput(await read(args));
-      if (!result?.ok || requestEpoch !== epoch || requestScope !== selectedScope) return;
+      if (requestEpoch !== epoch || requestScope !== selectedScope) return;
+      if (!result?.ok) {
+        attempted = false;
+        return;
+      }
       page = result.data;
       publish(structuredClone(page));
     } catch {
       // Discovery retains its approved empty/current-page state on read failure.
+      if (requestEpoch === epoch && requestScope === selectedScope) attempted = false;
     }
   };
 

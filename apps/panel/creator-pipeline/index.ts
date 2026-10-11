@@ -169,15 +169,16 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let catalogIndex=0;
   let catalogScopeKey:string|undefined;
 
-  const enterDiscovery=(loadCatalog=false,projectId?:string)=>{
+  const enterDiscovery=(loadCatalog=false,projectId?:string,explicit=false)=>{
     screenKind='discovery';
     if(!loadCatalog)return;
     const nextScope=projectId??'account';
-    if(catalogScopeKey!==nextScope){
+    const scopeChanged=catalogScopeKey!==nextScope;
+    if(scopeChanged){
       const changingKnownScope=catalogScopeKey!==undefined;
       catalogScopeKey=nextScope;if(changingKnownScope)catalog=undefined;catalogIndex=0;
-      options.onDiscoveryOpen?.(projectId?{projectId}:{});
     }
+    if(scopeChanged||explicit)options.onDiscoveryOpen?.(projectId?{projectId}:{});
   };
 
   const setStatus = (text: string) => { if (status.textContent !== text) status.textContent = text; };
@@ -798,7 +799,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     render,
     setCatalog(page){catalog=page?structuredClone(page):undefined;if(showingCatalog)renderCatalogDiscovery();},
     showCatalog(library='videos',scope={}){if(disposed)return;discoveryLibrary=library;discoveryFilter=library==='showcases'?'Quick demos':'For you';catalogIndex=0;
-      const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(library==='videos',projectId);renderCatalogDiscovery();},
+      const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(library==='videos',projectId,true);renderCatalogDiscovery();},
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
     dispose() { if (disposed) return; disposed = true; current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;root.replaceChildren(); },

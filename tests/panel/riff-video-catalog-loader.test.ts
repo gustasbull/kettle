@@ -71,3 +71,48 @@ test('catalog loader clears and rejects late pages across owner/project boundari
   assert.equal(published.some(page => page?.cards?.[0]?.caption === 'Catalog caption 1'), false,
     'a late page from the previous owner never reaches the current view');
 });
+
+test('transient catalog failure permits one explicit same-scope retry without an automatic loop', async () => {
+  let calls = 0;
+  const published: any[] = [];
+  const loader = createRiffVideoCatalogLoader(async () => {
+    calls++;
+    if (calls === 1) throw new Error('transient fixture failure');
+    return envelope(1, null);
+  }, page => published.push(page));
+  const scope = { ownerKey: 'account-a' };
+
+  await loader.load(scope);
+  assert.equal(calls, 1);
+  assert.equal(published.length, 1, 'failure publishes once and does not loop');
+  assert.equal(published[0], undefined, 'failure retains the approved empty state');
+
+  await loader.load(scope);
+  assert.equal(calls, 2, 'an explicit same-scope re-entry retries once');
+  assert.equal(published.at(-1)!.cards[0]!.caption, 'Catalog caption 1');
+
+  await loader.load(scope);
+  assert.equal(calls, 2, 'the recovered first page remains cached');
+});
+
+test('structured unavailable catalog result permits an explicit same-scope retry', async () => {
+  let calls = 0;
+  const published: any[] = [];
+  const loader = createRiffVideoCatalogLoader(async () => {
+    calls++;
+    if (calls === 1) return { structuredContent: { ok: false, error: {
+      code: 'UNAVAILABLE', message: 'Temporarily unavailable.', retryable: true, recovery: 'retry_same_request',
+    } } };
+    return envelope(1, null);
+  }, page => published.push(page));
+  const scope = { ownerKey: 'account-a' };
+
+  await loader.load(scope);
+  assert.equal(calls, 1);
+  assert.equal(published.length, 1, 'application failure publishes once and does not loop');
+  assert.equal(published[0], undefined, 'application failure retains the approved empty state');
+
+  await loader.load(scope);
+  assert.equal(calls, 2, 'an explicit re-entry can recover from a structured read failure');
+  assert.equal(published.at(-1)!.cards[0]!.caption, 'Catalog caption 1');
+});

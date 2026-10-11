@@ -12,6 +12,21 @@
 
 **Authoritative design source:** Paper file **Riff**, page **Riff · Core workflows**, especially `CURRENT · Riff · New creator flow`. Re-read the live page before UI implementation. Do not introduce a new surface, menu, filter, button, label, or layout unless it exists in the current Paper design or the user explicitly approves it.
 
+## Execution status — 11 October 2026
+
+This plan contains ten labeled work items: Task 0 plus Tasks 1–9.
+
+| Work item | Final status |
+| --- | --- |
+| Task 0 | Implemented and verified locally. |
+| Tasks 1–8 | Implemented and verified locally, including the final bounded-catalog, exact-Paper-copy, reused-observation provenance, and explicit same-scope catalog-retry corrections. |
+| Task 9, Steps 1–3 and 6 | Implemented and verified locally: guarded benchmark CLI, fixture evidence, verification suite, and recorded evidence. |
+| Task 9, Steps 4–5 | Conditional external rollout remains gated. No fresh live provider trial, hosted deployment, served ChatGPT fingerprint/canary, allowance expansion, or production promotion was performed. These steps require the plan's separately approved development allocation, canonical inputs, maximum-call approval, trusted operator endpoint, and deployment authority. |
+
+Accordingly, all authorized repository implementation is complete. “Complete”
+does not claim the conditional live/deployment evidence above; the local evidence
+documents those boundaries explicitly.
+
 **Provider references:** [Lightreel API docs](https://lightreel.ai/docs), [Lightreel support](https://lightreel.ai/support), [ScrapeCreators TikTok profile](https://docs.scrapecreators.com/v1/tiktok/profile/), [ScrapeCreators profile videos](https://docs.scrapecreators.com/v3/tiktok/profile/videos/), [ScrapeCreators video details](https://docs.scrapecreators.com/v2/tiktok/video/), [ScrapeCreators caching](https://docs.scrapecreators.com/caching/), [ScrapeCreators usage history](https://docs.scrapecreators.com/v1/account/get-api-usage/), and [Cloudflare Workflow rules](https://developers.cloudflare.com/workflows/build/rules-of-workflows/).
 
 ## What the current integration actually does
@@ -137,27 +152,27 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - On an ambiguous start, automatically reconciles the same request ID/input before asking the user to retry.
 - Maps a definite profile-cap or exhausted-grant rejection to a truthful, actionable no-allowance state. It does not retry, refill, relax the one-profile guard, or claim the URL was invalid.
 
-- [ ] **Step 1: Add a regression for the exact reported share link**
+- [x] **Step 1: Add a regression for the exact reported share link**
 
   Assert `https://vm.tiktok.com/ZN8kT85EE/` passes client recognition and the bounded resolver contract. Keep the network-free unit test based on its canonical redirect fixture; the two live ~0.3–0.5 second observations belong only in evidence, not a deterministic test.
 
-- [ ] **Step 2: Write failing bridge recovery tests**
+- [x] **Step 2: Write failing bridge recovery tests**
 
   Cover: start response times out after the server persisted the job; lookup returns that job and the existing Paper pipeline opens automatically. Cover lookup `NOT_FOUND`; the exact typed value remains in the field, the same request ID is reused on explicit retry, and no second request is started automatically. Cover returned and host-rejected `FORBIDDEN`/`VALIDATION_ERROR` results, including profile-cap and exhausted-grant cases; the bridge shows the mapped application result rather than the ambiguous sentence. Cover host reconnect/account change; pending state cannot cross accounts.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
   Run: `node --import tsx --test tests/riff-creator-start.test.ts tests/riff-creator-mcp.test.ts && node --test tests/panel/riff-home-bridge.test.mjs tests/panel/riff-home.test.mjs`
 
-- [ ] **Step 4: Implement exact read-after-ambiguous recovery**
+- [x] **Step 4: Implement exact read-after-ambiguous recovery**
 
   Register the existing repository `find` path as a public read-only contract with `projects:read`. After a start timeout/transport exception, perform a short bounded lookup sequence with the same request ID and source input. If found, render/observe the returned saved job. If definitely absent, preserve the user's text and request ID and stop; do not silently resubmit or consume another grant. Keep the field populated until a job is visibly mounted or the user edits it.
 
-- [ ] **Step 5: Add safe failure diagnostics**
+- [x] **Step 5: Add safe failure diagnostics**
 
   Feed timeout/transport/returned-error enums into Task 1 telemetry. Do not expose internal exception strings in the UI. Verify both no-grant and profile-cap responses are shown as allowance/access issues and are never described as an unrecognized link. Record the linked-development evidence above without account IDs, credentials, or provider payloads.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
   Run: `npm run build:panel && node --import tsx --test tests/riff-creator-start.test.ts tests/riff-creator-mcp.test.ts && node --test tests/panel/riff-home-bridge.test.mjs tests/panel/riff-home.test.mjs`
 
@@ -187,25 +202,25 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Produces one allowlisted structured event shape with `event`, `request_id` or `job_id`, stage, monotonic duration, status enum, byte/count fields, cache state, resource/bundle version, and no source URL, caption, provider body, token, email, or credential.
 - Produces a build-time resource/bundle fingerprint so deployed screenshots and timings can be tied to actual code.
 
-- [ ] **Step 1: Write failing telemetry-safety and timing tests**
+- [x] **Step 1: Write failing telemetry-safety and timing tests**
 
   Assert that telemetry drops arbitrary objects and credential-bearing strings, accepts only known stage/status/provider enums, records durations as non-negative integers, and never logs raw provider text. Assert the generated panel manifest contains stable content hashes and byte/gzip budgets for Home, onboarding, and pipeline bundles.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
   Run: `node --import tsx --test tests/creator-telemetry.test.ts tests/panel-build.test.ts`
 
   Expected: FAIL because the telemetry helper and generated fingerprint do not exist.
 
-- [ ] **Step 3: Instrument the real boundaries**
+- [x] **Step 3: Instrument the real boundaries**
 
   Record request receipt, MCP routing, auth metadata/JWKS, identity lookup, application operation, Supabase RPC, workflow dispatch, queue-to-running, provider reservation, provider HTTP, sanitization, receipt persistence, checkpoint persistence, terminal save, poll observation, and panel render. Reuse correlation IDs already present; do not add user content to logs. Include endpoint enums rather than URLs.
 
-- [ ] **Step 4: Establish the pre-change baseline without new paid calls**
+- [x] **Step 4: Establish the pre-change baseline without new paid calls**
 
   Record bundle sizes, local click/paint timings, Worker/MCP timings, and the retained historical provider sample. Mark fixture, historical-live, and current-live evidence separately. Do not claim current provider percentiles from one historical run.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
   Run: `node --import tsx --test tests/creator-telemetry.test.ts tests/panel-build.test.ts tests/creator-pipeline-application.test.ts tests/riff-creator-runtime.test.ts`
 
@@ -236,23 +251,23 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Keeps current tool schemas and auth behavior unchanged.
 - Returns a durably stored queued job without waiting for Workflow creation; `waitUntil` performs the immediate dispatch and the deterministic outbox remains the recovery authority.
 
-- [ ] **Step 1: Write failing launch-path tests**
+- [x] **Step 1: Write failing launch-path tests**
 
   Assert published tool descriptors/output schemas are computed once per isolate rather than rebuilt for each RPC. Assert a new canonical TikTok URL uses one atomic start RPC rather than `find` then `start`; exact replays and short-link replay protection remain correct. Assert the operation returns after durable intent while dispatch is scheduled in `ExecutionContext.waitUntil`, and a failed background dispatch leaves the same queued job for reconciliation.
 
-- [ ] **Step 2: Add bundle regression tests**
+- [x] **Step 2: Add bundle regression tests**
 
   Pin maximum raw and gzip sizes. Assert the standalone pipeline bridge no longer imports the server-side Zod/MCP contract graph and still rejects oversized, malformed, cross-job, and hostile results.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
   Run: `node --import tsx --test tests/creator-mcp.test.ts tests/riff-creator-start.test.ts tests/riff-creator-runtime.test.ts tests/panel-build.test.ts && node --test tests/panel/creator-pipeline-bridge.test.mjs`
 
-- [ ] **Step 4: Implement acknowledgement and launch optimizations**
+- [x] **Step 4: Implement acknowledgement and launch optimizations**
 
   Hoist immutable descriptors and JSON schema conversion to module scope. Add a small display-boundary validator for the pipeline panel. For direct canonical inputs, call the atomic start RPC directly; retain the existing preflight lookup only where short-link replay avoids network resolution. Schedule Workflow creation after the queued record commits, retain the deterministic workflow ID, and reduce the scheduled fallback from two minutes to the shortest Cloudflare-supported cron interval without creating duplicate attempts.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run: `npm run build:panel && node --import tsx --test tests/creator-mcp.test.ts tests/riff-creator-start.test.ts tests/riff-creator-runtime.test.ts tests/panel-build.test.ts && node --test tests/panel/creator-pipeline-bridge.test.mjs`
 
@@ -285,27 +300,27 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - `detailRequest(videoUrl, region, cacheMaxAge)` keeps transcript/media disabled.
 - Provenance retains both retrieval time and provider `cached_at` observation time.
 
-- [ ] **Step 1: Write failing provider-shape tests**
+- [x] **Step 1: Write failing provider-shape tests**
 
   Add official-shape fixtures containing `video.dynamic_cover.url_list`, signed query strings, and `*.tiktokcdn-us.com` hosts. Assert exact approved TikTok CDN families pass and lookalike/suffix/credential/HTTP URLs fail. Assert sanitizer and normalizer retain a valid dynamic cover. Assert CSP and contract allow exactly the same host families.
 
-- [ ] **Step 2: Write failing request tests**
+- [x] **Step 2: Write failing request tests**
 
   Assert profile/detail requests include only an approved `cache_max_age`; feed includes validated `user_id`; transcript/media remain false; cached timestamps survive sanitization and become source observation time. Assert invalid cache ages, IDs, regions, and URLs fail before I/O.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
   Run: `node --import tsx --test tests/creator-pipeline-provider.test.ts tests/creator-pipeline-normalization.test.ts tests/creator-profile-contracts.test.ts tests/creator-pipeline-resource.test.ts tests/riff-home-resource.test.ts`
 
-- [ ] **Step 4: Implement the aligned request and thumbnail policy**
+- [x] **Step 4: Implement the aligned request and thumbnail policy**
 
   Pass the profile response's native `user.id` into the feed call. Implement the approved one-day profile/seven-day detail policy as validated runtime configuration, not arbitrary tool input. Preserve provider cache disclosure. Retain `dynamic_cover` with a safe fallback to `cover`; do not retain play/download URLs. Update the resource CSP only after the URL contract accepts the same exact host set.
 
-- [ ] **Step 5: Correct sample language**
+- [x] **Step 5: Correct sample language**
 
   Where the UI or structured result says “Top videos,” use the exact approved Paper copy while disclosing that ranking is among the bounded recent sample. If Paper currently requires the misleading label, pause the copy change and record the conflict for user review rather than inventing replacement text.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
   Run: `node --import tsx --test tests/creator-pipeline-provider.test.ts tests/creator-pipeline-normalization.test.ts tests/creator-profile-contracts.test.ts tests/creator-pipeline-resource.test.ts tests/riff-home-resource.test.ts`
 
@@ -333,27 +348,27 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Adds `CreatorProviderContext.checkpoint(key, stage, progress)` with the same exact-replay/conflict semantics as durable writes.
 - Adds a compact `get_creator_job_status` read that returns ID, state, stage, revision, timestamps, safe progress, and terminal-result availability; `get_creator_job` remains the full owned result read.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
   Assert allowed stage transitions by job kind, progress size/card bounds, strict fields, provenance/freshness requirements, terminal invariants, and rejection of account IDs, provider receipts, raw bodies, and unknown stages.
 
-- [ ] **Step 2: Write failing migration tests**
+- [x] **Step 2: Write failing migration tests**
 
   Add an append-only `creator_job_checkpoints` table keyed by `(job_id, key)`, current safe progress/stage columns on `creator_jobs`, and an idempotent checkpoint RPC. Exact replay returns the existing checkpoint; changed replay conflicts. Running-to-running progress increments revision and appends a job event; terminal jobs reject new checkpoints. Keep old identity/input/captured/result fields immutable and service-role-only.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
   Run: `node --import tsx --test tests/creator-pipeline-contracts.test.ts tests/creator-pipeline-application.test.ts tests/creator-pipeline-database.test.ts tests/creator-pipeline-provider.test.ts`
 
-- [ ] **Step 4: Emit checkpoints around existing work**
+- [x] **Step 4: Emit checkpoints around existing work**
 
   Persist stages before and after each expensive boundary. Publish sanitized profile data after profile validation and video cards after each feed page. Publish researched reference identities before detail enrichment and enriched cards after detail completion. Continue to publish the terminal DNA/recommendation result only after full validation and persistence.
 
-- [ ] **Step 5: Verify migration and application behavior**
+- [x] **Step 5: Verify migration and application behavior**
 
   Run: `npm run test:db && node --import tsx --test tests/creator-pipeline-contracts.test.ts tests/creator-pipeline-application.test.ts tests/creator-pipeline-database.test.ts tests/creator-pipeline-provider.test.ts`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
   ```bash
   git add supabase/migrations/20261011091042_creator_job_progress.sql packages/contracts packages/application packages/database packages/adapters tests
@@ -378,23 +393,23 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Uses bounded concurrency of three only for independent video-detail lookups and preserves Lightreel URL order in the result.
 - Reuses a same-account, same-native-ID feed observation only when required fields, permission basis, and approved freshness satisfy `PipelineReference`; no provider attempt is reserved for a valid cache reuse.
 
-- [ ] **Step 1: Write failing concurrency and reuse tests**
+- [x] **Step 1: Write failing concurrency and reuse tests**
 
   Use controlled promises to prove all independent detail requests begin before any one resolves, never exceed concurrency three, retain deterministic output order, use unique stable attempt keys, and do not retry a rejected or ambiguous attempt. Assert a fresh sufficient feed observation avoids the detail call, while stale/incomplete/foreign-account/permission-incompatible data does not.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
   Run: `node --import tsx --test tests/creator-pipeline-provider.test.ts tests/creator-pipeline-application.test.ts tests/creator-pipeline-runtime.test.ts`
 
-- [ ] **Step 3: Implement safe recommendation fan-out**
+- [x] **Step 3: Implement safe recommendation fan-out**
 
   Use `Promise.all` over the already bounded, deduplicated Lightreel URLs. Cloudflare documents concurrent durable steps, but keep every side effect inside its own durable `step.do`. Preserve one receipt and allowance unit per actual detail request and stable ordering after join.
 
-- [ ] **Step 4: Resolve the seed-order decision before changing scan concurrency**
+- [x] **Step 4: Resolve the seed-order decision before changing scan concurrency**
 
   If approved, record the new policy, then start the Lightreel review and ScrapeCreators profile branch concurrently, with each call independently reserved and checkpointed. The feed still depends on the validated profile/native user ID; page two still depends on page one's cursor. If not approved, retain Lightreel-first and do not mark the task incomplete—the rest of the speed plan remains valid, but the direct-video first-card target must be reported as unavailable under the current order.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run: `node --import tsx --test tests/creator-pipeline-provider.test.ts tests/creator-pipeline-application.test.ts tests/creator-pipeline-runtime.test.ts`
 
@@ -423,27 +438,27 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Adds read-only `list_riff_videos` with strict bounded input: optional owned project, source role, approved sort, opaque cursor, and limit at most 20. It never calls a provider, refreshes data, or spends credits.
 - Returns safe `RiffVideoCard` rows plus `next_cursor`, coverage/ freshness text, and no raw provider payload.
 
-- [ ] **Step 1: Write failing contract and account-isolation tests**
+- [x] **Step 1: Write failing contract and account-isolation tests**
 
   Assert stable card fields, strict cursor/filter bounds, null-preserving metrics, provenance, account/project ownership, deterministic keyset pagination, duplicate-native-ID collapse to the latest permitted observation, and rejection of client-supplied account IDs.
 
-- [ ] **Step 2: Write failing database tests**
+- [x] **Step 2: Write failing database tests**
 
   Add service-only tables/RPCs with RLS, unique identities, append-only observations, source links, indexes for `(account_id, observed_at desc, id)` and `(account_id, project_id, role, observed_at desc, id)`, and an idempotent ingest RPC called only after validated checkpoints/results. Test that reads never mutate attempts/allowances.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
   Run: `node --import tsx --test tests/riff-videos-contracts.test.ts tests/riff-videos-application.test.ts tests/riff-videos-database.test.ts tests/riff-videos-mcp.test.ts`
 
-- [ ] **Step 4: Persist catalog observations from successful provider facts**
+- [x] **Step 4: Persist catalog observations from successful provider facts**
 
   Ingest sanitized scan cards after each durable feed checkpoint and discovered references after enrichment. Keep catalog insertion separate from terminal DNA so a later Lightreel or model failure does not erase already permitted video facts. Exact replay must not duplicate observations.
 
-- [ ] **Step 5: Register the read-only MCP tool**
+- [x] **Step 5: Register the read-only MCP tool**
 
   Require `projects:read`, verified account identity, read-only annotations, and concise text fallback. Do not add an automatic refresh side effect. Keep the existing `list_riff_work` recents tool unchanged.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
   Run: `npm run test:db && node --import tsx --test tests/riff-videos-contracts.test.ts tests/riff-videos-application.test.ts tests/riff-videos-database.test.ts tests/riff-videos-mcp.test.ts`
 
@@ -473,31 +488,31 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Reads one catalog page when the existing Paper Discovery surface opens; local arrows/filter changes do not call tools.
 - Reuses the current Analysis, loading, Discovery, and Studio structures exactly.
 
-- [ ] **Step 1: Write failing progressive-render tests**
+- [x] **Step 1: Write failing progressive-render tests**
 
   Assert an acknowledged job mounts immediately, each backend stage maps to the existing Paper loading treatment, profile/video cards render as soon as safe progress arrives, and no fabricated percentage or completion appears. Assert same-revision polls do not rerender or reset focus. Assert terminal failure retains the last truthful partial cards and limitations.
 
-- [ ] **Step 2: Write failing browse-interaction tests**
+- [x] **Step 2: Write failing browse-interaction tests**
 
   Assert the first catalog page is fetched once, up to the Paper-approved card count is rendered, arrows and already-loaded filters respond locally under 100 ms, the next page is fetched only at the approved carousel threshold, thumbnails remain lazy/async, and malformed/expired images degrade without blocking text. Assert no read action invokes a provider-start tool.
 
-- [ ] **Step 3: Run browser tests and verify RED**
+- [x] **Step 3: Run browser tests and verify RED**
 
   Run: `npm run build:panel && node --test tests/panel/riff-home-bridge.test.mjs tests/panel/creator-pipeline-bridge.test.mjs tests/panel/creator-pipeline.test.mjs && node --import tsx --test tests/panel/creator-pipeline-controller.test.ts`
 
-- [ ] **Step 4: Implement one shared measured polling policy**
+- [x] **Step 4: Implement one shared measured polling policy**
 
   Replace divergent Home/standalone schedules with one controller using bounded jitter, a real wall-clock deadline, lifecycle pause/resume, and a visible paused state. Target result-ready-to-paint under three seconds without polling more aggressively during long Lightreel stages. Keep identity/revision checks and clear stale data on auth/account changes.
 
-- [ ] **Step 5: Render progress and catalog data without redesigning**
+- [x] **Step 5: Render progress and catalog data without redesigning**
 
   Populate only slots that already exist in Paper. Do not add an internal player, navigation bar, debug timings, batch-limit copy, extra actions, or new categories. Filters must affect real backed data; if a Paper category has no server classification contract, retain its approved empty/loading behavior rather than showing the same cards under a false label.
 
-- [ ] **Step 6: Reduce MCP wire duplication**
+- [x] **Step 6: Reduce MCP wire duplication**
 
   Keep full data in `structuredContent`, but return a concise human-readable `content` summary instead of stringifying the entire result twice. Verify the app still works in hosts that ignore UI resources.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
   Run: `npm run build:panel && node --test tests/panel/riff-home-bridge.test.mjs tests/panel/creator-pipeline-bridge.test.mjs tests/panel/creator-pipeline.test.mjs && node --import tsx --test tests/panel/creator-pipeline-controller.test.ts tests/creator-pipeline-mcp.test.ts`
 
@@ -523,19 +538,19 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - Reserves `needs_reconciliation` for timeout/network ambiguity, process loss after dispatch, or failure after provider success but before receipt persistence.
 - Does not automatically retry either class.
 
-- [ ] **Step 1: Write failing classification tests**
+- [x] **Step 1: Write failing classification tests**
 
   Cover definite 4xx/5xx, schema-invalid 2xx, permission/unavailable, timeout, network disconnect, persistence failure, exact replay, and changed replay. Assert only genuinely uncertain spend states become reconciliation cases.
 
-- [ ] **Step 2: Add append-only failure outcomes and RPCs**
+- [x] **Step 2: Add append-only failure outcomes and RPCs**
 
   Store provider/operation/status/failure enum/timestamps only—never bodies or credentials. Make replay return the same terminal outcome. Keep allowance accounting unchanged until O05 is decided.
 
-- [ ] **Step 3: Add an operator-only reconciliation report**
+- [x] **Step 3: Add an operator-only reconciliation report**
 
   Compare unresolved attempts with ScrapeCreators usage history when explicitly run by an operator. Do not make usage-history lookup part of a public retry path and do not resubmit Lightreel research.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
   Run: `npm run test:db && node --import tsx --test tests/creator-pipeline-application.test.ts tests/creator-pipeline-database.test.ts tests/creator-pipeline-provider.test.ts`
 
@@ -557,15 +572,15 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 - `npm run benchmark:creator -- --fixture` performs no network calls and validates reporting.
 - `npm run benchmark:creator -- --live --allocation-id <id>` requires an explicit pre-provisioned development allocation, prints the planned maximum calls before execution, refuses production hosts, and never provisions/refills credits itself.
 
-- [ ] **Step 1: Write failing benchmark-guard tests**
+- [x] **Step 1: Write failing benchmark-guard tests**
 
   Assert live mode fails closed without the explicit flag, development endpoint, allocation ID, bounded source list, and maximum-call confirmation. Assert secrets and source content are redacted. Assert reports separate fixture, historical-live, and current-live samples.
 
-- [ ] **Step 2: Implement measurement output**
+- [x] **Step 2: Implement measurement output**
 
   Report p50/p95/p99 when sample count permits: shell, durable acknowledgement, queue delay, first safe partial, profile/feed, seed review, research, detail enrichment, terminal persistence, result-ready-to-paint, provider/cache hit, bytes, calls, and credits. Small samples must show raw observations and “insufficient for percentile” rather than a misleading percentile.
 
-- [ ] **Step 3: Run the no-spend verification suite**
+- [x] **Step 3: Run the no-spend verification suite**
 
   Run:
 
@@ -583,7 +598,7 @@ Do not label the configured 540-second seed timeout as an SLA. If real measureme
 
   Deploy to development, verify the bundle/resource fingerprint in ChatGPT, and canary with the test accounts. Do not promote or expand allowances until the observed error/reconciliation/cache behavior and O01/O05/O06 decisions are acceptable.
 
-- [ ] **Step 6: Commit evidence**
+- [x] **Step 6: Commit evidence**
 
   ```bash
   git add scripts/creator-latency-benchmark.ts package.json tests/creator-latency-benchmark.test.ts docs/engineering/evidence/riff-video-browsing-latency.md docs/engineering/stage2-verification.md
