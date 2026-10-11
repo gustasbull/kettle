@@ -234,14 +234,14 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
           result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
       };
       const profile = OpenAIProfile.parse({ id: result.data.account.id, name: result.data.account.display_name });
-      return { content: [{ type: 'text' as const, text: 'Riff profile is connected.' }], structuredContent: profile };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(profile) }], structuredContent: profile };
     });
     server.registerTool('open_riff', HOME_REGISTRATION, async () => {
       const result = await auth.operations.execute('get_account_state', token, {});
       const needsAuth = !result.ok && (result.error.code === 'UNAUTHENTICATED'
         || (result.error.code === 'FORBIDDEN' && token && !(await auth.verifier.verify(token))?.scopes.includes(ACCOUNT_CONTRACT.scope)));
       if (!result.ok) return {
-        content: [{ type: 'text' as const, text: result.error.message }], structuredContent: result, isError: true,
+        content: [{ type: 'text' as const, text: summarizeFailure(result) }], structuredContent: result, isError: true,
         ...(needsAuth ? { _meta: { 'mcp/www_authenticate': [challenge(auth.config,
           result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
       };
