@@ -85,6 +85,12 @@ html, body { margin: 0; padding: 0; background: transparent; }
   background: #D9E1EE; cursor: pointer;
 }
 .riff-onboarding__dot[aria-selected="true"] { width: 20px; flex-basis: 20px; background: #7138D4; }
+@media (forced-colors: active) {
+  .riff-onboarding__dot {
+    border: 1px solid CanvasText; background: Canvas; forced-color-adjust: none;
+  }
+  .riff-onboarding__dot[aria-selected="true"] { border-color: CanvasText; background: Highlight; }
+}
 .riff-onboarding__next {
   display: flex; width: 32px; height: 32px; flex: 0 0 32px; align-items: center; justify-content: center;
   padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; background: #F0F3F7; cursor: pointer;
@@ -325,11 +331,12 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
         : event.key === 'Home' ? 0 : event.key === 'End' ? steps.length - 1 : undefined;
     if (index === undefined) return;
     event.preventDefault();
-    select(index);
+    select(index, true);
   };
   const onResize = () => select(active);
   next.addEventListener('click', onNext);
   carousel.addEventListener('keydown', onKeydown);
+  dotList.addEventListener('keydown', onKeydown);
   const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(onResize);
   resize?.observe(carousel);
   select(0);
@@ -338,6 +345,7 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
       resize?.disconnect();
       next.removeEventListener('click', onNext);
       carousel.removeEventListener('keydown', onKeydown);
+      dotList.removeEventListener('keydown', onKeydown);
       root.replaceChildren();
     },
   };

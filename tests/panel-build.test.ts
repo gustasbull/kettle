@@ -92,7 +92,7 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   const panel = join(root, 'apps/panel');
   const fixtures = [
     { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v3' },
-    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v2' },
+    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v3' },
     { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v3' },
   ] as const;
   for (const fixture of fixtures) {
@@ -112,7 +112,7 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   const second = await buildPanelManifest(root) as Manifest;
   assert.deepEqual(second, first);
   assert.equal(first.schema_version, 1);
-  assert.doesNotMatch(JSON.stringify(first), /riff-onboarding-v1/,
+  assert.doesNotMatch(JSON.stringify(first), /riff-onboarding-v[12]/,
     'rebuilt manifests must not preserve the stale onboarding cache identity');
   assert.deepEqual(first.panels.map(panel => panel.panel), ['creator-pipeline', 'riff-home', 'riff-onboarding']);
   for (const entry of first.panels) {
@@ -124,7 +124,7 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
     assert.ok(entry.raw_bytes <= entry.budget.raw_bytes);
     assert.ok(entry.gzip_bytes <= entry.budget.gzip_bytes);
     const source = await readFile(join(panel, `generated/${fixture.name}-bundle.ts`), 'utf8');
-    assert.doesNotMatch(source, /riff-onboarding-v1/,
+    assert.doesNotMatch(source, /riff-onboarding-v[12]/,
       'rebuilt browser resources must not preserve the stale onboarding cache identity');
     const script = generatedScript(source, fixture.symbol);
     assert.equal(entry.raw_bytes, Buffer.byteLength(script));

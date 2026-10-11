@@ -104,12 +104,12 @@ const aggregateSchema = z.strictObject({
 const fingerprintResourceVersions = {
   pipeline: 'creator-pipeline-v3',
   home: 'riff-home-v3',
-  onboarding: 'riff-onboarding-v2',
+  onboarding: 'riff-onboarding-v3',
 } as const;
 
 const fingerprintSchema = z.strictObject({
   resource: fingerprintNames,
-  resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v2']),
+  resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v3']),
   bundle_version: z.string().regex(sha256),
   raw_bytes: integer.max(10_000_000),
   gzip_bytes: integer.max(10_000_000),
@@ -415,12 +415,12 @@ function fixtureSamples(bundleVersions: Readonly<Record<z.infer<typeof fingerpri
 const panelResourceVersions = {
   'creator-pipeline': 'creator-pipeline-v3',
   'riff-home': 'riff-home-v3',
-  'riff-onboarding': 'riff-onboarding-v2',
+  'riff-onboarding': 'riff-onboarding-v3',
 } as const;
 
 const manifestPanelSchema = z.strictObject({
   panel: z.enum(['creator-pipeline', 'riff-home', 'riff-onboarding']),
-  resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v2']),
+  resource_version: z.enum(['creator-pipeline-v3', 'riff-home-v3', 'riff-onboarding-v3']),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   raw_bytes: integer.max(10_000_000),
   gzip_bytes: integer.max(10_000_000),

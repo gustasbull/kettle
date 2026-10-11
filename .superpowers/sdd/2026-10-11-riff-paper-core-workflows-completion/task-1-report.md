@@ -80,3 +80,45 @@ image content is pinned as
 - The generated panel directory is intentionally ignored by Git; the deterministic
   build and manifest tests prove the committed sources reproduce the v2-only
   artifacts within budget.
+
+## Fix round 1/5 — progress-tab keyboard and forced-colors visibility
+
+Two Important review findings were corrected:
+
+- The progress `tablist` now owns the same bounded Arrow/Home/End handler as the
+  carousel region. Selection calls `select(index, true)`, so roving `tabindex`,
+  `aria-selected`, the visible slide, and DOM focus move together. Teardown removes
+  both listeners.
+- A dedicated `forced-colors: active` rule gives every progress tab a nonzero
+  `CanvasText` border and uses `Highlight` for the selected tab against the
+  unselected `Canvas` fill. The selected and unselected states therefore remain
+  distinguishable when Chromium suppresses ordinary author backgrounds.
+- Because these changes alter the bundled UI, the immutable onboarding resource,
+  telemetry, performance, manifest, and benchmark identity advanced from v2 to v3.
+  Generated manifest tests reject both stale v1 and v2 identities.
+
+### RED/GREEN evidence
+
+- RED — `node --test tests/panel/riff-onboarding.test.mjs`: 1/2 passed. With a
+  progress tab focused, ArrowRight left the second tab at
+  `aria-selected="false"` instead of `"true"`.
+- RED after the keyboard correction — the same command reached the forced-colors
+  assertion and failed 1/2. All three computed dots reported
+  `borderWidth: "0px"`, `borderStyle: "none"`, and the same
+  `rgb(255, 255, 255)` background.
+- GREEN — `node --test tests/panel/riff-onboarding.test.mjs`: 2/2 passed. The test
+  asserts ArrowRight/Home/End update both selection and `document.activeElement`,
+  the last tab remains bounded, all forced-color dots have solid nonzero borders,
+  and the selected fill differs from unselected tabs.
+
+### Verification
+
+- `npx tsx --test tests/panel/riff-onboarding.test.mjs tests/panel/riff-onboarding-bridge.test.mjs tests/panel-build.test.ts tests/riff-onboarding-resource.test.ts tests/creator-latency-benchmark.test.ts`
+  — PASS, 28/28.
+- `npm run build:panel` — PASS. Onboarding v3 is 29,589 bytes raw / 11,955
+  bytes gzip with
+  `sha256:474f8cf2f786d8d5e02e2f88dd74af3558deb53b9fd0870324d71d83fb9b3457`.
+- `npm run check` — PASS: Worker types and TypeScript, 521/521 Node tests,
+  Worker dry-run build at 3,925.60 KiB / 788.87 KiB gzip, local workerd smoke,
+  and 79/79 real-browser tests.
+- `git diff --check` — PASS.

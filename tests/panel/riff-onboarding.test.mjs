@@ -104,16 +104,44 @@ test('Riff onboarding renders the approved Paper carousel without host chrome', 
   await page.getByRole('tab', { name: 'Show Make step' }).click();
   assert.equal(await page.getByRole('tab').last().getAttribute('aria-selected'), 'true');
 
-  await page.getByRole('region', { name: 'How Riff works' }).focus();
-  await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.getByRole('tab').nth(1).getAttribute('aria-selected'), 'true');
-  await page.keyboard.press('Home');
-  assert.equal(await page.getByRole('tab').first().getAttribute('aria-selected'), 'true');
-  await page.keyboard.press('End');
-  assert.equal(await page.getByRole('tab').last().getAttribute('aria-selected'), 'true');
+  const firstTab = page.getByRole('tab').first();
+  const secondTab = page.getByRole('tab').nth(1);
+  const lastTab = page.getByRole('tab').last();
+  await firstTab.click();
+  assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'riff-onboarding-dot-1');
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab').last().getAttribute('aria-selected'), 'true',
+  assert.equal(await secondTab.getAttribute('aria-selected'), 'true');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'riff-onboarding-dot-2',
+    'ArrowRight on the tablist moves both selection and focus to the next tab');
+  await page.keyboard.press('Home');
+  assert.equal(await firstTab.getAttribute('aria-selected'), 'true');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'riff-onboarding-dot-1');
+  await page.keyboard.press('End');
+  assert.equal(await lastTab.getAttribute('aria-selected'), 'true');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'riff-onboarding-dot-3');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await lastTab.getAttribute('aria-selected'), 'true',
     'keyboard navigation stops at the last step');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'riff-onboarding-dot-3');
+
+  await page.emulateMedia({ forcedColors: 'active' });
+  const forcedColorDots = await page.locator('.riff-onboarding__dot').evaluateAll(nodes => nodes.map(node => {
+    const style = getComputedStyle(node);
+    return {
+      selected: node.getAttribute('aria-selected') === 'true',
+      borderWidth: style.borderTopWidth,
+      borderStyle: style.borderTopStyle,
+      background: style.backgroundColor,
+    };
+  }));
+  assert.equal(forcedColorDots.every(dot => dot.borderWidth !== '0px' && dot.borderStyle === 'solid'), true,
+    JSON.stringify(forcedColorDots));
+  assert.notEqual(
+    forcedColorDots.find(dot => dot.selected)?.background,
+    forcedColorDots.find(dot => !dot.selected)?.background,
+    'forced-colors mode keeps the selected progress tab visibly distinct',
+  );
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
   assert.deepEqual(errors, []);
 });
