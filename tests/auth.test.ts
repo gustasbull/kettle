@@ -75,6 +75,8 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   assert.equal((home as { title?: string }).title, 'Riff Home');
   assert.deepEqual((home._meta as { 'openai/ui': { entrypoints: unknown[] } })['openai/ui'].entrypoints, [{ type: 'global' }, { type: 'thread' }]);
   assert.deepEqual((home._meta as { ui: { visibility?: string[] } }).ui.visibility, ['model', 'app']);
+  assert.equal((home._meta as { ui: { resourceUri: string } }).ui.resourceUri, 'ui://riff/home-v4.html',
+    'a fresh Home result selects the immutable v4 resource');
   assert.equal((home._meta as Record<string, unknown>)['openai/widgetAccessible'], true,
     'ChatGPT compatibility hosts must allow the Home widget to invoke Riff tools directly');
   const denied = await (await rpc('tools/call', { name: 'save_project', arguments: createInput() })).json() as { result: { isError: boolean; structuredContent?: unknown; _meta: Record<string, string[]> } };
@@ -159,7 +161,7 @@ test('MCP discovery stays local while protected tool invocations verify identity
     'raw MCP clients receive the complete first-open sequence even when no packaged setup skill is installed');
   assert.match(initialized.result.instructions ?? '', /mark.*only after.*welcome.*succeeds/is);
   await rpc('tools/list', {});
-  await rpc('resources/read', { uri: 'ui://riff/home-v3.html' });
+  await rpc('resources/read', { uri: 'ui://riff/home-v4.html' });
   assert.equal(identity.resolutions.length, 0,
     'public MCP discovery and static UI reads must not resolve an account merely because ChatGPT attached a token');
 

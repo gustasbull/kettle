@@ -1,6 +1,6 @@
 export const riffProductContextStyles = `
 .riff-product,.riff-product *{box-sizing:border-box}
-.riff-product{width:100%;min-height:100%;display:flex;justify-content:center;overflow-x:hidden;padding:0;color:light-dark(#22262D,#F4F5F8);font-family:var(--font-kettle-body,system-ui,sans-serif)}
+.riff-product{width:100%;min-height:100%;display:flex;align-items:flex-start;justify-content:center;overflow-x:hidden;padding:0;color:light-dark(#22262D,#F4F5F8);font-family:var(--font-kettle-body,system-ui,sans-serif)}
 .riff-product :is(h1,p,fieldset,legend){margin:0}.riff-product button,.riff-product input,.riff-product textarea{font:inherit}
 .riff-product__panel{width:min(905px,100%);display:flex;flex-direction:column;gap:24px;padding:28px 52px;border-radius:0 0 24px 24px}
 .riff-product__header{display:flex;flex-direction:column;gap:8px}.riff-product__header h1{color:light-dark(#22262D,#F6F7FA);font-size:25px;font-weight:600;line-height:32px;outline:none}

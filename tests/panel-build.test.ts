@@ -56,6 +56,24 @@ test('creator pipeline build rejects a synthetic server-runtime import and remov
   await assert.rejects(readFile(output), 'a failed boundary build must not leave a stale artifact');
 });
 
+for (const kind of ['pipeline', 'riff-home'] as const) test(`${kind} production bundle rejects test-only fixture imports`, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), `kettle-${kind}-fixture-boundary-`));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const panel = join(root, 'apps/panel');
+  const name = kind === 'pipeline' ? 'creator-pipeline' : 'riff-home';
+  const bridge = kind === 'pipeline' ? 'creator-pipeline-bridge.ts' : 'riff-home-bridge.ts';
+  await mkdir(join(panel, name), { recursive: true });
+  await mkdir(join(root, 'tests/panel/fixtures'), { recursive: true });
+  await mkdir(join(root, 'apps/worker'), { recursive: true });
+  await writeFile(join(panel, name, 'index.ts'), 'export const message = "real component";');
+  await writeFile(join(root, 'tests/panel/fixtures/authored.ts'), 'export const authored = "fixture-only";');
+  await writeFile(join(panel, bridge),
+    `import { message } from './${name}/index'; import { authored } from '../../tests/panel/fixtures/authored'; globalThis.rendered = message + authored;`);
+  await writeFile(join(root, `apps/worker/${name}-resource.ts`), 'export {};');
+
+  await assert.rejects(buildPanel(root, kind), /fixture\/test boundary.*tests\/panel\/fixtures/);
+});
+
 for (const kind of ['project', 'creator', 'riff-onboarding', 'riff-home']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'kettle-panel-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -91,9 +109,9 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   t.after(() => rm(root, { recursive: true, force: true }));
   const panel = join(root, 'apps/panel');
   const fixtures = [
-    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v3' },
+    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v4' },
     { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v3' },
-    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v3' },
+    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v4' },
   ] as const;
   for (const fixture of fixtures) {
     const component = join(panel, fixture.name, 'index.ts');
@@ -115,6 +133,8 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   assert.doesNotMatch(JSON.stringify(first), /riff-onboarding-v[12]/,
     'rebuilt manifests must not preserve the stale onboarding cache identity');
   assert.deepEqual(first.panels.map(panel => panel.panel), ['creator-pipeline', 'riff-home', 'riff-onboarding']);
+  assert.doesNotMatch(JSON.stringify(first), /(?:riff-home|creator-pipeline)-v3/,
+    'new production manifests must not emit a stale v3 resource as current');
   for (const entry of first.panels) {
     const fixture = fixtures.find(value => value.name === entry.panel)!;
     assert.equal(entry.resource_version, fixture.resource);

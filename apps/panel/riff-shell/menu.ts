@@ -220,9 +220,19 @@ export function mountRiffMenu(host: HTMLElement, options: RiffMenuOptions): {
       const source = html('span', undefined, 'riff-menu__recent-source');
       const thumbnail = recent.thumbnail_url && safeHttpUrl(recent.thumbnail_url);
       if (thumbnail) { const image = html('img'); image.src = thumbnail; image.alt = ''; image.loading = 'lazy'; image.referrerPolicy = 'no-referrer'; source.append(image); }
-      if (recent.platform === 'tiktok') {
+      if (recent.platform) {
         const badge = html('span', undefined, 'riff-menu__platform'); badge.setAttribute('aria-hidden', 'true');
-        badge.append(path(svg(), 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z', { fill:'currentColor' })); button.append(badge);
+        badge.dataset.platform = recent.platform;
+        if (recent.platform === 'tiktok') {
+          badge.append(path(svg(), 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z', { fill:'currentColor' }));
+        } else {
+          const icon = svg();
+          path(icon, 'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Zm5 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm5.5-1.5h.01', {
+            fill:'none', stroke:'currentColor', 'stroke-width':'2', 'stroke-linecap':'round', 'stroke-linejoin':'round',
+          });
+          badge.append(icon);
+        }
+        button.append(badge);
       }
       const copy = html('span', undefined, 'riff-menu__recent-copy'); copy.append(html('span', recent.title, 'riff-menu__recent-title'), html('span', recent.stage, 'riff-menu__recent-stage'));
       button.prepend(source); button.append(copy);

@@ -13,6 +13,7 @@ export const riffMenuStyles = `
   position:relative;
   font-size:var(--font-text-md-size,16px);
 }
+.riff-menu-scope,.riff-menu-scope * { box-sizing:border-box; }
 :root[data-theme="dark"] .riff-menu-scope {
   --riff-menu-surface:var(--color-background-primary,#101318);
   --riff-menu-canvas:var(--color-background-secondary,#181D25);

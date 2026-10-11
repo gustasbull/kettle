@@ -1,5 +1,42 @@
 # Stage 1 decisions and open dependencies
 
+## Riff Core workflows visual acceptance — 2026-10-12
+
+Task 8 accepts the Riff-owned CURRENT surface against the read-only Paper source:
+file `01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, artboard `Z9H-0`
+(`7700 × 10112`), observed token hash `17cc259e`. Host-owned ChatGPT rail,
+composer, attribution, authorization/install chrome, and fullscreen chrome are not
+part of the visual target.
+
+- Authored Paper examples live only in the deterministic test fixture module. Every
+  fixture is marked `origin: 'fixture'`, `contains_fixture_data: true`, has a stable
+  fixture ID and Paper node. Runtime-shaped account, job, catalog, Product, and
+  work-state values pass their public boundary parsers; host/failure controls remain
+  explicit test-only fakes. The fixture/evaluation modules are not imported by
+  production resource entrypoints.
+- Acceptance uses roles/text, DOM geometry, computed styles, state semantics,
+  keyboard routes, responsive overflow, host dark variables, forced colors, reduced
+  motion, and 200% text. Twenty-five screenshots under ignored `.context/` are the
+  recorded human review aid, not a pixel-diff baseline or a production data source.
+- Browser fakes record tool calls and block `fetch`, XHR, WebSocket, EventSource,
+  `window.open`, and unexpected image sources. Hostile/malformed/timeout/late and
+  account-switch cases must fail closed; mutation success requires a parsed receipt.
+- The canonical immutable resources are `ui://riff/home-v4.html`
+  (`riff-home-v4`, SHA-256 `c715cb402e6d38c613922d5b3bfe0444355208e06e832c862995f540b8d58a62`,
+  235911 raw / 65738 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
+  (`creator-pipeline-v4`, SHA-256 `b312261b78293d5e39ffbb874a1aa9ba81deec1bb61582359f179474bf801186`,
+  170973 raw / 47091 gzip bytes). Home keeps v1–v3 compatibility URIs and the
+  pipeline keeps v2–v3 compatibility URIs; all aliases serve the same current static
+  document so existing turns do not lose their resource.
+- Instagram remains presentation/fixture-only until a permitted live provider path is
+  verified. A raw custom MCP URL can receive truthful first-open prose but cannot
+  distribute the package-controlled onboarding skill and carousel ordering.
+- Verified scope is local static resources, parsed fixtures, bridge behavior, ordered
+  local migrations through PGlite, and generated-bundle determinism. This acceptance
+  authorizes no provider call, spend, deployment, publication, external outreach,
+  production secret, or new data source; hosted identity/provider behavior and public
+  release remain unverified.
+
 ## ScrapeCreators cache policy — 2026-10-11
 
 The user approved the fast-video implementation plan, including a trusted runtime

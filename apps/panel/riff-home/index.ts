@@ -132,15 +132,15 @@ body { min-height: 100vh; }
 .riff-home__label { display: none; }
 .riff-home__chips { display: flex; width: 100%; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .riff-home__chip, .riff-home__upload, .riff-home__submit, .riff-home__recent-next, .riff-home__recent-card { appearance: none; border: 0; cursor: pointer; }
-.riff-home__chip { display: flex; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #6933A1; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; }
+.riff-home__chip { display: flex; min-height: 32px; max-width: 100%; flex: 0 1 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #6933A1; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; white-space: normal; }
 .riff-home__chip svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .riff-home__input-shell { display: flex; width: 100%; flex-direction: column; gap: 22px; padding: 18px; border: 1px solid #DDE5F4; border-radius: 14px; background: #FFFFFF; }
-.riff-home__composer textarea { display: block; width: 100%; height: 22px; min-height: 22px; resize: none; overflow: auto; padding: 0; border: 0; outline: 0; color: #242426; background: transparent; font-size: 15px; line-height: 22px; }
+.riff-home__composer textarea { display: block; width: 100%; height: 1.5em; min-height: 1.5em; resize: none; overflow: auto; padding: 0; border: 0; outline: 0; color: #242426; background: transparent; font-size: 15px; line-height: 22px; }
 .riff-home__composer textarea::placeholder { color: #687386; opacity: 1; }
 .riff-home__composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .riff-home__upload { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0; color: #566279; background: transparent; font-size: 13px; font-weight: 400; line-height: 20px; }
 .riff-home__upload svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.riff-home__submit { display: flex; height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0 22px; border-radius: 999px; color: #FFFFFF; background: radial-gradient(circle farthest-corner at 50% 45% in oklab, oklab(46.1% .087 -.206) 0%, oklab(50.7% .09 -.203) 55%, oklab(61.7% .089 -.17) 100%), #7138D4; box-shadow: inset 0 1px 2px #FFFFFF55, 0 4px 8px #54259B33, 0 10px 20px #7444CD33; font-size: 14px; font-weight: 600; line-height: 20px; }
+.riff-home__submit { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 10px 22px; border-radius: 999px; color: #FFFFFF; background: radial-gradient(circle farthest-corner at 50% 45% in oklab, oklab(46.1% .087 -.206) 0%, oklab(50.7% .09 -.203) 55%, oklab(61.7% .089 -.17) 100%), #7138D4; box-shadow: inset 0 1px 2px #FFFFFF55, 0 4px 8px #54259B33, 0 10px 20px #7444CD33; font-size: 14px; font-weight: 600; line-height: 20px; white-space: normal; }
 .riff-home__composer textarea:focus-visible { outline: 3px solid var(--color-ring-primary, #3865F8); outline-offset: 3px; border-radius: 2px; }
 .riff-home__chip:disabled, .riff-home__upload:disabled, .riff-home__submit:disabled, .riff-home__recent-next:disabled, .riff-home__recent-card:disabled { cursor: wait; opacity: .62; }
 .riff-home__status { width: 760px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; text-align: left; }
@@ -167,7 +167,36 @@ body { min-height: 100vh; }
 .riff-home__recent-stage { color: #667285; font-size: 11px; font-weight: 400; line-height: 16px; }
 .riff-home__recent-state { flex: 0 0 auto; padding: 12px 0; color: #667285; font-size: 13px; line-height: 18px; }
 .riff-home__workflow { width: 100%; min-height: calc(100vh - 92px); background: transparent; }
+:root[data-theme="dark"], :root[data-theme="dark"] body { background:#101318; }
+:root[data-theme="dark"] .riff-home { color:#F6F7F9; background:radial-gradient(circle,rgba(255,255,255,.05) .6px,transparent .85px) center/16px 16px,radial-gradient(at 10% 70%,#162433 0%,transparent 60%),radial-gradient(at 70% 65%,#221D31 0%,transparent 58%),radial-gradient(at 92% 30%,#2E1E2A 0%,transparent 55%),#101318; }
+:root[data-theme="dark"] .riff-home__rail-symbol,
+:root[data-theme="dark"] .riff-home__input-shell,
+:root[data-theme="dark"] .riff-home__recent-card { color:#F6F7F9; border-color:#596273; background:#181D25; }
+:root[data-theme="dark"] .riff-home__brand,
+:root[data-theme="dark"] .riff-home__location,
+:root[data-theme="dark"] .riff-home h1,
+:root[data-theme="dark"] .riff-home__section h2,
+:root[data-theme="dark"] .riff-home__recent-title,
+:root[data-theme="dark"] .riff-home__composer textarea { color:#F6F7F9; }
+:root[data-theme="dark"] .riff-home__hero-mark { color:#F6F7F9; }
+:root[data-theme="dark"] .riff-home__separator,
+:root[data-theme="dark"] .riff-home__upload,
+:root[data-theme="dark"] .riff-home__status,
+:root[data-theme="dark"] .riff-home__recent-stage,
+:root[data-theme="dark"] .riff-home__recent-state,
+:root[data-theme="dark"] .riff-home__composer textarea::placeholder { color:#C1C8D2; }
+:root[data-theme="dark"] .riff-home__composer { background:linear-gradient(150deg,#24283288,#181D25CC),#181D25; box-shadow:inset 0 1px 0 #FFFFFF18,0 8px 18px #00000033; }
+:root[data-theme="dark"] .riff-home__chip { color:#C8A8FF; border-color:#596273; background:#242832; }
+:root[data-theme="dark"] .riff-home__recent-next { color:#C8A8FF; border-color:#596273; background:#242832; }
+:root[data-theme="dark"] .riff-home__recent-thumbnail { border-color:#181D25; background:#242832; }
+:root[data-theme="dark"] .riff-home__platform { border-color:#181D25; }
+:root[data-theme="dark"] .riff-home__intent { border-color:#596273; background:#181D25; }
+:root[data-theme="dark"] .riff-home__intent legend { color:#F6F7F9; }
+:root[data-theme="dark"] .riff-home__intent button { color:#C8A8FF; border-color:#596273; background:#242832; }
+:root[data-theme="dark"] .riff-home__intent button:hover { background:#303643; }
 @media (max-width: 480px) {
+  .riff-home__chrome { padding-inline: 12px; }
+  .riff-home__chrome-trail { height: auto; max-width: 100%; flex-wrap: wrap; gap: 6px 8px; white-space: normal; }
   .riff-home__home { padding-inline: calc(16px + var(--riff-safe-left, 0px)) calc(16px + var(--riff-safe-right, 0px)); }
   .riff-home h1 { font-size: 34px; line-height: 41px; }
   .riff-home__composer-footer { align-items: stretch; flex-direction: column; }

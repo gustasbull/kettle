@@ -2,7 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { creatorPipelineScript, creatorPipelineFingerprint } from '../panel/generated/creator-pipeline-bundle.ts';
 import { TIKTOK_IMAGE_RESOURCE_DOMAINS } from '../../packages/contracts/tiktok-image-policy.ts';
 
-export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v3.html';
+export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v4.html';
+export const CREATOR_PIPELINE_V3_URI = 'ui://kettle/creator-pipeline-v3.html';
 export const CREATOR_PIPELINE_V2_URI = 'ui://kettle/creator-pipeline-v2.html';
 export const CREATOR_PIPELINE_MIME = 'text/html;profile=mcp-app';
 export const CREATOR_PIPELINE_META = {
@@ -47,5 +48,6 @@ export function registerCreatorPipelineResource(server: McpServer): void {
       text: CREATOR_PIPELINE_DOCUMENT, _meta: CREATOR_PIPELINE_META,
     }] }));
   register('kettle-creator-pipeline', CREATOR_PIPELINE_URI);
+  register('kettle-creator-pipeline-v3-compat', CREATOR_PIPELINE_V3_URI);
   register('kettle-creator-pipeline-v2-compat', CREATOR_PIPELINE_V2_URI);
 }

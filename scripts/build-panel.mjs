@@ -17,9 +17,9 @@ export const PANEL_BUDGETS = Object.freeze({
 const panels = {
   project: { name: 'project-review', symbol: 'projectReviewScript', fingerprintSymbol: 'projectReviewFingerprint', entry: 'apps/panel/bridge.ts', component: 'apps/panel/project-review.ts' },
   creator: { name: 'creator-review', symbol: 'creatorReviewScript', fingerprintSymbol: 'creatorReviewFingerprint', entry: 'apps/panel/creator-review-bridge.ts', component: 'apps/panel/creator-review.ts' },
-  pipeline: { name: 'creator-pipeline', symbol: 'creatorPipelineScript', fingerprintSymbol: 'creatorPipelineFingerprint', resourceVersion: 'creator-pipeline-v3', entry: 'apps/panel/creator-pipeline-bridge.ts', component: 'apps/panel/creator-pipeline/index.ts' },
+  pipeline: { name: 'creator-pipeline', symbol: 'creatorPipelineScript', fingerprintSymbol: 'creatorPipelineFingerprint', resourceVersion: 'creator-pipeline-v4', entry: 'apps/panel/creator-pipeline-bridge.ts', component: 'apps/panel/creator-pipeline/index.ts' },
   'riff-onboarding': { name: 'riff-onboarding', symbol: 'riffOnboardingScript', fingerprintSymbol: 'riffOnboardingFingerprint', resourceVersion: 'riff-onboarding-v3', entry: 'apps/panel/riff-onboarding-bridge.ts', component: 'apps/panel/riff-onboarding/index.ts' },
-  'riff-home': { name: 'riff-home', symbol: 'riffHomeScript', fingerprintSymbol: 'riffHomeFingerprint', resourceVersion: 'riff-home-v3', entry: 'apps/panel/riff-home-bridge.ts', component: 'apps/panel/riff-home/index.ts' },
+  'riff-home': { name: 'riff-home', symbol: 'riffHomeScript', fingerprintSymbol: 'riffHomeFingerprint', resourceVersion: 'riff-home-v4', entry: 'apps/panel/riff-home-bridge.ts', component: 'apps/panel/riff-home/index.ts' },
 };
 
 /** No fixture or fallback component is emitted by this build. */
@@ -64,6 +64,12 @@ export async function buildPanel(root = repository, kind = 'project') {
   }
   const componentInput = Object.keys(result.metafile.inputs).some(path => resolve(root, path) === component);
   if (!componentInput) throw new Error(`Bridge must import the real ${name} component.`);
+  if (kind === 'pipeline' || kind === 'riff-home') {
+    const testOnly = Object.keys(result.metafile.inputs).find(path =>
+      /(?:^|\/)(?:tests?|evals)(?:\/|$)/.test(path)
+      || /(?:^|\/)(?:fixtures?|__fixtures__)(?:\/|\.|$)/i.test(path));
+    if (testOnly) throw new Error(`${name} browser bundle crosses fixture/test boundary: ${testOnly}`);
+  }
   if (kind === 'pipeline') {
     const browserSafePolicy = 'packages/contracts/tiktok-image-policy.ts';
     const forbidden = Object.keys(result.metafile.inputs).find(path => path !== browserSafePolicy

@@ -13,6 +13,7 @@ import {
   RIFF_HOME_LEGACY_URI,
   RIFF_HOME_MIME,
   RIFF_HOME_URI,
+  RIFF_HOME_V3_URI,
   RIFF_HOME_V2_URI,
 } from '../apps/worker/riff-home-resource.ts';
 import { config, fixtureAuth } from './auth-fixtures.ts';
@@ -117,6 +118,7 @@ test('project-review render tool uses signed identity, exact read contract and r
     [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
       ['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME],
       ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME],
+      ['riff-home-v3-compat', RIFF_HOME_V3_URI, RIFF_HOME_MIME],
       ['riff-home-v2-compat', RIFF_HOME_V2_URI, RIFF_HOME_MIME],
       ['riff-home-v1-compat', RIFF_HOME_LEGACY_URI, RIFF_HOME_MIME]]);
   assert.equal(resources.result.resources.find((r) => r.uri === PROJECT_REVIEW_URI)!.title, 'Riff project brief');
