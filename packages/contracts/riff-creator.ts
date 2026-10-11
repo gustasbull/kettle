@@ -65,6 +65,12 @@ export const riffCreatorContracts = {
     scope: 'projects:write',
     readOnly: false,
   },
+  get_riff_creator_start: {
+    input: StartRiffCreatorInput,
+    output: StartRiffCreatorOutput,
+    scope: 'projects:read',
+    readOnly: true,
+  },
   list_riff_work: {
     input: ListRiffWorkInput,
     output: ListRiffWorkOutput,

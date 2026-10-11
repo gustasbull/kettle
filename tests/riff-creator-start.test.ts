@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { failure } from '../packages/application/operations.ts';
 import { createRiffCreatorOperations, type RiffCreatorRepository } from '../packages/application/riff-creator.ts';
 import {
-  ListRiffWorkInput, ListRiffWorkOutput, StartRiffCreatorInput, StartRiffCreatorOutput,
+  ListRiffWorkInput, ListRiffWorkOutput, StartRiffCreatorInput, StartRiffCreatorOutput, riffCreatorContracts,
 } from '../packages/contracts/riff-creator.ts';
 import { resolveTikTokCreatorSource } from '../packages/adapters/creator-pipeline/tiktok-source.ts';
 import { accountA } from './fixtures.ts';
@@ -54,6 +54,24 @@ test('start contract accepts only a request ID and HTTPS source URL', () => {
     { ...input, source_url: 'https://user:secret@www.tiktok.com/@creator.one' },
     { source_url: source.canonical_url },
   ]) assert.equal(StartRiffCreatorInput.safeParse(invalid).success, false);
+});
+
+test('exact reported TikTok share link passes intake and the bounded canonical redirect fixture', async () => {
+  const reported = 'https://vm.tiktok.com/ZN8kT85EE/';
+  const canonical = 'https://www.tiktok.com/@katieworktips/video/7693046617351441672';
+  assert.equal(StartRiffCreatorInput.safeParse({ request_id: requestId, source_url: reported }).success, true);
+  const visited: string[] = [];
+  const resolved = await resolveTikTokCreatorSource(reported, async (url, init) => {
+    visited.push(String(url));
+    assert.equal(init.redirect, 'manual');
+    assert.ok(init.signal);
+    return new Response(null, { status: 302, headers: { Location: `${canonical}?_r=1` } });
+  }, { maxRedirects: 2, timeoutMs: 100 });
+  assert.deepEqual(visited, [reported]);
+  assert.deepEqual(resolved, {
+    platform: 'tiktok', kind: 'video', handle: 'katieworktips', canonical_url: canonical,
+    profile_url: 'https://www.tiktok.com/@katieworktips', video_url: canonical,
+  });
 });
 
 test('canonical TikTok sources avoid network and short links follow only bounded HTTPS TikTok redirects', async () => {
@@ -148,6 +166,39 @@ test('creator start replays stored work before URL resolution and rejects untrus
   assert.deepEqual(await operations.execute('start_riff_creator', 'read-only', input), failure('FORBIDDEN'));
   assert.deepEqual(await operations.execute('start_riff_creator', 'valid', { ...input, account_id: accountA }), failure('VALIDATION_ERROR'));
   assert.equal(finds, 1);
+});
+
+test('creator start lookup is a provider-free authenticated exact read', async () => {
+  const contract = riffCreatorContracts.get_riff_creator_start;
+  assert.equal(contract.input, StartRiffCreatorInput);
+  assert.equal(contract.output, StartRiffCreatorOutput);
+  assert.equal(contract.scope, 'projects:read');
+  assert.equal(contract.readOnly, true);
+  const calls: unknown[] = [];
+  const repository: RiffCreatorRepository = {
+    async find(accountId, value) { calls.push({ accountId, value }); return storedSuccess; },
+    async start() { throw new Error('lookup must not start'); },
+    async list() { throw new Error('lookup must not list'); },
+  };
+  const operations = createRiffCreatorOperations(
+    { async verify() { return { account_id: accountA, scopes: ['projects:read'] }; } }, repository,
+    async () => { throw new Error('lookup must not resolve'); },
+    async () => { throw new Error('lookup must not dispatch'); },
+    () => false,
+  );
+  const result = await operations.execute('get_riff_creator_start', 'fixture-token', input);
+  assert.deepEqual(StartRiffCreatorOutput.parse(result), {
+    ok: true,
+    data: {
+      project,
+      job: {
+        id: jobId, project_id: projectId, kind: 'scan', state: 'queued', revision: 1,
+        created_at: timestamp, updated_at: timestamp, result: null, message: null,
+      },
+      source,
+    },
+  });
+  assert.deepEqual(calls, [{ accountId: accountA, value: input }]);
 });
 
 test('recent Riff work is a bounded account-scoped read with no start or URL resolution', async () => {

@@ -191,6 +191,195 @@ test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT 
   assert.equal(await submit.isEnabled(), true);
 });
 
+test('Riff Home reconciles the exact reported link after a timed-out start persisted the saved job', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.job=pipelineFixture('video-analysis'); window.calls=[];
+    window.openai={callTool:async(name,args)=>{
+      window.calls.push({name,args});
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='start_riff_creator')return new Promise(()=>{});
+      if(name==='get_riff_creator_start')return {structuredContent:{ok:true,data:{job:window.job}}};
+      return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:60,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'reconcile',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const source = 'https://vm.tiktok.com/ZN8kT85EE/';
+  await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').fill(source);
+  await frame.getByRole('button', { name: 'Find my next idea' }).click();
+  await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).waitFor();
+  const calls = await frame.evaluate(() => window.calls.filter(call => call.name !== 'list_riff_work'));
+  assert.deepEqual(calls.map(call => call.name), ['start_riff_creator', 'get_riff_creator_start']);
+  assert.deepEqual(calls[1].args, calls[0].args, 'reconciliation uses the exact request ID and source input');
+});
+
+test('Riff Home preserves a definitely absent intent and maps returned application failures', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.starts=[]; window.lookups=[];
+    const failure=(code,recovery)=>({structuredContent:{ok:false,error:{code,message:'fixture detail',retryable:false,recovery}}});
+    window.openai={callTool:async(name,args)=>{
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='get_riff_creator_start'){window.lookups.push(args);return failure('NOT_FOUND','reload');}
+      if(name==='start_riff_creator'){
+        window.starts.push(args);
+        if(window.starts.length===1)return new Promise(()=>{});
+        if(window.starts.length===2)return failure('FORBIDDEN','contact_support');
+        return failure('VALIDATION_ERROR','correct_input');
+      }
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:60,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'absent',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const submit = frame.getByRole('button', { name: 'Find my next idea' });
+  const source = 'https://vm.tiktok.com/ZN8kT85EE/';
+  await input.fill(source); await submit.click();
+  await frame.getByText(/was not saved|did not save/i).waitFor();
+  assert.equal(await input.inputValue(), source);
+  assert.equal(await frame.evaluate(() => window.starts.length), 1);
+  await frame.waitForTimeout(120);
+  assert.equal(await frame.evaluate(() => window.starts.length), 1, 'a NOT_FOUND lookup never resubmits a start automatically');
+  await submit.click();
+  await frame.getByText(/development access or trial allowance/i).waitFor();
+  let starts = await frame.evaluate(() => window.starts);
+  assert.equal(starts[0].request_id, starts[1].request_id, 'explicit retry reuses the absent logical request ID');
+  assert.doesNotMatch(await frame.getByRole('status').textContent(), /unrecognized|public TikTok|could not confirm/i);
+  const invalid = 'https://www.tiktok.com/@fixture/video/7000000000000000002';
+  await input.fill(invalid); await submit.click();
+  await frame.getByText(/Use a public TikTok video or creator-profile link/i).waitFor();
+  starts = await frame.evaluate(() => window.starts);
+  assert.notEqual(starts[1].request_id, starts[2].request_id);
+});
+
+test('Riff Home safely maps host-rejected allowance and validation failures without exception text', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:200,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.starts=0;window.lookups=0;window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      const failure=(code,recovery)=>({structuredContent:{ok:false,error:{code,message:'server-only detail',retryable:false,recovery}}});
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'rejected-errors',version:'1'},hostCapabilities:{serverTools:{}},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');window.ready=true;
+        }
+        if(m.method==='tools/call'&&m.params.name==='list_riff_work')return frame().postMessage({jsonrpc:'2.0',id:m.id,result:{content:[],structuredContent:{ok:true,data:{work:[]}}}},'*');
+        if(m.method==='tools/call'&&m.params.name==='get_riff_creator_start'){window.lookups++;return;}
+        if(m.method==='tools/call'&&m.params.name==='start_riff_creator'){
+          window.starts++;const code=window.starts===1?'FORBIDDEN':'VALIDATION_ERROR';const recovery=window.starts===1?'contact_support':'correct_input';
+          return frame().postMessage({jsonrpc:'2.0',id:m.id,error:{code:-32603,message:'SECRET host exception text',data:failure(code,recovery)}},'*');
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const submit = frame.getByRole('button', { name: 'Find my next idea' });
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000001'); await submit.click();
+  await frame.getByText(/development access or trial allowance/i).waitFor();
+  assert.doesNotMatch(await frame.getByRole('status').textContent(), /SECRET|could not confirm|public TikTok/i);
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000002'); await submit.click();
+  await frame.getByText(/Use a public TikTok video or creator-profile link/i).waitFor();
+  assert.doesNotMatch(await frame.getByRole('status').textContent(), /SECRET|could not confirm/i);
+  assert.equal(await page.evaluate(() => window.lookups), 0, 'definite application failures never enter ambiguous recovery');
+});
+
+test('Riff Home does not carry an ambiguous request ID across an account change', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.starts=[];window.lookups=0;
+    window.openai={callTool:async(name,args)=>{
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='get_riff_creator_start'){window.lookups++;return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};}
+      if(name==='start_riff_creator'){
+        window.starts.push(args);
+        if(window.starts.length===1)return new Promise(()=>{});
+        return {structuredContent:{ok:false,error:{code:'VALIDATION_ERROR',message:'Invalid',retryable:false,recovery:'correct_input'}}};
+      }
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:90,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      const account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      window.changeAccount=()=>account('00000000-0000-4000-8000-000000000002');
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'account-change',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){account('00000000-0000-4000-8000-000000000001');window.ready=true;}
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const submit = frame.getByRole('button', { name: 'Find my next idea' });
+  const source = 'https://vm.tiktok.com/ZN8kT85EE/';
+  await input.fill(source); await submit.click();
+  await frame.waitForFunction(() => window.starts.length === 1);
+  await page.evaluate(() => window.changeAccount());
+  await frame.waitForFunction(() => !document.querySelector('.riff-home__submit')?.disabled);
+  await submit.click(); await frame.getByText(/Use a public TikTok video or creator-profile link/i).waitFor();
+  const starts = await frame.evaluate(() => window.starts);
+  assert.notEqual(starts[0].request_id, starts[1].request_id);
+  assert.equal(await frame.evaluate(() => window.lookups), 0, 'the old account pending start is not reconciled under the new account');
+});
+
 test('Riff Home ignores an older start response after a newer creator intent wins', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';

@@ -149,6 +149,11 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
       ui: { resourceUri: CREATOR_PIPELINE_URI } as { resourceUri: string } | undefined,
     },
     {
+      name: 'get_riff_creator_start', operation: 'get_riff_creator_start' as const, title: 'Recover creator analysis start',
+      description: 'Read the signed-in account’s exact saved creator start by its original request ID and source URL. Provider-free and read-only: it never starts, retries, refills, dispatches, or spends provider allowance.',
+      ui: undefined as { resourceUri: string } | undefined,
+    },
+    {
       name: 'list_riff_work', operation: 'list_riff_work' as const, title: 'List recent Riff work',
       description: 'List the signed-in account’s recent saved Riff creator jobs for Home. Reads owned summaries only; it does not call providers, start work, or spend credits.',
       ui: undefined as { resourceUri: string } | undefined,

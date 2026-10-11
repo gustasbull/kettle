@@ -71,6 +71,17 @@ export function createRiffCreatorOperations(
     }
     const parsed = StartRiffCreatorInput.safeParse(rawInput);
     if (!parsed.success) return failure('VALIDATION_ERROR');
+    if (operation === 'get_riff_creator_start') {
+      try {
+        return projectStored(
+          StoredRiffCreatorOutput.parse(await repository.find(identity.account_id, parsed.data)),
+          identity.account_id,
+          parsed.data,
+        );
+      } catch {
+        return failure('UNAVAILABLE');
+      }
+    }
     if (!isEnabled()) return failure('UNAVAILABLE');
 
     try {

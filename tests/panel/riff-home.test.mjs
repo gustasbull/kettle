@@ -88,12 +88,16 @@ test('Riff Home reproduces the Paper Home surface without app-owned chrome', asy
       kind: 'start', source: 'https://vm.tiktok.com/ZN8kT9uhV/',
     });
     assert.match(await page.getByRole('status').textContent(), /Analysis started/);
+    assert.equal(await creatorInput.inputValue(), 'https://vm.tiktok.com/ZN8kT9uhV/',
+      'the typed source remains until a saved job is visibly mounted');
 
     await page.evaluate(() => window.view.showJob(window.fixture('video-analysis')));
     assert.equal(await page.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).count(), 1);
     assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 0);
     await page.evaluate(() => window.view.showHome());
     assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 1);
+    assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').inputValue(), '',
+      'mounting the saved job clears the completed source intent');
     await page.close();
   }
 });

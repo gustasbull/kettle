@@ -11,6 +11,8 @@ export const RiffCreatorDevelopmentPolicy = z.strictObject({
 });
 export type RiffCreatorDevelopmentPolicy = z.infer<typeof RiffCreatorDevelopmentPolicy>;
 
+type RiffCreatorStorageOperation = 'get_riff_creator_start' | 'start_riff_creator' | 'list_riff_work';
+
 export function createRiffCreatorSupabaseRepository(
   baseUrl: string,
   serviceRoleKey: string,
@@ -20,7 +22,7 @@ export function createRiffCreatorSupabaseRepository(
   createSupabaseRepository(baseUrl, serviceRoleKey, fetcher);
   const policy = RiffCreatorDevelopmentPolicy.parse(rawPolicy);
   const call = async (
-    operation: 'get_riff_creator_start' | 'start_riff_creator' | 'list_riff_work',
+    operation: RiffCreatorStorageOperation,
     accountId: string,
     input: unknown,
   ) => {

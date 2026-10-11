@@ -29,6 +29,7 @@ type ScriptResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'scri
 
 export type RiffHomeActions = {
   start(source: string): Promise<RiffActionResult>;
+  inputChanged?: (source: string) => void;
   send: RiffPanelAction;
   upload?: () => Promise<RiffActionResult>;
   showWelcome?: () => Promise<RiffActionResult>;
@@ -308,6 +309,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) form.requestSubmit();
   });
+  input.addEventListener('input', () => actions.inputChanged?.(input.value));
   upload.addEventListener('click', () => void invoke(
     actions.upload ?? (() => actions.send('I want to analyze a video with Riff. Help me attach it through ChatGPT, and do not claim it was uploaded until the host confirms the file.')),
     'Opening the ChatGPT file picker…',
@@ -373,6 +375,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     showJob(job) {
       if (disposed) return;
       invocationEpoch++;
+      input.value = '';
       home.remove(); workflow.hidden = false;
       pipeline ??= mountCreatorPipeline(workflowRoot, {
         displayMode: 'fullscreen', sendPrompt: actions.send,
