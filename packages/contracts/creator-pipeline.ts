@@ -48,9 +48,11 @@ export const TimedFilmingSegment = z.strictObject({
   start_seconds: z.number().finite().nonnegative().max(180),
   end_seconds: z.number().finite().positive().max(180),
   spoken_text: text(4000), filming_direction: text(3000), on_screen_text: text(1000).optional(),
+  reference_ids: z.array(Id).min(1).max(3).refine(ids => new Set(ids).size === ids.length, 'Segment reference IDs must be unique')
+    .meta({ uniqueItems: true }).optional(),
 }).refine(segment => segment.end_seconds > segment.start_seconds, 'Timed segment must end after it starts');
 const Hashtag = z.string().trim().regex(/^#[\p{L}\p{N}_]{1,100}$/u);
-export const FilmingVariant = z.strictObject({
+const FilmingVariantShape={
   id: Id, label: z.enum(['Reference-led','Creator Fit','Experimental']),
   hook: text(2000), opening_visual: text(2000), script: text(12000),
   shots: z.array(text(2000)).min(1).max(30), b_roll: z.array(text(2000)).max(30),
@@ -59,7 +61,16 @@ export const FilmingVariant = z.strictObject({
   timed_segments: z.array(TimedFilmingSegment).min(1).max(10).optional(),
   caption: text(3000).optional(), hashtags: z.array(Hashtag).max(30).optional(),
   reference_ids: z.array(Id).min(1).max(3), limitations: z.array(text(1000)).max(20),
-});
+};
+const validateVariantLineage=(variant:{reference_ids:string[];timed_segments?:Array<z.infer<typeof TimedFilmingSegment>>},ctx:z.RefinementCtx)=>{
+  const variantReferenceIds=new Set(variant.reference_ids);
+  if(variant.timed_segments?.some(segment=>segment.reference_ids?.some(id=>!variantReferenceIds.has(id)))){
+    ctx.addIssue({code:'custom',message:'Timed segments must cite their own variant evidence'});
+  }
+};
+export const FilmingVariant = z.strictObject(FilmingVariantShape).superRefine(validateVariantLineage);
+const {id:_filmingVariantId,...SavableFilmingVariantShape}=FilmingVariantShape;
+export const SavableFilmingVariant=z.strictObject(SavableFilmingVariantShape).superRefine(validateVariantLineage);
 export const CreatorScriptSet = z.strictObject({
   id: Id, batch_id: Id, idea_id: Id, dna_id: Id, dna_version: z.number().int().positive(),
   version: z.literal(1), created_at: Timestamp, variants: z.array(FilmingVariant).min(2).max(3),
@@ -88,7 +99,7 @@ export const StartCreatorScanInput = z.strictObject({project_id:Id,request_id:Id
     && /^\/@[\w.]+\/video\/\d{1,30}$/.test(new URL(v.seed_url).pathname), 'Seed video must belong to the requested profile');
 export const StartCreatorRecommendationsInput = z.strictObject({dna_id:Id,expected_version:z.number().int().positive(),request_id:Id});
 export const StartCreatorScriptsInput = z.strictObject({batch_id:Id,idea_id:Id,request_id:Id});
-export const SaveCreatorScriptsInput = StartCreatorScriptsInput.extend({variants:z.array(FilmingVariant.omit({id:true})).min(2).max(3)});
+export const SaveCreatorScriptsInput = StartCreatorScriptsInput.extend({variants:z.array(SavableFilmingVariant).min(2).max(3)});
 export const GetCreatorJobInput = z.strictObject({job_id:Id});
 export const GetCreatorJobStatusInput = z.strictObject({job_id:Id});
 export const CreatorJobStage = z.enum(['accepted','reviewing_video','reading_profile','reading_posts',

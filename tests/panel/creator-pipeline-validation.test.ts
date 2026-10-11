@@ -216,6 +216,45 @@ test('script timing, hashtags, unique variants and persisted lineage match the s
   assert.ok(parseCreatorJobOutput(boundary),'contract-valid text boundaries remain accepted');
 });
 
+test('segment reference lineage is optional, bounded, unique and scoped to its own variant at both strict boundaries',()=>{
+  const contextual=()=>{
+    const raw=structuredClone(envelope('scripts')) as any;
+    const scripts=raw.data.job.result.scripts;
+    const batch=recommendationBatchFixture();
+    const first=batch.references[0]!;
+    const second={...structuredClone(first),id:id(699),native_id:'9000000000000000699',
+      url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000699'};
+    scripts.idea={...structuredClone(batch.ideas[0]!),reference_ids:[first.id,second.id]};
+    scripts.references=[structuredClone(first),second];
+    scripts.variants[0].reference_ids=[first.id];
+    scripts.variants[1].reference_ids=[second.id];
+    scripts.variants[0].timed_segments=[{part:'hook',start_seconds:0,end_seconds:3,spoken_text:'A grounded hook.',
+      filming_direction:'Open on the result.',reference_ids:[first.id]}];
+    return raw;
+  };
+  const accepted=contextual();
+  assert.equal(CreatorJobOutput.safeParse(accepted).success,true,'authoritative contract accepts known segment lineage');
+  assert.ok(parseCreatorJobOutput(accepted),'public projection accepts known segment lineage');
+  const legacy=contextual();delete legacy.data.job.result.scripts.variants[0].timed_segments[0].reference_ids;
+  assert.equal(CreatorJobOutput.safeParse(legacy).success,true,'historical omitted lineage stays valid');
+  assert.ok(parseCreatorJobOutput(legacy),'public projection keeps historical omitted lineage');
+
+  const cases:Array<[string,(value:any)=>void]>=[
+    ['duplicate IDs',value=>{const id=value.data.job.result.scripts.variants[0].reference_ids[0];value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=[id,id];}],
+    ['empty IDs',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=[];}],
+    ['excess IDs',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=[id(1),id(2),id(3),id(4)];}],
+    ['malformed ID',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=['not-an-id'];}],
+    ['foreign script ID',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=[id(998)];}],
+    ['other variant ID',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].reference_ids=[value.data.job.result.scripts.variants[1].reference_ids[0]];}],
+    ['unknown segment key',value=>{value.data.job.result.scripts.variants[0].timed_segments[0].source_ids=value.data.job.result.scripts.variants[0].reference_ids;}],
+  ];
+  for(const [name,mutate] of cases){
+    const raw=contextual();mutate(raw);
+    assert.equal(CreatorJobOutput.safeParse(raw).success,false,`${name}: authoritative contract`);
+    assert.equal(parseCreatorJobOutput(raw),undefined,`${name}: public projection`);
+  }
+});
+
 test('structured results alone are accepted and Riff start output projects only the job',()=>{
   const started=validStartOutput();
   assert.deepEqual(creatorJobStructuredOutput({structuredContent:started}),{ok:true,data:{job:started.data.job}});

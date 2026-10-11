@@ -243,6 +243,8 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let discoveryLibrary: RiffDiscoveryLibrary = 'videos';
   let discoveryFilter = 'For you';
   let studioTab = 0;
+  let studioVariantId:string|undefined;
+  let studioPlatform:'tiktok'|'reels'='tiktok';
   let catalogIndex=0;
   let catalogActiveId:string|undefined;
   let catalogScopeKey:string|undefined;
@@ -776,9 +778,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       if(hasStats)media.append(stats);
       article.append(media);if(delta===0){if(card.caption)article.append(el('p',card.caption,'riff-idea-title'));
         const sourceDate=card.source_observed_at??card.observed_at;const provenance=el('p',`${card.origin==='fixture'?'Fixture reference':'Saved reference'} · observed ${new Date(sourceDate).toLocaleDateString('en',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'})}`,'riff-catalog-provenance');article.append(provenance);
-        const intent=catalogProposalIntent(card,discoveryLibrary,discoveryFilter);const action=button(view.action,'riff-button riff-button--primary',()=>void run(()=>options.proposeCatalogReference
-          ? options.proposeCatalogReference({card:structuredClone(card),library:discoveryLibrary,filter:discoveryFilter,intent,...(studioExplore?.library===discoveryLibrary?{studioExplore:structuredClone(studioExplore)}:{})})
-          : sendPrompt(intent)),'catalog-proposal');article.append(el('div',undefined,'riff-idea-actions'));article.lastElementChild!.append(action);}
+        const intent=catalogProposalIntent(card,discoveryLibrary,discoveryFilter);const action=button(view.action,'riff-button riff-button--primary',()=>void run(async()=>{
+          const context=studioExplore?.library===discoveryLibrary?structuredClone(studioExplore):undefined;
+          const result=options.proposeCatalogReference
+            ? await options.proposeCatalogReference({card:structuredClone(card),library:discoveryLibrary,filter:discoveryFilter,intent,...(context?{studioExplore:context}:{})})
+            : await sendPrompt(intent);
+          return context?{...result,message:`${result.message} The current persisted script remains unchanged.`}:result;
+        }),'catalog-proposal');article.append(el('div',undefined,'riff-idea-actions'));article.lastElementChild!.append(action);}
       stage.append(article);
     });
     carousel.append(stage);const navigation=el('div',undefined,'riff-carousel-navigation');
@@ -789,14 +795,20 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if(hadFocus)([...content.querySelectorAll<HTMLElement>('[data-focus]')].find(node=>node.dataset.focus===focusKey)??headingGroup.heading).focus({preventScroll:true});
   }
 
-  function scriptPart(label: string, copy: string, tip?: string) {
+  function scriptPart(label: string, copy: string, tip?: string, onScreenText?:string, legacy=false) {
     const part = el('article', undefined, 'riff-script-part'); part.append(el('h3', label));
     const body = el('div', undefined, 'riff-script-part__body'); body.append(el('p', copy));
-    if (tip) { const note = el('div', undefined, 'riff-filming-tip'); note.append(bulbIcon(), el('p', tip)); body.append(note); }
+    if (tip) { const note = el('div', undefined, `riff-filming-tip${legacy?' riff-filming-tip--legacy':''}`); note.append(bulbIcon(), el('p', legacy?`General filming guidance: ${tip}`:tip)); body.append(note); }
+    if(onScreenText){const note=el('p',undefined,'riff-on-screen-text');note.append(el('strong','On-screen text: '),doc.createTextNode(onScreenText));body.append(note);}
     part.append(body); return part;
   }
 
   const formatSeconds = (seconds: number) => Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1).replace(/\.0$/, '');
+  const formatClock=(seconds:number)=>{
+    const minutes=Math.floor(seconds/60);const remainder=seconds-minutes*60;
+    const formatted=Number.isInteger(remainder)?String(remainder).padStart(2,'0'):remainder.toFixed(1).padStart(4,'0');
+    return `${minutes}:${formatted}`;
+  };
 
   function renderStudio(job: CreatorJobView & { result: { kind: 'scripts' } }) {
     const scripts = job.result.scripts;
@@ -807,26 +819,33 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       setStatus('Studio ready.'); return heading;
     }
     screen('studio');
-    const variant = scripts.variants[0]!;
-    const reference = scripts.references?.find(item => variant.reference_ids.includes(item.id));
+    const variant=scripts.variants.find(item=>item.id===studioVariantId)??scripts.variants[0]!;
+    studioVariantId=variant.id;
+    const completeReferences=(scripts.references??[]).filter(item=>variant.reference_ids.includes(item.id));
     const header = el('header', undefined, 'riff-studio-header');
     const { group, heading } = title('Your script, ready to film.', 'riff-studio-title');
-    if (scripts.idea?.title) group.append(el('p', `${scripts.idea.title}${reference?.platform === 'tiktok' ? ' · TikTok' : ''}`, 'riff-studio-subtitle'));
+    if (scripts.idea?.title) group.append(el('p', `${scripts.idea.title}${completeReferences.some(item=>item.platform==='tiktok')?' · TikTok':''}`, 'riff-studio-subtitle'));
     header.append(group);
     const studioActions = actions(
-      button('Save for later', 'riff-button', () => void run(() => options.setVariantState
-        ? options.setVariantState({ job, scripts, variant, state: 'saved' })
-        : sendPrompt(`Help me save the ${variant.label} script for later in ChatGPT. Riff has not saved this action because no save-state tool is available.`)), 'save-later'),
-      button('I filmed it', 'riff-button riff-button--primary', () => void run(() => options.setVariantState
-        ? options.setVariantState({ job, scripts, variant, state: 'filmed' })
-        : sendPrompt(`I filmed the ${variant.label} script. Record that acknowledgement in ChatGPT only; it is not persisted in Riff because no filmed-state tool is available.`)), 'filmed-it'),
+      button('Save for later', 'riff-button', () => void run(async()=>{const result=await sendPrompt(`Help me save the ${variant.label} script for later. This Task 6 handoff is not persisted in Riff because no save-state tool is available; do not claim success.`);return {...result,message:`${result.message} This action is not persisted in Riff.`};}), 'save-later'),
+      button('I filmed it', 'riff-button riff-button--primary', () => void run(async()=>{const result=await sendPrompt(`I filmed the ${variant.label} script. This acknowledgement is not persisted in Riff because no filmed-state tool is available; do not claim a saved, published, or verified milestone.`);return {...result,message:`${result.message} This milestone is not persisted in Riff.`};}), 'filmed-it'),
     );
     studioActions.classList.add('riff-studio-actions'); studioActions.setAttribute('role', 'group'); studioActions.setAttribute('aria-label', 'Studio actions');
     header.append(studioActions); content.append(header);
+    const variantSelector=el('div',undefined,'riff-studio-variants');variantSelector.setAttribute('role','radiogroup');variantSelector.setAttribute('aria-label','Script variant');
+    scripts.variants.forEach((candidate,index)=>{
+      const selected=candidate.id===variant.id;
+      const control=button(candidate.label,'riff-studio-variant',()=>{studioVariantId=candidate.id;render(job);},`studio-variant-${candidate.id}`);
+      control.setAttribute('role','radio');control.setAttribute('aria-checked',String(selected));control.tabIndex=selected?0:-1;control.dataset.variant=candidate.id;
+      control.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;event.preventDefault();
+        const target=event.key==='Home'?0:event.key==='End'?scripts.variants.length-1:
+          (index+(event.key==='ArrowRight'?1:-1)+scripts.variants.length)%scripts.variants.length;
+        studioVariantId=scripts.variants[target]!.id;render(job);
+      });variantSelector.append(control);
+    });
+    content.append(variantSelector);
     const shell = el('section', undefined, 'riff-studio-shell');
-    const shellMeta = el('div', undefined, 'riff-studio-shell__meta');
-    shellMeta.append(el('h2', 'Your references & script'), el('p', `${formatSeconds(variant.estimated_duration_seconds)} seconds · 3 parts`));
-    shell.append(shellMeta);
+    if(studioTab>=2)shell.classList.add('riff-studio-shell--part');
     const tabNames = ['Full video', 'Hook', 'Main content', 'CTA'] as const;
     const tabs = el('div', undefined, 'riff-studio-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Script components');
     const tabControls: HTMLButtonElement[] = [];
@@ -842,47 +861,76 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       tabControls.push(tab); tabs.append(tab);
     });
     shell.append(tabs);
+    const partOrder = ['hook', 'main_content', 'cta'] as const;
+    const partLabels = { hook: 'Hook', main_content: 'Main content', cta: 'CTA' } as const;
+    const visiblePart = studioTab === 1 ? 'hook' : studioTab === 2 ? 'main_content' : studioTab === 3 ? 'cta' : undefined;
+    const visibleParts: readonly (typeof partOrder[number])[] = visiblePart ? [visiblePart] : partOrder;
+    const visibleSegments=(variant.timed_segments??[]).filter(segment=>visibleParts.includes(segment.part));
+    const lineageIds=[...new Set(visibleSegments.flatMap(segment=>segment.reference_ids??[]))];
+    const resolvedIds=lineageIds.length?lineageIds:variant.reference_ids;
+    const resolvedReferences=resolvedIds.flatMap(id=>scripts.references?.find(reference=>reference.id===id)??[]);
+    const reference=resolvedReferences[0];
+    const timingSegments=studioTab===0&&new Set(visibleSegments.map(segment=>segment.part)).size!==partOrder.length?[]:visibleSegments;
+    const timingRange=timingSegments.length?{
+      start:Math.min(...timingSegments.map(segment=>segment.start_seconds)),
+      end:Math.max(...timingSegments.map(segment=>segment.end_seconds)),
+    }:undefined;
     const body = el('div', undefined, 'riff-studio-body');
     const player = safeLink(reference?.url, 'Open reference video', 'riff-studio-player');
     const preview = mediaImage(reference?.thumbnail_url, 'Reference video preview', 'riff-media-image'); if (preview) player.append(preview);
-    player.append(el('span', studioTab === 0 ? 'Main format' : `Reference · ${tabNames[studioTab]}`, 'riff-studio-player__label'));
-    const play = el('span', undefined, 'riff-studio-player__play'); play.append(playIcon(true)); player.append(play);
-    const minutes = Math.floor(variant.estimated_duration_seconds / 60);
-    const seconds = Math.round(variant.estimated_duration_seconds % 60).toString().padStart(2, '0');
-    player.append(el('span', `0:00 / ${minutes}:${seconds}`, 'riff-studio-player__time')); body.append(player);
+    else{player.classList.add('riff-studio-player--unavailable');const unavailableCopy=el('span',reference?'Preview unavailable':'Reference media unavailable','riff-studio-player__unavailable');unavailableCopy.setAttribute('role','status');player.append(unavailableCopy);}
+    const playerPart=studioTab===1?'Hook':studioTab===2?'Main content':'CTA';
+    player.append(el('span', studioTab === 0 ? 'Main format' : `Reference · ${playerPart}`, 'riff-studio-player__label'));
+    if(reference){const play = el('span', undefined, 'riff-studio-player__play'); play.append(playIcon(true)); player.append(play);}
+    player.append(el('span', timingRange?`${formatClock(timingRange.start)} / ${formatClock(timingRange.end)}`:'Timing unavailable', 'riff-studio-player__time')); body.append(player);
     const panel = el('section', undefined, 'riff-studio-panel'); panel.id = 'riff-studio-panel'; panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', `riff-studio-tab-${studioTab}`);
     const panelHeader = el('div', undefined, 'riff-studio-panel__header');
-    const panelTitles = ['Your complete video', 'Your hook', 'Your main content', 'Your CTA']; panelHeader.append(el('h2', panelTitles[studioTab]!));
+    const panelTitles = ['Your complete video', 'Your hook', 'Your main content', 'Your call to action']; panelHeader.append(el('h2', panelTitles[studioTab]!));
     const exploreLibraries:readonly RiffDiscoveryLibrary[]=['videos','hooks','showcases','ctas'];
     const exploreParts:readonly RiffStudioExploreIntent['part'][]=['full','hook','main_content','cta'];
-    const exploreLabels=['Explore videos','Explore hooks','Explore showcases','Explore CTAs'] as const;
+    const exploreLabels=['Explore videos','Explore hooks','Explore main content','Explore CTAs'] as const;
     const subject = scripts.idea?.title ? `“${scripts.idea.title}”` : 'my current Riff video';
     panelHeader.append(button(exploreLabels[studioTab]!, 'riff-button', () => {
-      const library=exploreLibraries[studioTab]!;const prompt=`Explore ${library==='showcases'?'product showcases':library} for ${subject}. Keep the current script unchanged until I explicitly choose an adaptation.`;
+      const library=exploreLibraries[studioTab]!;const prompts:Record<RiffStudioExploreIntent['part'],string>={
+        full:`Draft a complete-video adaptation for ${subject}. Keep the current script unchanged until I explicitly choose the proposal.`,
+        hook:`Draft only a hook for ${subject}; preserve the persisted main content and CTA. Keep the current script unchanged.`,
+        main_content:`Draft only the main content or product demonstration for ${subject}; preserve the persisted hook and CTA. Keep the current script unchanged.`,
+        cta:`Draft only the ending for ${subject}; preserve the persisted hook and main content. Keep the current script unchanged.`,
+      };const part=exploreParts[studioTab]!;const prompt=prompts[part];
       enterDiscovery(true,job.project_id,true);studioExplore={source:'studio',part:exploreParts[studioTab]!,library,prompt,currentScriptUnchanged:true};
       discoveryLibrary=library;discoveryFilter=discoveryLibraryViews[library].filters[0];renderCatalogDiscovery();
     }, `explore-${studioTab}`));
     panel.append(panelHeader);
     const mainTip = [...variant.shots, ...variant.b_roll, ...variant.on_screen_text, variant.showcase_timing, variant.pacing].join(' · ');
-    const partOrder = ['hook', 'main_content', 'cta'] as const;
-    const partLabels = { hook: 'Hook', main_content: 'Main content', cta: 'CTA' } as const;
-    const visiblePart = studioTab === 1 ? 'hook' : studioTab === 2 ? 'main_content' : studioTab === 3 ? 'cta' : undefined;
     const appendFallback = (part: typeof partOrder[number]) => {
-      if (part === 'hook') panel.append(scriptPart('Hook', variant.hook, variant.opening_visual));
-      else if (part === 'main_content') panel.append(scriptPart('Main content', variant.script, mainTip));
+      if (part === 'hook') panel.append(scriptPart('Hook', variant.hook, variant.opening_visual,undefined,true));
+      else if (part === 'main_content') panel.append(scriptPart('Main content', variant.script, mainTip,undefined,true));
       else panel.append(scriptPart('CTA', variant.cta));
     };
-    const visibleParts: readonly (typeof partOrder[number])[] = visiblePart ? [visiblePart] : partOrder;
     for (const part of visibleParts) {
       const timed = variant.timed_segments?.filter(segment => segment.part === part) ?? [];
       if (!timed.length) { appendFallback(part); continue; }
       timed.forEach(segment => panel.append(scriptPart(
         `${partLabels[segment.part]} · ${formatSeconds(segment.start_seconds)}–${formatSeconds(segment.end_seconds)}s`,
         segment.spoken_text,
-        `${segment.filming_direction}${segment.on_screen_text ? ` Caption: ${segment.on_screen_text}` : ''}`,
+        segment.filming_direction,
+        segment.on_screen_text,
       )));
     }
     body.append(panel); shell.append(body); content.append(shell);
+    const references=el('section',undefined,'riff-studio-references');references.setAttribute('aria-label','References');references.append(el('h2','References'));
+    if(!resolvedReferences.length){const missing=el('p','Reference details unavailable for this script.','riff-studio-references__unavailable');missing.setAttribute('role','status');references.append(missing);}
+    else resolvedReferences.forEach((item,index)=>{
+      const link=safeLink(item.url,`Open reference ${index+1}`,'riff-studio-reference');
+      link.append(el('strong',item.caption?.trim()||`Reference ${index+1}`));
+      const date=item.source_observed_at??item.retrieved_at;
+      const dateLabel=new Date(date).toLocaleDateString('en',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'});
+      link.append(el('span',`${item.origin==='fixture'?'Fixture reference':'Saved reference'} · ${item.source_observed_at?`observed ${dateLabel}`:`retrieved ${dateLabel}; source observation unavailable`}`));
+      link.append(el('span',item.permission_basis));
+      item.limitations.forEach(limitation=>link.append(el('span',limitation)));
+      references.append(link);
+    });
+    content.append(references);
     if (variant.caption || variant.hashtags?.length) {
       const caption = el('section', undefined, 'riff-studio-caption');
       const captionHeader = el('div', undefined, 'riff-studio-caption__header'); captionHeader.append(el('h2', 'Caption'));
@@ -893,7 +941,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         void clipboard.writeText(copyText).then(() => setStatus('Caption copied.'), () => setStatus('Copy the caption directly from Studio.'));
       }, 'copy-caption');
       copy.setAttribute('aria-label', 'Copy caption'); copy.append(copyIcon()); captionHeader.append(copy); caption.append(captionHeader);
-      if (reference?.platform === 'tiktok') captionHeader.append(el('span', 'TikTok', 'riff-caption-platform'));
+      const platforms=el('div',undefined,'riff-caption-platforms');platforms.setAttribute('role','group');platforms.setAttribute('aria-label','Caption format guidance');
+      (['tiktok','reels'] as const).forEach(platform=>{const label=platform==='tiktok'?'TikTok':'Reels';const selected=studioPlatform===platform;
+        const control=button(label,'riff-caption-platform',()=>{studioPlatform=platform;render(job);setStatus(`${label} local format guidance selected. This local format guidance is not saved or published; the persisted script, caption, and reference attribution are unchanged.`);},`studio-platform-${platform}`);
+        control.setAttribute('aria-pressed',String(selected));platforms.append(control);});captionHeader.append(platforms);
       if (variant.caption) caption.append(el('p', variant.caption, 'riff-studio-caption__copy'));
       if (variant.hashtags?.length) caption.append(el('p', variant.hashtags.join(' '), 'riff-studio-caption__hashtags'));
       content.append(caption);
@@ -910,7 +961,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
     if (!same) {
-      ideaIndex = 0; catalogIndex=0;catalogActiveId=undefined;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;studioExplore=undefined;
+      ideaIndex = 0; catalogIndex=0;catalogActiveId=undefined;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;studioVariantId=undefined;studioPlatform='tiktok';sourceUrl=undefined;studioExplore=undefined;
       if(current?.project_id!==job.project_id){catalogState={status:'loading'};catalogScopeKey=undefined;}
     }
     if(!preserveStudioCatalog)studioExplore=undefined;
@@ -948,6 +999,6 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     leaveCatalog,
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
-    dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalogState={status:'loading'};sourceUrl=undefined;catalogScopeKey=undefined;catalogActiveId=undefined;studioExplore=undefined;root.replaceChildren(); },
+    dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalogState={status:'loading'};sourceUrl=undefined;catalogScopeKey=undefined;catalogActiveId=undefined;studioExplore=undefined;studioVariantId=undefined;studioPlatform='tiktok';root.replaceChildren(); },
   };
 }

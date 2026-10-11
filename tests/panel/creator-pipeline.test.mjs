@@ -733,7 +733,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     const mappings=[
       ['Full video','Explore videos','Videos','Make it mine','full','videos'],
       ['Hook','Explore hooks','Hooks','Use this hook','hook','hooks'],
-      ['Main content','Explore showcases','Product showcases','Use this showcase','main_content','showcases'],
+      ['Main content','Explore main content','Product showcases','Use this showcase','main_content','showcases'],
       ['CTA','Explore CTAs','CTAs','Use this CTA','cta','ctas'],
     ];
     for(const [studioTab,explore,library,action,part,libraryKey] of mappings){
@@ -798,11 +798,15 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await studioActions.getByRole('button').count(), 2);
     assert.equal(await studioActions.getByRole('button', { name: 'Save for later' }).count(), 1);
     assert.equal(await studioActions.getByRole('button', { name: 'I filmed it' }).count(), 1);
-    assert.equal(await root.locator('[data-variant]').count(), 0, 'Paper does not show invented variant chips');
+    assert.equal(await root.getByRole('radiogroup',{name:'Script variant'}).count(),1,
+      'the real persisted variants have one compact non-Paper local selector');
+    assert.equal(await root.getByRole('radio').count(),2);
     for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab, exact: true }).count(), 1);
     assert.deepEqual(await root.locator('.riff-studio-player').evaluate(node => {
       const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
     }), { width: '240px', height: '427px', radius: '16px' });
+    assert.equal(await root.locator('.riff-studio-player__unavailable').textContent(),'Reference media unavailable');
+    assert.equal(await root.locator('.riff-studio-references__unavailable').filter({hasText:'Reference details unavailable for this script.'}).count(),1);
     assert.equal(await root.locator('.riff-script-part').count(), 3);
     const text = await root.locator('.riff-pipeline__content').textContent();
     assert.doesNotMatch(text, /Caption.*not available|publishing fields|Variant limitations|Script set limitations|Captured DNA|DNA ID|Create a video/i);
@@ -823,26 +827,32 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       ];
       variant.caption = 'Still rereading the same page? Try one question before you read it again.';
       variant.hashtags = ['#studytips', '#studytok', '#learning'];
-      window.job.result.scripts.idea = { title: 'The one-question study reset' };
+      window.job.result.scripts.idea = { id:window.job.result.scripts.idea_id,title: 'The one-question study reset',concept:'Authored fixture concept.',
+        creator_fit:'Authored fixture fit.',evidence_summary:'Authored fixture evidence.',execution:'Authored fixture execution.',
+        reference_ids:[variant.reference_ids[0]],limitations:[] };
       window.job.result.scripts.references = [{
         id: variant.reference_ids[0],
         platform: 'tiktok',
+        native_id:'9000000000000000011',
         url: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',
         thumbnail_url: 'https://p16-sign.tiktokcdn.com/riff-studio-reference.jpeg',
+        retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,published_at:null,caption:'Authored fixture reference',views:null,
+        origin:'fixture',permission_basis:'Authored fixture permission.',limitations:[],
       }];
       window.view.render(window.job);
     });
     await root.getByRole('tab', { name: 'Full video', exact: true }).click();
     assert.match(await root.locator('.riff-studio-header').textContent(), /The one-question study reset/);
-    assert.equal(await root.getByRole('heading', { name: 'Your references & script' }).count(), 1);
-    assert.match(await root.locator('.riff-studio-shell__meta').textContent(), /20 seconds · 3 parts/);
+    assert.equal(await root.getByRole('heading', { name: 'Your references & script' }).count(), 0,
+      'the hidden Paper meta heading is not rendered');
     assert.equal(await root.locator('.riff-studio-player').getAttribute('href'), 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011');
     assert.equal(await root.locator('.riff-studio-player > img').getAttribute('src'), 'https://p16-sign.tiktokcdn.com/riff-studio-reference.jpeg');
     assert.match(await root.locator('.riff-script-part').first().textContent(), /Hook · 0–3s/);
     assert.match(await root.locator('.riff-script-part').nth(1).textContent(), /Main content · 3–17s/);
     assert.match(await root.locator('.riff-script-part').nth(2).textContent(), /CTA · 17–22s/);
     assert.equal(await root.getByRole('heading', { name: 'Caption', exact: true }).count(), 1);
-    assert.equal(await root.locator('.riff-caption-platform', { hasText: 'TikTok' }).count(), 1);
+    assert.equal(await root.getByRole('group',{name:'Caption format guidance'}).count(),1);
+    assert.equal(await root.getByRole('button',{name:'TikTok',exact:true}).getAttribute('aria-pressed'),'true');
     assert.match(await root.locator('.riff-studio-caption').textContent(), /Still rereading.*#studytips #studytok #learning/);
 
     await root.getByRole('button', { name: 'Save for later' }).click();
@@ -868,12 +878,114 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       window.view.render(window.job);
     });
     await root.getByRole('tab', { name: 'Full video', exact: true }).click();
-    assert.match(await root.locator('.riff-studio-shell__meta').textContent(), /20 seconds · 3 parts/);
+    assert.match(await root.locator('.riff-studio-player__time').textContent(), /Timing unavailable/);
     assert.equal(await root.locator('.riff-script-part').count(), 3,
       'partial timed data must not erase the persisted main content or CTA');
     assert.match(await root.locator('.riff-script-part').nth(0).textContent(), /Hook · 0–3s.*A persisted timed hook/s);
     assert.match(await root.locator('.riff-script-part').nth(1).textContent(), /Main content.*Here is my current setup/s);
     assert.match(await root.locator('.riff-script-part').nth(2).textContent(), /CTA.*What would you change/s);
+  });
+
+  await t.test('Studio uses ID-keyed variants, actual timings, complete provenance and local-only controls', async () => {
+    await page.evaluate(() => {
+      boot('three-variants','fullscreen');
+      const scripts=window.job.result.scripts;
+      const ids=['00000000-0000-4000-8000-000000000601','00000000-0000-4000-8000-000000000602','00000000-0000-4000-8000-000000000603'];
+      scripts.idea={id:'00000000-0000-4000-8000-000000000602',title:'A fixture-led desk reset',concept:'Fixture concept',creator_fit:'Fixture fit',
+        evidence_summary:'Fixture evidence',execution:'Fixture execution',reference_ids:ids,limitations:[]};
+      scripts.idea_id=scripts.idea.id;
+      scripts.references=ids.map((id,index)=>({id,platform:'tiktok',native_id:`9000000000000000${index+11}`,
+        url:`https://www.tiktok.com/@fictional_studio/video/9000000000000000${index+11}`,retrieved_at:'2026-10-11T12:00:00Z',
+        source_observed_at:index===2?null:`2026-10-11T11:0${index}:00Z`,published_at:null,caption:`Reference ${index+1}`,
+        views:index===0?0:null,origin:'fixture',permission_basis:`Fixture permission ${index+1}`,limitations:index===1?['Media unavailable.']:[],
+        ...(index===0?{thumbnail_url:'https://p16-sign.tiktokcdn.com/studio-a.jpeg'}:{})}));
+      const first=scripts.variants[0];first.reference_ids=ids;first.caption='Persisted caption copy.';first.hashtags=['#fixture','#desk'];
+      first.timed_segments=[
+        {part:'hook',start_seconds:0,end_seconds:1.5,spoken_text:'First hook beat.',filming_direction:'Open on the result.',on_screen_text:'RESULT',reference_ids:[ids[0]]},
+        {part:'hook',start_seconds:1.5,end_seconds:3,spoken_text:'Second hook beat.',filming_direction:'Cut to the old setup.',reference_ids:[ids[1]]},
+        {part:'main_content',start_seconds:3,end_seconds:17,spoken_text:'Persisted main content.',filming_direction:'Show the one useful change.',on_screen_text:'ONE CHANGE',reference_ids:[ids[1]]},
+        {part:'cta',start_seconds:17,end_seconds:22,spoken_text:'Persisted ending.',filming_direction:'Hold on the final desk.'},
+      ];
+      scripts.variants[1].hook='Creator Fit persisted hook.';scripts.variants[1].script='Creator Fit persisted main.';scripts.variants[1].cta='Creator Fit persisted CTA.';
+      scripts.variants[1].reference_ids=[ids[2]];
+      scripts.variants[2].hook='Experimental persisted hook.';scripts.variants[2].script='Experimental persisted main.';scripts.variants[2].cta='Experimental persisted CTA.';
+      scripts.variants[2].reference_ids=[ids[1]];
+      window.studioSnapshot=JSON.stringify(scripts);window.view.render(window.job);
+    });
+    const selector=root.getByRole('radiogroup',{name:'Script variant'});
+    assert.equal(await selector.getByRole('radio').count(),3);
+    assert.equal(await selector.getByRole('radio',{name:'Reference-led'}).getAttribute('aria-checked'),'true');
+    assert.equal(await root.getByRole('heading',{name:'Your complete video'}).count(),1);
+    assert.equal(await root.locator('.riff-script-part').count(),4,'all ordered persisted segments render');
+    assert.equal(await root.locator('.riff-on-screen-text').filter({hasText:'On-screen text: RESULT'}).count(),1);
+    assert.doesNotMatch(await root.locator('.riff-filming-tip').first().textContent(),/RESULT/,'on-screen text is not folded into direction');
+    assert.equal(await root.locator('.riff-studio-player__time').textContent(),'0:00 / 0:22');
+    assert.equal(await root.locator('.riff-studio-player__label').textContent(),'Main format');
+    assert.equal(await root.locator('.riff-studio-reference').count(),2,'full view uses the union of supplied segment lineage');
+    assert.match((await root.locator('.riff-studio-references').textContent()),/Reference 1.*Reference 2/s);
+    assert.doesNotMatch((await root.locator('.riff-studio-references').textContent()),/Reference 3/);
+    assert.equal(await root.locator('.riff-studio-reference').first().getAttribute('rel'),'noopener noreferrer');
+    assert.equal(await root.locator('.riff-studio-reference').first().getAttribute('referrerpolicy'),'no-referrer');
+
+    await root.getByRole('tab',{name:'Hook',exact:true}).click();
+    assert.equal(await root.getByRole('heading',{name:'Your hook'}).count(),1);
+    assert.equal(await root.locator('.riff-script-part').count(),2);
+    assert.equal(await root.locator('.riff-studio-player__label').textContent(),'Reference · Hook');
+    assert.equal(await root.locator('.riff-studio-player__time').textContent(),'0:00 / 0:03');
+    assert.equal(await root.locator('.riff-studio-reference').count(),2);
+    await root.getByRole('tab',{name:'Main content',exact:true}).click();
+    assert.equal(await root.getByRole('heading',{name:'Your main content'}).count(),1);
+    assert.equal(await root.locator('.riff-studio-player__label').textContent(),'Reference · Main content');
+    assert.equal(await root.locator('.riff-studio-player__time').textContent(),'0:03 / 0:17');
+    assert.equal(await root.getByRole('button',{name:'Explore main content'}).count(),1);
+    assert.equal(await root.locator('.riff-studio-reference').count(),1);
+    await root.getByRole('tab',{name:'CTA',exact:true}).click();
+    assert.equal(await root.getByRole('heading',{name:'Your call to action'}).count(),1);
+    assert.equal(await root.locator('.riff-studio-player__label').textContent(),'Reference · CTA');
+    assert.equal(await root.locator('.riff-studio-player__time').textContent(),'0:17 / 0:22');
+    assert.equal(await root.locator('.riff-studio-reference').count(),3,'omitted segment lineage falls back to complete variant references');
+
+    await selector.getByRole('radio',{name:'Creator Fit'}).click();
+    assert.match(await root.locator('[role=tabpanel]').textContent(),/Creator Fit persisted CTA/);
+    assert.equal(await root.locator('.riff-studio-player__time').textContent(),'Timing unavailable');
+    assert.equal(await root.locator('.riff-studio-reference').count(),1);
+    assert.equal(await page.evaluate(()=>JSON.stringify(window.job.result.scripts)===window.studioSnapshot),true,'local variant choice never mutates persisted data');
+    await page.evaluate(()=>{window.job.result.scripts.variants=window.job.result.scripts.variants.filter(item=>item.label!=='Creator Fit');window.view.render(window.job);});
+    assert.equal(await selector.getByRole('radio',{name:'Reference-led'}).getAttribute('aria-checked'),'true','disappearing ID reconciles to a real remaining variant');
+    await selector.getByRole('radio',{name:'Experimental'}).click();
+    await page.evaluate(()=>{const next=structuredClone(window.job);next.id='00000000-0000-4000-8000-000000000997';window.view.render(next);});
+    assert.equal(await root.getByRole('radio',{name:'Reference-led'}).getAttribute('aria-checked'),'true','job identity change resets local selection');
+
+    const persistedBefore=await page.evaluate(()=>JSON.stringify(window.job.result.scripts));
+    await root.getByRole('button',{name:'Reels',exact:true}).click();
+    assert.equal(await root.getByRole('button',{name:'Reels',exact:true}).getAttribute('aria-pressed'),'true');
+    assert.match(await root.getByRole('status').textContent(),/local format guidance.*not saved or published/i);
+    assert.equal(await root.locator('.riff-studio-caption__copy').textContent(),'Persisted caption copy.');
+    assert.equal(await page.evaluate(()=>JSON.stringify(window.job.result.scripts)),persistedBefore);
+    assert.equal(await root.locator('.riff-studio-references').textContent().then(text=>/Instagram|Reels/.test(text)),false,'local format never rewrites attribution');
+
+    await root.getByRole('button',{name:'Save for later'}).click();
+    await root.getByRole('button',{name:'I filmed it'}).click();
+    const handoffs=await page.evaluate(()=>window.actions.slice(-2));
+    assert.match(handoffs[0],/not persisted/i);assert.match(handoffs[1],/not persisted/i);
+    assert.doesNotMatch(await root.getByRole('status').textContent(),/saved for later|marked as filmed/i);
+
+    assert.deepEqual(await root.locator('.riff-studio-shell').evaluate(node=>{const s=getComputedStyle(node);return {width:s.width,padding:s.padding,gap:s.gap,radius:s.borderRadius,background:s.backgroundColor};}),
+      {width:'900px',padding:'18px',gap:'18px',radius:'18px',background:'rgb(240, 246, 250)'});
+    assert.equal(await root.getByRole('tab',{name:'Full video',exact:true}).evaluate(node=>getComputedStyle(node).color),'rgb(105, 51, 161)');
+    for(const width of [320,375,768,1440]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true,`${width}px has no page overflow`);}
+    await page.setViewportSize({width:1200,height:900});await page.emulateMedia({forcedColors:'active'});
+    assert.equal(await root.getByRole('radio',{name:'Reference-led'}).evaluate(node=>getComputedStyle(node).borderTopWidth),'2px');
+    await page.emulateMedia({forcedColors:'none',reducedMotion:'reduce'});
+    assert.equal(await root.locator('.riff-studio-shell').evaluate(node=>getComputedStyle(node).transitionDuration),'0s');
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+    assert.equal(await root.getByRole('heading',{name:'Your script, ready to film.'}).evaluate(node=>getComputedStyle(node).color),'rgb(244, 245, 247)');
+    await page.evaluate(()=>{document.documentElement.dataset.theme='';document.documentElement.style.fontSize='200%';});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true,'200% text has no page overflow');
+    assert.equal(await root.getByRole('button',{name:'Save for later'}).count(),1);
+    assert.equal(await root.getByRole('button',{name:'I filmed it'}).count(),1);
+    await page.evaluate(()=>document.documentElement.style.fontSize='');
   });
 
   await t.test('actions stay connected, hostile text remains inert, focus persists, and layouts do not overflow', async () => {
@@ -892,7 +1004,9 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     await page.evaluate(() => bootConnected('scripts'));
     await root.getByRole('button', { name: 'Save for later' }).click();
     await root.getByRole('button', { name: 'I filmed it' }).click();
-    assert.deepEqual(await page.evaluate(() => window.connectedActions.slice(-2).map(action => action.state)), ['saved', 'filmed']);
+    assert.equal(await page.evaluate(() => window.connectedActions.filter(action=>action.kind==='variant-state').length),0,
+      'Task 6 never treats the optional future work-state seam as persistence');
+    assert.deepEqual(await page.evaluate(() => window.actions.slice(-2).map(prompt=>/not persisted/i.test(prompt))),[true,true]);
     await page.evaluate(() => boot('hostile', 'fullscreen'));
     assert.equal(await root.locator('img,iframe,script').count(), 0);
     for (const width of [320, 375, 768, 1200]) {

@@ -2,10 +2,10 @@ import { CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts'
 import type { RiffVideoCard } from '../../../packages/contracts/riff-videos.ts';
 import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
 import { creatorJobFixture } from '../../../evals/creator-loop/pipeline-fixtures.ts';
-export const scenarioNames = ['ideas', 'empty', 'three-ideas', 'scripts', 'three-variants', 'scan', 'video-analysis', 'video-analysis-incomplete', 'partial-video-analysis', 'instagram-profile', 'queued', 'running', 'failed', 'needs_reconciliation', 'long', 'long-scripts', 'hostile'] as const;
+export const scenarioNames = ['ideas', 'empty', 'three-ideas', 'scripts', 'three-variants', 'studio-complete', 'scan', 'video-analysis', 'video-analysis-incomplete', 'partial-video-analysis', 'instagram-profile', 'queued', 'running', 'failed', 'needs_reconciliation', 'long', 'long-scripts', 'hostile'] as const;
 export type Scenario = typeof scenarioNames[number];
 export function pipelineFixture(scenario: Scenario): CreatorJobView {
-  const job = creatorJobFixture(['scan', 'video-analysis', 'video-analysis-incomplete', 'partial-video-analysis', 'instagram-profile'].includes(scenario) ? 'scan' : ['scripts', 'three-variants', 'long-scripts'].includes(scenario) ? 'scripts' : 'recommendations');
+  const job = creatorJobFixture(['scan', 'video-analysis', 'video-analysis-incomplete', 'partial-video-analysis', 'instagram-profile'].includes(scenario) ? 'scan' : ['scripts', 'three-variants', 'studio-complete', 'long-scripts'].includes(scenario) ? 'scripts' : 'recommendations');
   if (['queued', 'running', 'failed', 'needs_reconciliation'].includes(scenario)) {
     job.state = scenario as 'queued' | 'running' | 'failed' | 'needs_reconciliation';
     job.stage = 'accepted';
@@ -32,6 +32,24 @@ export function pipelineFixture(scenario: Scenario): CreatorJobView {
   }
   if (scenario === 'three-variants' && job.result?.kind === 'scripts') {
     job.result.scripts.variants.push({...job.result.scripts.variants[0]!, id: '00000000-0000-4000-8000-000000000703', label: 'Experimental'});
+  }
+  if(scenario==='studio-complete'&&job.result?.kind==='scripts'){
+    const scripts=job.result.scripts,batch=creatorJobFixture('recommendations').result;
+    if(batch?.kind!=='recommendations')throw new Error('Expected recommendation fixture');
+    const base=batch.batch.references[0]!;
+    const references=[base,
+      {...base,id:'00000000-0000-4000-8000-000000000704',native_id:'9000000000000000704',url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000704',caption:'Second authored Studio reference'},
+      {...base,id:'00000000-0000-4000-8000-000000000705',native_id:'9000000000000000705',url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000705',caption:'Third authored Studio reference'},
+    ];
+    scripts.idea={...batch.batch.ideas[0]!,reference_ids:references.map(reference=>reference.id)};
+    scripts.references=references;scripts.variants[0]!.reference_ids=references.map(reference=>reference.id);
+    scripts.variants[0]!.timed_segments=[
+      {part:'hook',start_seconds:0,end_seconds:2,spoken_text:'First authored hook beat.',filming_direction:'Open on the finished desk.',on_screen_text:'THE RESULT',reference_ids:[references[0]!.id]},
+      {part:'hook',start_seconds:2,end_seconds:3,spoken_text:'Second authored hook beat.',filming_direction:'Cut to the earlier setup.',reference_ids:[references[1]!.id]},
+      {part:'main_content',start_seconds:3,end_seconds:17,spoken_text:'Show the authored desk change.',filming_direction:'Keep the change visible.',reference_ids:[references[1]!.id]},
+      {part:'cta',start_seconds:17,end_seconds:22,spoken_text:'Ask which change comes next.',filming_direction:'Hold on the final result.'},
+    ];
+    scripts.variants.push({...scripts.variants[0]!,id:'00000000-0000-4000-8000-000000000706',label:'Experimental',reference_ids:[references[2]!.id],timed_segments:undefined});
   }
   if (scenario === 'long-scripts' && job.result?.kind === 'scripts') {
     job.result.scripts.variants[0]!.script = 'LongUnbrokenScript'.repeat(600);

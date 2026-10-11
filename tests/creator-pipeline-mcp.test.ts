@@ -87,6 +87,15 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const saveScriptsTool=listing.result.tools.find(t=>t.name==='save_creator_scripts');
   assert.match(saveScriptsTool.description,/timed segments.*caption.*hashtags/i,
     'ChatGPT receives the persisted Studio fields needed by the Paper flow');
+  assert.match(saveScriptsTool.description,/per-segment reference_ids.*when.*lineage.*known/i);
+  assert.match(saveScriptsTool.description,/omit.*reference_ids.*unknown/i);
+  assert.match(saveScriptsTool.description,/complete variant reference_ids/i);
+  const segmentSchema=saveScriptsTool.inputSchema.properties.variants.items.properties.timed_segments.items;
+  assert.deepEqual(segmentSchema.properties.reference_ids.maxItems,3);
+  assert.deepEqual(segmentSchema.properties.reference_ids.minItems,1);
+  assert.equal(segmentSchema.properties.reference_ids.uniqueItems,true);
+  assert.ok(!listing.result.tools.some(t=>/replace|publish|work_state/i.test(t.name)),
+    'Task 6 adds no replacement, publication, or durable work-state tool');
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
@@ -118,12 +127,15 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   assert.equal(detailRequest.searchParams.get('download_media'),'false');
   assert.equal(batch.references[0]!.source_observed_at,'2026-10-08T14:30:00.000Z');
   assert.notEqual(batch.references[0]!.retrieved_at,batch.references[0]!.source_observed_at);
-  const variants=creatorScriptsFixture().variants.map(({id:_id,...v})=>({...v,reference_ids:batch.ideas[0]!.reference_ids}));
+  const variants=creatorScriptsFixture().variants.map(({id:_id,...v},index)=>({...v,reference_ids:batch.ideas[0]!.reference_ids,
+    ...(index===0?{timed_segments:[{part:'hook' as const,start_seconds:0,end_seconds:3,spoken_text:'A saved fixture hook.',
+      filming_direction:'Open on the result.',reference_ids:batch.ideas[0]!.reference_ids}]}:{})}));
   const saveInput={batch_id:batch.id,idea_id:batch.ideas[0]!.id,request_id:crypto.randomUUID(),variants};
   let saved=job(await call('save_creator_scripts',saveInput));const constructions=providerConstructions,requests=f.http.length;
   await run(saved.id);saved=job(await call('render_creator_job',{job_id:saved.id}));assert.equal(saved.state,'succeeded');
   if(saved.result?.kind!=='scripts')throw Error(JSON.stringify(saved));
   assert.equal(saved.result.scripts.variants.length,2);assert.equal(saved.result.scripts.dna_version,dna.version);assert.equal(saved.result.scripts.batch_id,batch.id);
+  assert.deepEqual(saved.result.scripts.variants[0]!.timed_segments?.[0]?.reference_ids,batch.ideas[0]!.reference_ids);
   assert.match(saved.result.scripts.limitations.join(' '),/No separate OpenAI API request/);
   assert.equal(providerConstructions,constructions);assert.equal(f.http.length,requests);
   const dispatchCount=dispatches.length;

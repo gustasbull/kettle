@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CreatorDnaView } from '../../contracts/creator-operations.ts';
 import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview,
   type ProfileObservation, type VideoObservation } from '../../contracts/creator-profile.ts';
-import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment, CreatorJobProgress,
+import { RecommendationBatch, CreatorScriptSet, FilmingVariant, SavableFilmingVariant, TimedFilmingSegment, CreatorJobProgress,
   CreatorAttemptError, CreatorRecommendationReuseSource, PipelineReference,
   type CreatorProgressProfile, type CreatorProgressVideoCard,
   type CreatorPipelineProvider, type CreatorProviderContext,
@@ -101,7 +101,7 @@ const generatedTimedSegment = z.strictObject({
   spoken_text: TimedFilmingSegment.shape.spoken_text,
   filming_direction: TimedFilmingSegment.shape.filming_direction,
 }).refine(segment => segment.end_seconds > segment.start_seconds, 'Timed segment must end after it starts');
-const generatedVariant = FilmingVariant.omit({ id: true }).extend({
+const generatedVariant = SavableFilmingVariant.safeExtend({
   timed_segments: z.array(generatedTimedSegment).min(1).max(10),
   caption: FilmingVariant.shape.caption.unwrap(),
   hashtags: FilmingVariant.shape.hashtags.unwrap(),

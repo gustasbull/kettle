@@ -277,11 +277,12 @@ function recommendations(value: unknown) {
 }
 
 function segment(value: unknown) {
-  const item = shape(value, ['part','start_seconds','end_seconds','spoken_text','filming_direction'], ['on_screen_text']);
+  const item = shape(value, ['part','start_seconds','end_seconds','spoken_text','filming_direction'], ['on_screen_text','reference_ids']);
   return !!item && enumValue(item.part, ['hook', 'main_content', 'cta'])
     && boundedNumber(item.start_seconds, 180) && boundedNumber(item.end_seconds, 180) && item.end_seconds > item.start_seconds
     && text(item.spoken_text, 4_000) && text(item.filming_direction, 3_000)
-    && optional(item, 'on_screen_text', candidate => text(candidate, 1_000));
+    && optional(item, 'on_screen_text', candidate => text(candidate, 1_000))
+    && optional(item, 'reference_ids', candidate => idList(candidate, 3, 1) && unique(candidate as unknown[], id => id));
 }
 
 function variant(value: unknown) {
@@ -309,6 +310,12 @@ function scripts(value: unknown) {
     || typeof item.contains_fixture_data !== 'boolean' || !textList(item.limitations, 30, 1_000)) return false;
   const variants=item.variants as JsonObject[];
   if (!unique(variants,entry=>entry.id) || !unique(variants,entry=>entry.label)) return false;
+  for (const entry of variants) {
+    const variantReferenceIds=new Set(entry.reference_ids as unknown[]);
+    const segments=(entry.timed_segments as JsonObject[]|undefined)??[];
+    if(segments.some(segment=>segment.reference_ids!==undefined
+      &&(segment.reference_ids as unknown[]).some(referenceId=>!variantReferenceIds.has(referenceId))))return false;
+  }
   if (!hasIdea) return true;
   const selectedIdea=item.idea as JsonObject,references=item.references as JsonObject[];
   const referenceIds=new Set(references.map(entry=>entry.id));

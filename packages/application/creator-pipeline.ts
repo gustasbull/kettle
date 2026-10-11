@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Id, Timestamp, result } from '../contracts/index.ts';
 import { CreatorJobView, CreatorJobOutput, CreatorJobStatusView, CreatorJobStatusOutput, CreatorJobProgress,
   CreatorJobStage, pipelineContracts, RecommendationBatch, CreatorScriptSet, emptyCreatorJobProgress,
-  FilmingVariant, CreatorAttemptOutcomeInput, CreatorAttemptOutcome, CreatorAttemptError,
+  SavableFilmingVariant, CreatorAttemptOutcomeInput, CreatorAttemptOutcome, CreatorAttemptError,
   CreatorRecommendationReuseSource,
   type AttemptFailureCode, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider,
   type CreatorRecommendationReuseSource as CreatorRecommendationReuseSourceType } from '../contracts/creator-pipeline.ts';
@@ -289,7 +289,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
       if(!stored.ok)throw new PipelineRunError('failed');
       output={kind:'scan',dna:projectCreatorDna(stored.data)};
     } else {
-      const captured=z.object({stored:StoredCreatorAnalysis,batch:RecommendationBatch.optional(),idea_id:Id.optional(),variants:z.array(FilmingVariant.omit({id:true})).min(2).max(3).optional()}).parse(job.captured);
+      const captured=z.object({stored:StoredCreatorAnalysis,batch:RecommendationBatch.optional(),idea_id:Id.optional(),variants:z.array(SavableFilmingVariant).min(2).max(3).optional()}).parse(job.captured);
       if(captured.stored.project_id!==job.project_id)throw new PipelineRunError('failed');
       const dna=projectCreatorDna(captured.stored);
       if(!canProcessCapturedDna(captured.stored,dna))throw new PipelineRunError('failed');

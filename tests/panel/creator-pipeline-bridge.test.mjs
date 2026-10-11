@@ -128,7 +128,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     const mappings=[
       ['Full video','Explore videos','Make it mine','full video','videos'],
       ['Hook','Explore hooks','Use this hook','hook','hooks'],
-      ['Main content','Explore showcases','Use this showcase','main content','showcases'],
+      ['Main content','Explore main content','Use this showcase','main content','showcases'],
       ['CTA','Explore CTAs','Use this CTA','CTA','ctas'],
     ];
     for(let index=0;index<mappings.length;index++){
