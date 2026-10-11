@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { build } from 'esbuild';
+
+const internalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 import { chromium } from 'playwright';
 
 // Real SDK + real component in an iframe; this is a local host fixture, not ChatGPT.
@@ -17,7 +19,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     window.output = window.makeOutput('recommendations');
     window.startInput = {request_id:'00000000-0000-4000-8000-000000000622',source_url:'https://www.tiktok.com/@fixture'};
     const startJob = window.makeOutput('scan').data.job;
-    startJob.state='queued'; startJob.revision=1; startJob.result=null;
+    startJob.state='queued'; startJob.revision=1; startJob.result=null; startJob.source_kind='profile';
     const createdAt=startJob.created_at, projectId=startJob.project_id;
     window.startOutput={ok:true,data:{
       project:{id:projectId,name:'@fixture creator work',project_type:'brand',current_version:1,created_at:createdAt,updated_at:createdAt,
@@ -40,7 +42,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
       addEventListener('message', e=>{
         const m=e.data;
         if(m.method==='ui/initialize' && location.search!=='?silent') window.reply(m.id,{protocolVersion:m.params.protocolVersion,
-          hostInfo:{name:'local-fixture',version:'1'},hostCapabilities:{...(location.search==='?no-tools'?{}:{serverTools:{}}),message:{text:{}},experimental:{'openai/message':{}}},hostContext:{theme:'dark',locale:'lt',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],styles:{variables:{'--color-background-primary':'#101010'}}}});
+          hostInfo:{name:'local-fixture',version:'1'},hostCapabilities:{...(location.search==='?no-tools'?{}:{serverTools:{}}),experimental:{'openai/message':{}}},hostContext:{theme:'dark',locale:'lt',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],styles:{variables:{'--color-background-primary':'#101010'}}}});
         if(m.method==='ui/notifications/initialized') {
           const direct=location.search==='?start';
           window.send('ui/notifications/tool-input',{arguments:direct?window.startInput:{job_id:window.output.data.job.id}});
@@ -65,18 +67,20 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
   async function launch(query='') {
     await page.goto(url+'/'+query); await page.waitForFunction(()=>window.ready);
     const frame=page.frames().find(f=>f.url().endsWith('/frame'));
-    await frame.waitForFunction(()=>{const text=document.querySelector('#review').textContent;return text.includes('Discovery')||text.includes('Finding your next directions')||text.includes('Analyzing your creator context')});
+    await frame.waitForFunction(()=>{const text=document.querySelector('#review').textContent;return text.includes('Discovery')||text.includes('Finding videos for your next idea')||text.includes('Fetching your video')||text.includes('Getting to know your profile')});
     return frame;
   }
   let frame=await launch();
   await t.test('direct start input and result select and render the created job', async()=>{
     frame=await launch('?start');
-    assert.match(await frame.locator('#review').textContent(),/Analyzing your creator context/);
+    assert.match(await frame.locator('#review').textContent(),/Getting to know your profile/);
     assert.doesNotMatch(await frame.locator('#review').textContent(),/invalid or mismatched/);
   });
   frame=await launch();
   await t.test('handshake renders without reread, applies theme/locale and sends sizes', async()=>{
     assert.equal(await page.evaluate(()=>window.calls.length),0);
+    assert.equal(await frame.locator('button').count(),1, 'only the Paper inline action is rendered; there is no bridge Refresh button');
+    assert.equal(await frame.getByText('Refresh job',{exact:true}).count(),0);
     assert.equal(await frame.evaluate(()=>document.documentElement.lang),'lt');
     assert.equal(await frame.evaluate(()=>document.documentElement.dataset.theme),'dark');
     await page.waitForFunction(()=>window.sizes.length>0);
@@ -92,7 +96,9 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     await frame.getByRole('button',{name:'Make it mine'}).click();
     await page.waitForFunction(()=>window.messages.length===1);
     const sent=await page.evaluate(()=>window.messages[0]);
-    assert.match(sent.content[0].text,/batch 00000000-0000-4000-8000-000000000600.*idea 00000000-0000-4000-8000-000000000602/i);
+    assert.match(sent.content[0].text,/One useful desk change.*complete video direction/i);
+    assert.doesNotMatch(sent.content[0].text,internalUuid);
+    assert.doesNotMatch(sent.content[0].text,/\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant)\b|\bversion\s+\d+\b/i);
     assert.deepEqual(sent._meta['openai/message'],{target:'active',send:true});
   });
   await t.test('explicit refresh reads only get_creator_job; duplicate calls suppressed',async()=>{

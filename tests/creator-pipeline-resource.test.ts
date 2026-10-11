@@ -6,7 +6,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { creatorPipelineHtml, registerCreatorPipelineResource, CREATOR_PIPELINE_URI,
   CREATOR_PIPELINE_MIME, CREATOR_PIPELINE_META } from '../apps/worker/creator-pipeline-resource.ts';
 
-test('Creator pipeline resource is a static bundled MCP App with consistent empty-network metadata', async t => {
+test('Creator pipeline resource is a static bundled MCP App with narrowly scoped media metadata', async t => {
   const server = new McpServer({name:'resource-fixture',version:'1'});
   registerCreatorPipelineResource(server);
   const client = new Client({name:'fixture-client',version:'1'});
@@ -14,17 +14,22 @@ test('Creator pipeline resource is a static bundled MCP App with consistent empt
   await server.connect(a); await client.connect(b);
   t.after(async()=>{ await client.close(); await server.close(); });
   const list = await client.listResources();
-  assert.equal(list.resources.length,1);
+  assert.equal(list.resources.length,2);
   assert.equal(list.resources[0]!.uri,CREATOR_PIPELINE_URI);
   assert.equal(list.resources[0]!.title,'Riff creator workflow');
   assert.equal(list.resources[0]!.mimeType,CREATOR_PIPELINE_MIME);
+  assert.equal(list.resources[1]!.uri,'ui://kettle/creator-pipeline-v2.html');
   assert.deepEqual(list.resources[0]!._meta,CREATOR_PIPELINE_META);
   const result = await client.readResource({uri:CREATOR_PIPELINE_URI});
   assert.equal(result.contents.length,1);
   const content = result.contents[0]!;
   assert.equal(content.mimeType,CREATOR_PIPELINE_MIME);
   assert.deepEqual(content._meta,CREATOR_PIPELINE_META);
-  assert.deepEqual(CREATOR_PIPELINE_META.ui.csp,{connectDomains:[],resourceDomains:[],frameDomains:[],baseUriDomains:[]});
+  assert.deepEqual(CREATOR_PIPELINE_META.ui.csp,{
+    connectDomains:[],
+    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com'],
+    frameDomains:[],baseUriDomains:[],
+  });
   assert.deepEqual(CREATOR_PIPELINE_META['openai/ui'],{
     availableDisplayModes:['inline','fullscreen'],preferredDisplayMode:'fullscreen',
   });

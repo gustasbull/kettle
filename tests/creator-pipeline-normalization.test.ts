@@ -50,6 +50,25 @@ test('live mapping requires server approval and preserves dated duplicates, null
   assert.equal(scan.video_observations[1]!.provenance.source_observed_at, '2026-10-08T00:00:00Z');
   assert.equal(scan.status, 'partial');
 });
+test('live feed and profile mapping retains only allowlisted Paper display facts', () => {
+  const i=input();
+  const profile=JSON.parse(i.profileAttempt.body);
+  profile.user.avatarLarger='https://p16-sign-va.tiktokcdn.com/avatar.jpeg?x-expires=1';
+  i.profileAttempt.body=JSON.stringify(profile);
+  const page=JSON.parse(i.feedAttempts[0]!.body);
+  page.aweme_list[0].statistics={...page.aweme_list[0].statistics,digg_count:22,collect_count:11};
+  page.aweme_list[0].video={...page.aweme_list[0].video,
+    cover:{url_list:['https://evil.test/cover.jpeg','https://p16-sign-va.tiktokcdn.com/cover.jpeg']},
+    play_addr:{url_list:['https://p16-sign-va.tiktokcdn.com/play.mp4']}};
+  i.feedAttempts[0]!.body=JSON.stringify(page);
+  const scan=normalizeLiveTikTokScan(i);
+  assert.equal(scan.profile_observations[0]!.avatar_url,'https://p16-sign-va.tiktokcdn.com/avatar.jpeg?x-expires=1');
+  assert.equal(scan.video_observations[0]!.thumbnail_url,'https://p16-sign-va.tiktokcdn.com/cover.jpeg');
+  assert.equal(scan.video_observations[0]!.duration_seconds,12);
+  assert.equal(scan.video_observations[0]!.metrics.likes,22);
+  assert.equal(scan.video_observations[0]!.metrics.saves,11);
+  assert.ok(!JSON.stringify(scan).includes('play.mp4'));
+});
 test('Lightreel parsing requires identity and bounds canonical deduplicated candidates to three', () => {
   const urls = ['https://evil.test/a', 'https://www.tiktok.com/@a/video/1?x=1',
     'https://www.tiktok.com/@b/video/1', ...[2, 3, 4].map(id => `https://www.tiktok.com/@a/video/${id}`)];
@@ -66,11 +85,18 @@ test('v2 enrichment binds native video and handle, never treats a caption as med
   const provenance = normalizeLiveTikTokScan(input()).profile_observations[0]!.provenance;
   const body = JSON.stringify({ success: true, aweme_detail: { ...video,
     author: { ...video.author, unique_id: 'fictional_kettle_creator' },
+    statistics: { ...video.statistics, collect_count: 9 },
+    video: { ...video.video, cover: { url_list: [
+      'https://evil.test/not-allowed.jpeg',
+      'https://p16-sign-va.tiktokcdn.com/tos-maliva-p-0068/cover.jpeg?x-expires=1',
+    ] }, play_addr: { url_list: ['https://p16-sign-va.tiktokcdn.com/private-playback.mp4'] } },
     provenance: { modalities: ['video'] } } });
   const result = readTikTokDetail(body, url, crypto.randomUUID(), provenance);
   assert.equal(result.credits, null); assert.equal(result.observation.metrics.likes, 0);
   assert.equal(result.observation.metrics.shares, null);
   assert.equal(result.observation.duration_seconds, 12);
+  assert.equal(result.observation.metrics.saves, 9);
+  assert.equal(result.observation.thumbnail_url, 'https://p16-sign-va.tiktokcdn.com/tos-maliva-p-0068/cover.jpeg?x-expires=1');
   assert.deepEqual(result.observation.provenance.modalities, ['metadata', 'caption']);
   assert.throws(() => readTikTokDetail(body, url.replace(video.aweme_id, '1'), crypto.randomUUID(), provenance));
 });
@@ -94,4 +120,15 @@ test('durable receipt sanitizer discards media/account fields and nested smuggli
     stats: { followerCount: null }, arbitrary: 'secret-media-url' }), 'profile');
   assert.ok(!body.includes('secret-media-url')); assert.ok(!body.includes('credits_remaining'));
   assert.deepEqual(JSON.parse(body).user.signature, {});
+
+  const videoBody = sanitizedScrape(JSON.stringify({ success: true, aweme_detail: {
+    aweme_id: '1', author: { uid: '2', unique_id: 'fictional' }, desc: 'caption', create_time: 1,
+    statistics: { play_count: 3, digg_count: 2, collect_count: 1 },
+    video: { duration: 1000, cover: { url_list: ['https://p16-sign-va.tiktokcdn.com/cover.jpeg'] },
+      play_addr: { url_list: ['https://p16-sign-va.tiktokcdn.com/play.mp4'] },
+      download_addr: { url_list: ['https://p16-sign-va.tiktokcdn.com/download.mp4'] } },
+  } }), 'video');
+  assert.match(videoBody,/cover\.jpeg/);
+  assert.ok(!videoBody.includes('play.mp4'));
+  assert.ok(!videoBody.includes('download.mp4'));
 });

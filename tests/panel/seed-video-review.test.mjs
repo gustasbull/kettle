@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
 // Synthetic provider summary only. No Lightreel or source requests.
-test('saved DNA and scan cards separate Lightreel supplied-video review from profile claims',async t=>{
+test('saved DNA keeps Lightreel evidence separate while the Paper scan view avoids a duplicate provider card',async t=>{
   const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
     import { mountSavedCreatorReview } from './apps/panel/creator-review.ts';
     import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
@@ -40,8 +40,8 @@ test('saved DNA and scan cards separate Lightreel supplied-video review from pro
   const base=`http://127.0.0.1:${server.address().port}/`;await page.goto(base);
   const seed={url:'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',provider:'lightreel',summary:'Synthetic supplied-video analysis: <img src=x onerror=alert(1)>',access_basis:'video_access_reported',limitations:['Synthetic response; access is not independently proven.'],retrieved_at:'2026-10-09T12:00:00Z',origin:'live'};
   const sections=page.getByRole('region',{name:'Lightreel review of supplied video',exact:true});
-  await t.test('exact source, inert summary, date and limitations appear separately in both views',async()=>{
-    await page.evaluate(seed=>window.renderReview(seed),seed);assert.equal(await sections.count(),2);
+  await t.test('exact source, inert summary, date and limitations remain in the saved evidence view only',async()=>{
+    await page.evaluate(seed=>window.renderReview(seed),seed);assert.equal(await sections.count(),1);
     for(const section of await sections.all()){
       assert.match(await section.textContent(),/supplied video only.*Profile-wide Creator DNA is shown separately/s);
       assert.match(await section.textContent(),/has not independently verified that access/);
@@ -77,7 +77,7 @@ test('saved DNA and scan cards separate Lightreel supplied-video review from pro
     await page.setViewportSize({width:320,height:1000});
     await page.evaluate(seed=>window.renderReview(seed),{...seed,summary:'LongUnbrokenSyntheticText'.repeat(100)});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    assert.equal(await sections.count(),2);
+    assert.equal(await sections.count(),1);
   });
   assert.deepEqual(errors,[]);assert.deepEqual(requests,[base]);
 });

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
-test('Riff Analysis, Discovery, and Studio render only persisted creator-job facts', async (t) => {
+const internalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
+const internalWorkflowLanguage = /\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant)\b|\bversion\s+\d+\b/i;
+
+test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted data only', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
@@ -24,7 +27,7 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
         displayMode:'fullscreen',
         sendPrompt:async prompt=>{window.actions.push(prompt);return {status:'sent',message:'Sent to ChatGPT.'}},
         startRecommendations:async ({job,dna})=>{window.connectedActions.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id,version:dna.version});return {status:'sent',message:'Discovery started.'}},
-        makeMine:async ({job,batch,idea})=>{window.connectedActions.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id});return {status:'sent',message:'Drafting in ChatGPT.'}},
+        makeMine:async ({job,batch,idea,library,filter,intent})=>{window.connectedActions.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id,library,filter,intent});return {status:'sent',message:'Drafting in ChatGPT.'}},
         setVariantState:async ({job,scripts,variant,state})=>{window.connectedActions.push({kind:'variant-state',jobId:job.id,scriptsId:scripts.id,variantId:variant.id,state});return {status:'sent',message:state==='saved'?'Saved for later.':'Marked as filmed.'}},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
@@ -34,191 +37,394 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', error => errors.push(error.message));
   await page.setContent('<div id="root"></div>');
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   const root = page.locator('#root');
 
-  await t.test('live and recovery states are indeterminate and never imply retry', async () => {
+  await t.test('pending and recovery states contain no invented job chrome or retry action', async () => {
     await page.evaluate(() => boot('queued', 'fullscreen'));
-    assert.match(await root.textContent(), /Preparing|queued|saved job/i);
+    assert.equal(await root.locator('svg[aria-label="Riff"]').count(), 0);
+    assert.doesNotMatch(await root.textContent(), /Saved Riff job|Job [0-9a-f-]+|Refresh job/i);
     assert.equal(await root.locator('[role="progressbar"]').count(), 1);
     assert.equal(await root.locator('[role="progressbar"][aria-valuenow]').count(), 0);
     assert.equal(await root.locator('button,a').count(), 0);
-    await page.evaluate(() => show('running'));
-    assert.doesNotMatch(await root.locator('.riff-pipeline').textContent(), /\d+%/);
+    assert.equal(await root.getByRole('heading', { name: 'Finding videos for your next idea' }).count(), 1);
+    assert.match(await root.textContent(), /Looking through relevant creators, videos and formats\.|Comparing hooks and product showcases…|Your brief is ready|Choosing matching references/);
+    assert.equal(await root.locator('.riff-loading-reference').count(), 7);
+    await page.evaluate(() => { window.job.kind = 'scan'; window.job.source_kind = 'video'; window.view.render(window.job); });
+    assert.equal(await root.getByRole('heading', { name: 'Fetching your video' }).count(), 1);
+    assert.match(await root.textContent(), /Opening your link and loading the available video details\.|Your video|Loading your linked video…|Link received|Analyzing next/);
+    assert.equal(await root.locator('.riff-loading-video').count(), 1);
+    await page.evaluate(() => { window.job.source_kind = 'profile'; window.view.render(window.job); });
+    assert.equal(await root.getByRole('heading', { name: 'Getting to know your profile' }).count(), 1);
+    assert.match(await root.textContent(), /Loading available posts and performance from your profile\.|Fetching your recent videos…|Profile found|Analyzing your content/);
+    assert.equal(await root.locator('.riff-loading-profile__avatar').count(), 1);
+    assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference').count(), 6);
+    assert.equal(await root.locator('.riff-loading-video').count(), 0);
     await page.evaluate(() => show('failed'));
-    assert.match(await root.textContent(), /does not retry/i);
-    assert.equal(await root.getByRole('button', { name: /retry/i }).count(), 0);
+    assert.equal(await root.getByRole('button', { name: /retry|refresh/i }).count(), 0);
     await page.evaluate(() => show('needs_reconciliation'));
-    assert.match(await root.textContent(), /reconcile.*before.*retry/i);
-    assert.equal(await root.getByRole('button', { name: /retry/i }).count(), 0);
+    assert.equal(await root.getByRole('button', { name: /retry|refresh/i }).count(), 0);
   });
 
-  await t.test('fullscreen video Analysis follows the six truthful dimensions and explicit handoffs', async () => {
+  await t.test('video Analysis matches Paper media-and-six-row composition and hides developer metadata', async () => {
     await page.evaluate(() => boot('video-analysis', 'fullscreen'));
-    const analysisHeading = root.getByRole('heading', { level: 1 });
-    assert.equal(await analysisHeading.textContent(), 'Unlock your video’s viral potential.');
-    assert.deepEqual(await analysisHeading.evaluate((node) => {
-      const style = getComputedStyle(node);
-      return { fontSize: style.fontSize, lineHeight: style.lineHeight };
-    }), { fontSize: '34px', lineHeight: '42px' });
+    const heading = root.getByRole('heading', { level: 1 });
+    assert.equal(await heading.textContent(), 'Unlock your video’s viral potential.');
+    assert.deepEqual(await heading.evaluate(node => {
+      const style = getComputedStyle(node); return { fontSize: style.fontSize, lineHeight: style.lineHeight, weight: style.fontWeight };
+    }), { fontSize: '24px', lineHeight: '30px', weight: '700' });
+    const card = root.locator('.riff-analysis-card');
+    assert.deepEqual(await card.evaluate(node => {
+      const style = getComputedStyle(node); return { width: style.width, radius: style.borderRadius, display: style.display };
+    }), { width: '900px', radius: '18px', display: 'flex' });
+    assert.deepEqual(await root.locator('.riff-analysis-media').evaluate(node => {
+      const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
+    }), { width: '313px', height: '556px', radius: '20px' });
+    assert.equal(await root.locator('.riff-analysis-row').count(), 6);
     for (const name of ['Hook', 'Content', 'Style & pacing', 'Voice & language', 'Script', 'CTA']) {
       assert.equal(await root.getByRole('heading', { name, exact: true }).count(), 1, name);
     }
-    assert.match(await root.textContent(), /Observed|Inferred|User-corrected/);
-    assert.doesNotMatch(await root.textContent(), /Working well|Needs attention/);
-    assert.match(await root.textContent(), /unique video|coverage/i);
-    assert.match(await root.textContent(), /Limitations/);
-    for (const label of ['Rework this video', 'Explore viral formats']) {
-      assert.equal(await root.getByRole('button', { name: label }).count(), 1);
-    }
+    const text = await root.textContent();
+    assert.doesNotMatch(text, /Saved Riff|Supplied video review|Provider|Retrieved|Captured DNA|DNA ID|Limitations|Observed|Inferred|User-corrected|coverage/i);
+    assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Explore viral formats' }).count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Create a video' }).count(), 0);
-    await root.getByRole('button', { name: 'Explore viral formats' }).click();
-    assert.match((await page.evaluate(() => window.actions.at(-1))), /DNA version 1|creator job/i);
+    assert.ok(await root.locator('svg path[d="M3 1 11 6 3 11Z"]').count() >= 1, 'Paper play icon is present');
+
+    await page.evaluate(() => {
+      const dimensions = [
+        ['hook', 'needs_attention', 'Open with the result before introducing yourself.'],
+        ['content', 'working_well', 'Keep one clear technique with a visible before-and-after.'],
+        ['style_pacing', 'needs_attention', 'Cut to the demonstration sooner.'],
+        ['voice_language', 'working_well', 'Keep the conversational wording.'],
+        ['script', 'needs_rework', 'The payoff needs to lead the story.'],
+        ['cta', 'needs_attention', 'Deliver the payoff, then give one reason to save.'],
+      ];
+      window.job.result.dna.seed_review.dimensions = dimensions.map(([dimension, status, summary]) => ({ dimension, status, summary }));
+      const evidence = window.job.result.dna.evidence.find(item => item.url === window.job.result.dna.seed_review.url);
+      evidence.thumbnail_url = 'https://p16-sign.tiktokcdn.com/riff-video.jpeg';
+      evidence.metrics.saves = 1200;
+      window.view.render(window.job);
+    });
+    assert.equal(await root.locator('.riff-analysis-video > img').getAttribute('src'), 'https://p16-sign.tiktokcdn.com/riff-video.jpeg');
+    assert.equal(await root.getByText('Working well', { exact: true }).count(), 2);
+    assert.equal(await root.getByText('Needs attention', { exact: true }).count(), 3);
+    assert.equal(await root.getByText('Needs rework', { exact: true }).count(), 1);
+    assert.match(await root.getByRole('heading', { name: 'Hook', exact: true }).locator('xpath=../..').textContent(), /Open with the result/);
+    assert.match(await root.locator('.riff-analysis-media').textContent(), /Saves/);
+    assert.doesNotMatch(await root.locator('.riff-analysis-media').textContent(), /Shares/);
   });
 
-  await t.test('fullscreen profile Analysis uses the canonical profile route', async () => {
+  await t.test('transcript-only video analysis uses the exact Paper partial-analysis card and safe handoff', async () => {
+    await page.evaluate(() => {
+      boot('video-analysis', 'fullscreen');
+      window.job.result.dna.seed_review.access_basis = 'transcript_or_caption_only';
+      window.view.render(window.job);
+    });
+    const card = root.locator('.riff-partial-analysis-card');
+    assert.equal(await card.count(), 1);
+    assert.equal(await root.getByRole('heading', { name: 'We could read the words, not the visuals.' }).count(), 1);
+    assert.match(await card.textContent(), /We can help with the wording\. Upload the video file in chat for feedback on the shots and pacing\./);
+    assert.deepEqual(await card.evaluate(node => {
+      const style = getComputedStyle(node); return {
+        width: style.width, radius: style.borderRadius, padding: style.padding, gap: style.gap,
+      };
+    }), { width: '656px', radius: '18px', padding: '24px', gap: '20px' });
+    assert.deepEqual(await card.getByRole('heading').evaluate(node => {
+      const style = getComputedStyle(node); return {
+        fontSize: style.fontSize, lineHeight: style.lineHeight, weight: style.fontWeight,
+      };
+    }), { fontSize: '24px', lineHeight: '30px', weight: '600' });
+    const action = root.getByRole('button', { name: 'Work on the script' });
+    assert.deepEqual(await action.evaluate(node => {
+      const style = getComputedStyle(node); return {
+        minHeight: style.minHeight, fontSize: style.fontSize, lineHeight: style.lineHeight,
+        backgroundImage: style.backgroundImage, borderWidth: style.borderWidth,
+      };
+    }), { minHeight: '44px', fontSize: '16px', lineHeight: '24px', backgroundImage: 'none', borderWidth: '0px' });
+    assert.equal(await root.getByRole('button').count(), 1);
+    assert.equal(await root.locator('.riff-analysis-card, .riff-inline-result').count(), 0);
+    assert.doesNotMatch(await card.textContent(), /Partial analysis|transcript only|Provider|Limitations|DNA|Open analysis|Explore viral formats/i);
+    await action.click();
+    const message = await page.evaluate(() => window.actions.at(-1));
+    assert.match(message, /work on the script/i);
+    assert.match(message, /transcript or captions/i);
+    assert.doesNotMatch(message, internalUuid);
+    assert.doesNotMatch(message, internalWorkflowLanguage);
+  });
+
+  await t.test('profile Analysis uses the Paper profile split and canonical action only', async () => {
     await page.evaluate(() => boot('scan', 'fullscreen'));
     assert.equal(await root.getByRole('heading', { name: 'Turn what’s working into your next breakout.' }).count(), 1);
+    assert.equal(await root.locator('.riff-profile-card').count(), 1);
+    assert.equal(await root.locator('.riff-profile-analysis').count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Find my next breakout idea' }).count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 0);
+    assert.doesNotMatch(await root.textContent(), /Captured DNA|DNA ID|Analysis created|Oldest post|Newest post|Limitations|Observed/i);
+
+    await page.evaluate(() => {
+      window.job.result.dna.profile_summary.avatar_url = 'https://p16-sign.tiktokcdn.com/riff-avatar.jpeg';
+      window.job.result.dna.profile_summary.follower_count = 12400;
+      window.job.result.dna.evidence[0].thumbnail_url = 'https://p16-sign.tiktokcdn.com/riff-top-video.jpeg';
+      window.view.render(window.job);
+    });
+    assert.equal(await root.locator('.riff-profile-avatar > img').getAttribute('src'), 'https://p16-sign.tiktokcdn.com/riff-avatar.jpeg');
+    assert.equal(await root.locator('.riff-profile-video > img').count(), 1);
+    assert.match(await root.locator('.riff-profile-card').textContent(), /12.4K|12K/);
+    assert.match(await root.locator('.riff-profile-card').textContent(), /Fictional desk creator/);
     await root.getByRole('button', { name: 'Find my next breakout idea' }).click();
-    assert.match((await page.evaluate(() => window.actions.at(-1))), /DNA version 1|creator job/i);
+    const message = await page.evaluate(() => window.actions.at(-1));
+    assert.match(message, /explore viral formats/i);
+    assert.doesNotMatch(message, internalUuid);
+    assert.doesNotMatch(message, internalWorkflowLanguage);
   });
 
-  await t.test('inline Analysis stays compact with two actions and no duplicate attribution', async () => {
+  await t.test('inline Analysis remains a compact host handoff without duplicate branding', async () => {
     await page.evaluate(() => boot('scan', 'inline'));
+    assert.deepEqual(await root.locator('.riff-pipeline__surface').evaluate(node => {
+      const style = getComputedStyle(node); return { padding: style.padding, borderWidth: style.borderWidth };
+    }), { padding: '0px', borderWidth: '0px' });
     assert.equal(await root.locator('svg[aria-label="Riff"]').count(), 0);
-    assert.equal(await root.locator('button').count(), 2);
     assert.equal(await root.getByRole('button', { name: 'Open analysis' }).count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Explore viral formats' }).count(), 1);
-    assert.equal(await root.getByRole('heading', { name: 'Voice & language' }).count(), 0);
+    assert.doesNotMatch(await root.textContent(), /Captured DNA|coverage|saved signal/i);
     await root.getByRole('button', { name: 'Open analysis' }).click();
     assert.equal(await page.evaluate(() => window.fullscreen.length), 1);
-    assert.equal(await root.getByRole('heading', { name: 'Voice & language' }).count(), 1);
+    assert.equal(await root.locator('.riff-profile-card').count(), 1);
   });
 
-  await t.test('fullscreen Discovery is a bounded real-count keyboard carousel', async () => {
+  await t.test('Discovery matches Paper libraries, filters, visual carousel, SVG controls, and omits unsupported metrics', async () => {
     await page.evaluate(() => boot('three-ideas', 'fullscreen'));
-    assert.equal(await root.getByRole('heading', { name: 'Find your next breakout idea.' }).count(), 1);
-    assert.match(await root.textContent(), /3 ideas/);
+    const heading = root.getByRole('heading', { name: 'Find your next breakout idea.' });
+    assert.deepEqual(await heading.evaluate(node => {
+      const style = getComputedStyle(node); return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    }), { fontSize: '34px', lineHeight: '42px' });
     const libraries = root.getByRole('tablist', { name: 'Discovery libraries' });
-    assert.equal(await libraries.count(), 1);
     assert.equal(await libraries.getByRole('tab').count(), 4);
-    assert.equal(await libraries.getByRole('tab', { name: 'Videos', exact: true }).getAttribute('aria-selected'), 'true');
-    const promptCount = await page.evaluate(() => window.actions.length);
-    const hooks = libraries.getByRole('tab', { name: 'Hooks', exact: true });
-    assert.equal(await hooks.count(), 1);
-    await hooks.click();
-    assert.equal(await hooks.getAttribute('aria-selected'), 'true');
-    assert.match(await root.textContent(), /timestamped hook clips are not available/i);
-    assert.equal(await page.evaluate(() => window.actions.length), promptCount,
-      'library tabs switch immediately inside Riff instead of waiting for ChatGPT');
-    await libraries.getByRole('tab', { name: 'Videos', exact: true }).click();
-    assert.doesNotMatch(await root.textContent(), /7 ideas|lift|likes/i);
-    const region = root.locator('[data-discovery-carousel]');
-    const stage = root.locator('[data-discovery-stage]');
-    assert.equal(await stage.count(), 1);
-    assert.deepEqual(await stage.evaluate((node) => {
-      const stageStyle = getComputedStyle(node);
-      const cardStyle = getComputedStyle(node.querySelector('[data-active-idea]'));
-      return {
-        maxWidth: stageStyle.maxWidth,
-        background: stageStyle.backgroundColor,
-        cardRadius: cardStyle.borderRadius,
-      };
-    }), { maxWidth: '999px', background: 'rgb(244, 245, 247)', cardRadius: '22px' });
-    const dots = root.getByRole('button', { name: /Go to idea/ });
-    assert.equal(await dots.count(), 3);
-    assert.equal(await root.getByRole('button', { name: 'Go to idea 1' }).getAttribute('aria-current'), 'true');
-    assert.deepEqual(await root.getByRole('button', { name: 'Go to idea 1' }).evaluate((node) => {
-      const style = getComputedStyle(node);
-      return { width: style.width, minHeight: style.minHeight };
-    }), { width: '44px', minHeight: '44px' });
-    assert.match(await region.textContent(), /Fictional desk idea 1/);
-    await region.focus(); await page.keyboard.press('ArrowRight');
-    assert.match(await region.textContent(), /Fictional desk idea 2/);
-    await root.getByRole('button', { name: 'Go to idea 3' }).click();
-    assert.match(await region.textContent(), /Fictional desk idea 3/);
-    assert.equal(await root.getByRole('button', { name: 'Go to idea 3' }).getAttribute('aria-current'), 'true');
-    await root.getByRole('button', { name: 'Previous idea' }).click();
-    assert.match(await region.textContent(), /Fictional desk idea 2/);
+    for (const name of ['Videos', 'Hooks', 'Product showcases', 'CTAs']) assert.equal(await libraries.getByRole('tab', { name, exact: true }).count(), 1);
+    const filters = root.getByRole('group', { name: 'Video filters' });
+    for (const name of ['For you', 'Quick demos', 'Before / after', 'How-to', 'Reactions', 'Challenges']) assert.equal(await filters.getByRole('button', { name, exact: true }).count(), 1);
+    assert.equal(await filters.getByRole('button', { name: 'For you' }).getAttribute('aria-pressed'), 'true');
+    await filters.getByRole('button', { name: 'Quick demos' }).click();
+    assert.equal(await filters.getByRole('button', { name: 'Quick demos' }).getAttribute('aria-pressed'), 'true');
+    const carousel = root.locator('[data-discovery-carousel]');
+    assert.equal(await root.locator('[data-idea-card]').count(), 3);
+    assert.equal(await root.locator('[data-active-idea]').count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 1);
+    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 1);
+    assert.ok(await root.locator('svg path[d="M19 12H5m7-7-7 7 7 7"]').count() >= 1, 'Paper previous-arrow icon is present');
+    assert.ok(await root.locator('svg path[d="M5 12h14m-7-7 7 7-7 7"]').count() >= 1, 'Paper next-arrow icon is present');
+    assert.ok(await root.locator('svg path[d="M3 2h10v14l-5-3-5 3Z"]').count() >= 1, 'Paper bookmark icon is present');
+    assert.doesNotMatch(await carousel.textContent(), /Views|Likes|Saves|[0-9.]+×/,
+      'the three-idea fixture has no persisted metrics');
+    const text = await root.textContent();
+    assert.doesNotMatch(text, /Batch limitations|Captured DNA|DNA ID|created|evidence-backed|Idea [0-9]+ \/|Why it fits|How to film|Sources/i);
+    await carousel.focus(); await page.keyboard.press('ArrowRight');
+    assert.match(await carousel.textContent(), /Fictional desk idea 2/);
     await root.getByRole('button', { name: 'Next idea' }).click();
-    assert.match(await region.textContent(), /Fictional desk idea 3/);
-    assert.match(await region.textContent(), /ViewsUnknown/);
+    assert.match(await carousel.textContent(), /Fictional desk idea 3/);
     await root.getByRole('button', { name: 'Make it mine' }).click();
-    assert.match((await page.evaluate(() => window.actions.at(-1))), /batch 00000000-0000-4000-8000-000000000600.*idea 00000000-0000-4000-8000-000000000702/i);
+    const selectionMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(selectionMessage, /complete video direction|whole video/i);
+    assert.match(selectionMessage, /Fictional desk idea 3/i);
+    assert.match(selectionMessage, /Quick demos/i);
+    assert.doesNotMatch(selectionMessage, internalUuid);
+    assert.doesNotMatch(selectionMessage, internalWorkflowLanguage);
+    await root.getByRole('button', { name: 'Bookmark idea' }).click();
+    const bookmarkMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(bookmarkMessage, /bookmark.*Fictional desk idea 3/i);
+    assert.doesNotMatch(bookmarkMessage, internalUuid);
+    assert.doesNotMatch(bookmarkMessage, internalWorkflowLanguage);
+    await page.evaluate(() => boot('ideas', 'fullscreen'));
+    assert.match(await root.locator('[data-discovery-carousel]').textContent(), /120/,
+      'persisted views remain visible when the reference includes them');
+    await page.evaluate(() => {
+      const reference = window.job.result.batch.references[0];
+      reference.thumbnail_url = 'https://p16-sign.tiktokcdn.com/riff-reference.jpeg';
+      reference.likes = 8;
+      reference.saves = 3;
+      reference.view_multiplier = 3.1;
+      reference.view_multiplier_basis = { method: 'median_observed_profile_views', baseline_views: 39, sample_size: 8 };
+      window.view.render(window.job);
+    });
+    assert.equal(await root.locator('.riff-idea-media > img').count(), 1);
+    assert.match(await root.locator('[data-active-idea]').textContent(), /120/);
+    assert.match(await root.locator('[data-active-idea]').textContent(), /8/);
+    assert.match(await root.locator('[data-active-idea]').textContent(), /3/);
+    assert.match(await root.locator('[data-active-idea]').textContent(), /3\.1×/);
+  });
+
+  await t.test('every Paper Discovery library remains data-backed and clickable without inventing metadata', async () => {
+    await page.evaluate(() => boot('ideas', 'fullscreen'));
+    const libraries = root.getByRole('tablist', { name: 'Discovery libraries' });
+    await libraries.getByRole('tab', { name: 'Hooks', exact: true }).click();
+    assert.equal(await libraries.getByRole('tab', { name: 'Hooks', exact: true }).getAttribute('aria-selected'), 'true');
+    assert.equal(await root.getByRole('heading', { name: 'Stop the scroll.' }).count(), 1);
+    assert.match(await root.textContent(), /Find a hook that grabs attention\. Make it sound like you\./);
+    assert.equal(await root.getByRole('button', { name: 'Use this hook' }).count(), 1);
+    assert.equal(await root.locator('[data-idea-card]').count(), 1);
+    assert.match(await root.locator('[data-active-idea]').textContent(), /One useful desk change/);
+    for (const filter of ['For you', 'Questions', 'Bold claims', 'Visual hooks', 'Problems', 'Storytelling']) {
+      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
+    }
+    await root.getByRole('button', { name: 'Questions', exact: true }).click();
+    await root.getByRole('button', { name: 'Use this hook' }).click();
+    const hookMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(hookMessage, /use.*One useful desk change.*(?:hook|opening)/i);
+    assert.match(hookMessage, /Questions/i);
+    assert.match(hookMessage, /only (?:the )?(?:hook|opening)|preserve.*main content.*CTA/i);
+    assert.doesNotMatch(hookMessage, internalUuid);
+    assert.doesNotMatch(hookMessage, internalWorkflowLanguage);
+    await libraries.getByRole('tab', { name: 'Product showcases', exact: true }).click();
+    assert.equal(await root.getByRole('heading', { name: 'Make your product stand out.' }).count(), 1);
+    assert.match(await root.textContent(), /Turn your product’s best benefit into a video worth watching\./);
+    assert.equal(await root.getByRole('button', { name: 'Use this showcase' }).count(), 1);
+    for (const filter of ['Quick demos', 'Before / after', 'Unboxing', 'Tutorials', 'Screen recordings']) {
+      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
+    }
+    await root.getByRole('button', { name: 'Use this showcase' }).click();
+    const showcaseMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(showcaseMessage, /use.*One useful desk change.*(?:showcase|demonstration|main content)/i);
+    assert.match(showcaseMessage, /only (?:the )?(?:showcase|demonstration|main content)|preserve.*hook.*CTA/i);
+    assert.doesNotMatch(showcaseMessage, internalUuid);
+    assert.doesNotMatch(showcaseMessage, internalWorkflowLanguage);
+    await libraries.getByRole('tab', { name: 'CTAs', exact: true }).click();
+    assert.equal(await root.getByRole('heading', { name: 'Turn views into action.' }).count(), 1);
+    assert.match(await root.textContent(), /Give viewers a reason to save, share, follow, or try your product\./);
+    assert.equal(await root.getByRole('button', { name: 'Use this CTA' }).count(), 1);
+    for (const filter of ['For you', 'Save', 'Comment', 'Follow', 'Share', 'Try it']) {
+      assert.equal(await root.getByRole('button', { name: filter, exact: true }).count(), 1);
+    }
+    await root.getByRole('button', { name: 'Save', exact: true }).click();
+    await root.getByRole('button', { name: 'Use this CTA' }).click();
+    const ctaMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(ctaMessage, /use.*One useful desk change.*(?:CTA|call to action|ending)/i);
+    assert.match(ctaMessage, /only (?:the )?(?:CTA|call to action|ending)|preserve.*hook.*main content/i);
+    assert.match(ctaMessage, /Save/i);
+    assert.doesNotMatch(ctaMessage, internalUuid);
+    assert.doesNotMatch(ctaMessage, internalWorkflowLanguage);
+    assert.equal(new Set([hookMessage, showcaseMessage, ctaMessage]).size, 3,
+      'each component library sends a distinct semantic intent');
+    assert.doesNotMatch(await root.textContent(), /timestamped|saved reference captions|Batch limitations/i);
     await page.evaluate(() => show('empty'));
-    assert.match(await root.textContent(), /No evidence-backed ideas/);
+    assert.equal(await root.locator('[data-idea-card]').count(), 0);
+    assert.doesNotMatch(await root.textContent(), /Batch limitations|DNA ID/i);
   });
 
-  await t.test('inline Discovery is a summary and opens fullscreen without nested navigation', async () => {
-    await page.evaluate(() => boot('ideas', 'inline'));
-    assert.match(await root.textContent(), /1 idea/);
-    assert.equal(await root.getByRole('button', { name: 'Open discovery' }).count(), 1);
-    assert.equal(await root.locator('[role="tablist"],[data-discovery-carousel]').count(), 0);
-    assert.ok(await root.locator('button').count() <= 2);
-  });
-
-  await t.test('fullscreen Studio maps actual variants into component tabs and honest state handoffs', async () => {
+  await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {
     await page.evaluate(() => boot('scripts', 'fullscreen'));
-    assert.equal(await root.getByRole('heading', { name: 'Your script, ready to film.' }).count(), 1);
+    const heading = root.getByRole('heading', { name: 'Your script, ready to film.' });
+    assert.deepEqual(await heading.evaluate(node => {
+      const style = getComputedStyle(node); return { fontSize: style.fontSize, lineHeight: style.lineHeight };
+    }), { fontSize: '30px', lineHeight: '36px' });
     const studioActions = root.getByRole('group', { name: 'Studio actions' });
-    assert.equal(await studioActions.count(), 1);
     assert.equal(await studioActions.getByRole('button').count(), 2);
     assert.equal(await studioActions.getByRole('button', { name: 'Save for later' }).count(), 1);
     assert.equal(await studioActions.getByRole('button', { name: 'I filmed it' }).count(), 1);
-    assert.equal(await studioActions.getByRole('button', { name: 'Create a video' }).count(), 0);
-    assert.equal(await root.getByRole('tab').count(), 4);
-    for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab }).count(), 1);
-    assert.equal(await root.locator('[data-variant]').count(), 2);
-    assert.match(await root.textContent(), /Reference-led|Creator Fit/);
-    assert.match(await root.textContent(), /Caption.*not available|publishing fields.*not part/i);
-    await root.getByRole('tab', { name: 'Hook' }).click();
+    assert.equal(await root.locator('[data-variant]').count(), 0, 'Paper does not show invented variant chips');
+    for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab, exact: true }).count(), 1);
+    assert.deepEqual(await root.locator('.riff-studio-player').evaluate(node => {
+      const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
+    }), { width: '240px', height: '427px', radius: '16px' });
+    assert.equal(await root.locator('.riff-script-part').count(), 3);
+    const text = await root.textContent();
+    assert.doesNotMatch(text, /Caption.*not available|publishing fields|Variant limitations|Script set limitations|Captured DNA|DNA ID|Create a video/i);
+    assert.ok(await root.locator('svg path[d="M9 18h6M10 21h4M9 15c0-2-3-3-3-7a6 6 0 0 1 12 0c0 4-3 5-3 7v1H9z"]').count() >= 1, 'Paper filming-tip icon is present');
+    await root.getByRole('tab', { name: 'Hook', exact: true }).click();
     assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /One small change for this desk|Wide shot/);
-    await root.getByRole('tab', { name: 'Main content' }).click();
-    assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /Shots|B-roll|On-screen text|Showcase timing|Pacing/);
-    await root.getByRole('tab', { name: 'CTA' }).click();
+    await root.getByRole('tab', { name: 'Main content', exact: true }).click();
+    assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /Here is my current setup|Wide setup|Hand placing/);
+    await root.getByRole('tab', { name: 'CTA', exact: true }).click();
     assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /What would you change/);
+
+    await page.evaluate(() => {
+      const variant = window.job.result.scripts.variants[0];
+      variant.timed_segments = [
+        { part: 'hook', start_seconds: 0, end_seconds: 3, spoken_text: 'Still on the same page after an hour?', filming_direction: 'Film the open textbook, then cut to the clock.', on_screen_text: 'SAME PAGE?' },
+        { part: 'main_content', start_seconds: 3, end_seconds: 17, spoken_text: 'Try one question. Close the book, answer from memory, then check what you missed.', filming_direction: 'Show the question, your answer and the page.' },
+        { part: 'cta', start_seconds: 17, end_seconds: 22, spoken_text: 'Save this for your next study session.', filming_direction: 'Return to the finished answer.' },
+      ];
+      variant.caption = 'Still rereading the same page? Try one question before you read it again.';
+      variant.hashtags = ['#studytips', '#studytok', '#learning'];
+      window.job.result.scripts.idea = { title: 'The one-question study reset' };
+      window.job.result.scripts.references = [{
+        id: variant.reference_ids[0],
+        platform: 'tiktok',
+        url: 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011',
+        thumbnail_url: 'https://p16-sign.tiktokcdn.com/riff-studio-reference.jpeg',
+      }];
+      window.view.render(window.job);
+    });
+    await root.getByRole('tab', { name: 'Full video', exact: true }).click();
+    assert.match(await root.locator('.riff-studio-header').textContent(), /The one-question study reset/);
+    assert.equal(await root.getByRole('heading', { name: 'Your references & script' }).count(), 1);
+    assert.match(await root.locator('.riff-studio-shell__meta').textContent(), /20 seconds · 3 parts/);
+    assert.equal(await root.locator('.riff-studio-player').getAttribute('href'), 'https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011');
+    assert.equal(await root.locator('.riff-studio-player > img').getAttribute('src'), 'https://p16-sign.tiktokcdn.com/riff-studio-reference.jpeg');
+    assert.match(await root.locator('.riff-script-part').first().textContent(), /Hook · 0–3s/);
+    assert.match(await root.locator('.riff-script-part').nth(1).textContent(), /Main content · 3–17s/);
+    assert.match(await root.locator('.riff-script-part').nth(2).textContent(), /CTA · 17–22s/);
+    assert.equal(await root.getByRole('heading', { name: 'Caption', exact: true }).count(), 1);
+    assert.equal(await root.locator('.riff-caption-platform', { hasText: 'TikTok' }).count(), 1);
+    assert.match(await root.locator('.riff-studio-caption').textContent(), /Still rereading.*#studytips #studytok #learning/);
+
     await root.getByRole('button', { name: 'Save for later' }).click();
-    assert.match((await page.evaluate(() => window.actions.at(-1))), /save.*ChatGPT.*not.*saved/i);
+    const saveMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(saveMessage, /save.*Reference-led.*later/i);
+    assert.doesNotMatch(saveMessage, internalUuid);
+    assert.doesNotMatch(saveMessage, internalWorkflowLanguage);
     await root.getByRole('button', { name: 'I filmed it' }).click();
-    assert.match((await page.evaluate(() => window.actions.at(-1))), /filmed.*ChatGPT.*not.*persisted/i);
+    const filmedMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(filmedMessage, /filmed.*Reference-led/i);
+    assert.doesNotMatch(filmedMessage, internalUuid);
+    assert.doesNotMatch(filmedMessage, internalWorkflowLanguage);
+    await root.getByRole('button', { name: 'Explore videos' }).click();
+    const exploreMessage = await page.evaluate(() => window.actions.at(-1));
+    assert.match(exploreMessage, /explore videos.*The one-question study reset/i);
+    assert.doesNotMatch(exploreMessage, internalUuid);
+    assert.doesNotMatch(exploreMessage, internalWorkflowLanguage);
+
+    await page.evaluate(() => {
+      const variant = window.job.result.scripts.variants[0];
+      variant.timed_segments = [
+        { part: 'hook', start_seconds: 0, end_seconds: 3, spoken_text: 'A persisted timed hook.', filming_direction: 'Open on the finished result.' },
+      ];
+      window.view.render(window.job);
+    });
+    await root.getByRole('tab', { name: 'Full video', exact: true }).click();
+    assert.match(await root.locator('.riff-studio-shell__meta').textContent(), /20 seconds · 3 parts/);
+    assert.equal(await root.locator('.riff-script-part').count(), 3,
+      'partial timed data must not erase the persisted main content or CTA');
+    assert.match(await root.locator('.riff-script-part').nth(0).textContent(), /Hook · 0–3s.*A persisted timed hook/s);
+    assert.match(await root.locator('.riff-script-part').nth(1).textContent(), /Main content.*Here is my current setup/s);
+    assert.match(await root.locator('.riff-script-part').nth(2).textContent(), /CTA.*What would you change/s);
   });
 
-  await t.test('inline scripts remain one-action summaries; hostile text stays inert and layouts do not overflow', async () => {
-    await page.evaluate(() => boot('three-variants', 'inline'));
-    assert.match(await root.textContent(), /Your script, ready to film/);
-    assert.equal(await root.getByRole('button', { name: 'Open Studio' }).count(), 1);
-    assert.equal(await root.getByRole('tab').count(), 0);
-    await page.evaluate(() => boot('hostile', 'fullscreen'));
-    assert.match(await root.textContent(), /<img src=x onerror=alert\(1\)>/);
-    assert.equal(await root.locator('img,iframe,script').count(), 0);
-    for (const width of [320, 375, 768, 1440]) {
-      await page.setViewportSize({ width, height: 900 });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
-    }
-  });
-
-  await t.test('connected workflow actions stay inside Riff while creative drafting returns to ChatGPT', async () => {
-    const promptCount = await page.evaluate(() => window.actions.length);
+  await t.test('actions stay connected, hostile text remains inert, focus persists, and layouts do not overflow', async () => {
     await page.evaluate(() => bootConnected('scan'));
     await root.getByRole('button', { name: 'Find my next breakout idea' }).click();
-    assert.deepEqual((await page.evaluate(() => window.connectedActions.at(-1))).kind, 'recommendations');
-    assert.equal((await page.evaluate(() => window.actions.length)), promptCount, 'prior handoff trace remains unchanged');
-
+    assert.equal((await page.evaluate(() => window.connectedActions.at(-1))).kind, 'recommendations');
     await page.evaluate(() => bootConnected('ideas'));
     await root.getByRole('button', { name: 'Make it mine' }).click();
-    assert.equal((await page.evaluate(() => window.connectedActions.at(-1))).kind, 'make-mine');
-
+    assert.deepEqual(await page.evaluate(() => {
+      const action = window.connectedActions.at(-1);
+      return { kind: action.kind, library: action.library, filter: action.filter, intent: action.intent };
+    }), {
+      kind: 'make-mine', library: 'videos', filter: 'For you',
+      intent: 'Use “One useful desk change” as the complete video direction for my next Riff video. Shape the adaptation around the “For you” preference, my creator context, and cited references, then draft filmable options for me to choose from.',
+    });
     await page.evaluate(() => bootConnected('scripts'));
     await root.getByRole('button', { name: 'Save for later' }).click();
     await root.getByRole('button', { name: 'I filmed it' }).click();
-    assert.deepEqual((await page.evaluate(() => window.connectedActions.slice(-2).map(action => action.state))), ['saved', 'filmed']);
-  });
-
-  await t.test('same-job selection/focus persists, a different job resets it, and disposal is final', async () => {
+    assert.deepEqual(await page.evaluate(() => window.connectedActions.slice(-2).map(action => action.state)), ['saved', 'filmed']);
+    await page.evaluate(() => boot('hostile', 'fullscreen'));
+    assert.equal(await root.locator('img,iframe,script').count(), 0);
+    for (const width of [320, 375, 768, 1200]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    }
     await page.setViewportSize({ width: 900, height: 900 });
     await page.evaluate(() => boot('three-ideas', 'fullscreen'));
     await root.getByRole('button', { name: 'Next idea' }).click();

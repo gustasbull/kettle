@@ -1,13 +1,21 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { creatorPipelineScript } from '../panel/generated/creator-pipeline-bundle.ts';
 
-export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v2.html';
+export const CREATOR_PIPELINE_URI = 'ui://kettle/creator-pipeline-v3.html';
+export const CREATOR_PIPELINE_V2_URI = 'ui://kettle/creator-pipeline-v2.html';
 export const CREATOR_PIPELINE_MIME = 'text/html;profile=mcp-app';
 export const CREATOR_PIPELINE_META = {
   'openai/ui': { availableDisplayModes: ['inline', 'fullscreen'], preferredDisplayMode: 'fullscreen' },
   ui: {
     prefersBorder: false,
-    csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
+    csp: {
+      connectDomains: [],
+      // The Paper discovery and analysis frames can render provider-observed
+      // TikTok cover images. No scripts, API calls, frames, or arbitrary image
+      // origins are permitted by this resource.
+      resourceDomains: ['https://tiktokcdn.com', 'https://*.tiktokcdn.com'],
+      frameDomains: [], baseUriDomains: [],
+    },
     permissions: {},
   },
 };
@@ -26,12 +34,14 @@ export function creatorPipelineHtml(script: string): string {
 }
 
 export function registerCreatorPipelineResource(server: McpServer): void {
-  server.registerResource('kettle-creator-pipeline', CREATOR_PIPELINE_URI, {
-    title: 'Riff creator workflow',
-    description: 'Read-only saved Riff creator jobs, ideas and filming variants. Status refresh never starts paid work.',
-    mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
-  }, async () => ({ contents: [{
-    uri: CREATOR_PIPELINE_URI, mimeType: CREATOR_PIPELINE_MIME,
-    text: creatorPipelineHtml(creatorPipelineScript), _meta: CREATOR_PIPELINE_META,
-  }] }));
+  const register = (name: string, uri: string) => server.registerResource(name, uri, {
+      title: 'Riff creator workflow',
+      description: 'Read-only saved Riff creator jobs, ideas and filming variants. Status refresh never starts paid work.',
+      mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
+    }, async () => ({ contents: [{
+      uri, mimeType: CREATOR_PIPELINE_MIME,
+      text: creatorPipelineHtml(creatorPipelineScript), _meta: CREATOR_PIPELINE_META,
+    }] }));
+  register('kettle-creator-pipeline', CREATOR_PIPELINE_URI);
+  register('kettle-creator-pipeline-v2-compat', CREATOR_PIPELINE_V2_URI);
 }

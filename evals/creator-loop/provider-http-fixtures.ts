@@ -44,7 +44,17 @@ export function providerHttpFixture() {
       if (u.hostname === 'api.openai.com') {
         const body = JSON.parse(init.body as string);
         const grounding = JSON.parse(body.input[0].content[0].text);
-        const variants = creatorScriptsFixture().variants.map(({ id: _id, ...v }) => ({ ...v, reference_ids: grounding.idea.reference_ids }));
+        const variants = creatorScriptsFixture().variants.map(({ id: _id, ...v }) => ({ ...v,
+          timed_segments: [
+            { part: 'hook', start_seconds: 0, end_seconds: 3, spoken_text: v.hook,
+              filming_direction: v.opening_visual },
+            { part: 'main_content', start_seconds: 3, end_seconds: 15, spoken_text: v.script,
+              filming_direction: v.shots.join(' ') },
+            { part: 'cta', start_seconds: 15, end_seconds: 20, spoken_text: v.cta,
+              filming_direction: v.pacing },
+          ],
+          caption: 'One practical desk change, shown step by step.', hashtags: ['#desktips'],
+          reference_ids: grounding.idea.reference_ids }));
         return Response.json({ id: 'resp-synthetic', status: 'completed', output: [{ type: 'message', role: 'assistant',
           content: [{ type: 'output_text', text: JSON.stringify({ variants }) }] }], usage: { input_tokens: 100, output_tokens: 200 } });
       }

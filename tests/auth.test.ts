@@ -156,7 +156,7 @@ test('MCP discovery stays local while protected tool invocations verify identity
   })).json() as { result: { instructions?: string } };
   assert.match(initialized.result.instructions ?? '', /open Riff immediately with `open_riff`/i);
   await rpc('tools/list', {});
-  await rpc('resources/read', { uri: 'ui://riff/home-v2.html' });
+  await rpc('resources/read', { uri: 'ui://riff/home-v3.html' });
   assert.equal(identity.resolutions.length, 0,
     'public MCP discovery and static UI reads must not resolve an account merely because ChatGPT attached a token');
 

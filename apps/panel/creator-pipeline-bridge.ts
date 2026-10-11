@@ -2,7 +2,7 @@ import {
   App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps';
-import { OpenAIExtensions } from '@openai/mcp-extensions/app';
+import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { StartRiffCreatorInput } from '../../packages/contracts/riff-creator.ts';
 import { mountCreatorPipeline } from './creator-pipeline/index.ts';
 import { createCreatorPipelineController, creatorJobStructuredOutput, type CreatorPipelineLimits } from './creator-pipeline-controller.ts';
@@ -14,7 +14,6 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const timeoutMs = limits.timeoutMs ?? WAIT_MS;
   const app = new App({ name: 'kettle-creator-pipeline', version: '1.0.0' },
     { availableDisplayModes: ['inline', 'fullscreen'] }, { autoResize: false });
-  const extensions = new OpenAIExtensions(app);
   const doc = root.ownerDocument;
   const host = doc.createElement('section');
   host.setAttribute('aria-label', 'Riff creator job');
@@ -22,16 +21,15 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const message = doc.createElement('p');
   message.setAttribute('role', 'status'); message.setAttribute('aria-live', 'polite');
   message.tabIndex = -1;
+  message.hidden = true;
+  message.style.cssText = 'margin:12px 20px;color:var(--color-text-secondary,#6d6d72);font-size:13px;line-height:20px';
   const card = doc.createElement('div');
-  const refresh = doc.createElement('button');
-  refresh.type = 'button'; refresh.textContent = 'Refresh job'; refresh.hidden = true;
-  refresh.style.cssText = 'font:inherit;padding:8px 12px;margin:8px;border:1px solid currentColor;border-radius:8px;color:inherit;background:transparent;cursor:pointer';
-  host.append(message, card, refresh); root.replaceChildren(host);
+  host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
     view?.dispose(); view = undefined; card.replaceChildren();
-    refresh.hidden = true; message.textContent = text;
+    message.hidden = false; message.textContent = text;
     if (hadFocus) message.focus({ preventScroll: true });
   }
   const messages = {
@@ -42,14 +40,17 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   } as const;
   let bridgeReady = false;
   const sendPrompt = async (prompt: string) => {
-    if (!bridgeReady || !app.getHostCapabilities()?.message?.text) return {
+    const capabilities = app.getHostCapabilities();
+    if (!bridgeReady || (capabilities?.experimental?.['openai/message'] == null && !capabilities?.message?.text)) return {
       status: 'unsupported' as const, message: 'Continue with this request in the ChatGPT composer.',
     };
     try {
-      const params = { role: 'user' as const, content: [{ type: 'text' as const, text: prompt }] };
-      const result = extensions.message
-        ? await extensions.message.send({ ...params, _meta: { 'openai/message': { target: 'active', send: true } } })
-        : await app.sendMessage(params);
+      const params: OpenAIMessageParams = {
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+        _meta: { 'openai/message': { target: 'active', send: true } },
+      };
+      const result = await app.sendMessage(params as Parameters<typeof app.sendMessage>[0]);
       return result.isError
         ? { status: 'failed' as const, message: 'ChatGPT did not accept that handoff. Continue in the composer.' }
         : { status: 'sent' as const, message: 'Sent to ChatGPT. Continue there when you are ready.' };
@@ -80,14 +81,13 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         sendPrompt, requestFullscreen,
       });
       view.render(job);
-      message.textContent = status.notice ?? (status.refreshing ? 'Checking saved job status…' : '');
-      refresh.hidden = !status.canRefresh; refresh.disabled = status.refreshing;
+      message.textContent = status.notice ?? '';
+      message.hidden = !status.notice;
     },
     cleared(reason) { clearCard(messages[reason]); },
   }, async (input, signal) => creatorJobStructuredOutput(await app.callServerTool(
     { name: 'get_creator_job', arguments: input },
     { signal, timeout: timeoutMs + 1_000, maxTotalTimeout: timeoutMs + 1_000 })), limits);
-  refresh.addEventListener('click', () => { void controller.refresh(); });
   // Receiving a job before initialization must not cancel the handshake deadline.
   const initialTimer = setTimeout(() => controller.connectionFailed(), timeoutMs);
   const applyContext = (context: McpUiHostContext | undefined) => {

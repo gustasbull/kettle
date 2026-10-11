@@ -4,6 +4,9 @@ import { createServer } from 'node:http';
 import { chromium } from 'playwright';
 import { build } from 'esbuild';
 
+const internalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
+const internalWorkflowLanguage = /\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant|file ID|save_creator_scripts)\b|\bversion\s+\d+\b/i;
+
 test('Riff Home keeps onboarding in chat and runs the creator happy path in the app', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
@@ -19,12 +22,12 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
       const frame=()=>document.querySelector('iframe').contentWindow;
       const result=(id,structuredContent)=>frame().postMessage({jsonrpc:'2.0',id,result:{content:[],structuredContent}},'*');
       addEventListener('message',e=>{const m=e.data;
-        if(m.method==='ui/initialize') frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},message:{text:{}},experimental:{'openai/message':{}}},hostContext:{theme:'dark',locale:'lt',safeAreaInsets:{top:7,right:8,bottom:9,left:10},styles:{variables:{'--color-background-primary':'#101010'},css:{fonts:'body{letter-spacing:.01px}'}}}}},'*');
+        if(m.method==='ui/initialize') frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},experimental:{'openai/message':{}}},hostContext:{theme:'dark',locale:'lt',safeAreaInsets:{top:7,right:8,bottom:9,left:10},styles:{variables:{'--color-background-primary':'#101010'},css:{fonts:'body{letter-spacing:.01px}'}}}}},'*');
         if(m.method==='ui/notifications/initialized'){frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;}
         if(m.method==='ui/message'){window.messages.push(m.params);frame().postMessage({jsonrpc:'2.0',id:m.id,result:{}},'*');}
         if(m.method==='tools/call'){
           window.calls.push(m.params);
-          if(m.params.name==='start_riff_creator') return result(m.id,{ok:true,data:{project:{id:frame().fixtures.scan.project_id},job:frame().fixtures.scan,source:{canonical_url:m.params.arguments.source_url}}});
+          if(m.params.name==='start_riff_creator') return result(m.id,{ok:true,data:{job:frame().fixtures.scan}});
           if(m.params.name==='start_creator_recommendations') return result(m.id,{ok:true,data:{job:frame().fixtures.ideas}});
           if(m.params.name==='get_creator_job') return result(m.id,{ok:true,data:{job:frame().fixtures.scan}});
           return result(m.id,{ok:true,data:{}});
@@ -54,15 +57,25 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   assert.equal(await page.evaluate(() => window.calls.some(call => call.name === 'mark_riff_onboarding_seen')), false,
     'Home does not mark onboarding before the chat welcome is delivered');
 
-  await frame.getByRole('button', { name: 'Open Riff menu' }).click();
-  await frame.getByRole('menuitem', { name: 'How Riff works' }).click();
-  await page.waitForFunction(() => window.messages.length === 1);
-  assert.match(await page.evaluate(() => window.messages[0].content[0].text), /welcome guide.*conversation/i);
   assert.equal(await page.evaluate(() => window.calls.some(call => call.name === 'show_riff_welcome')), false,
-    'the app asks in the active conversation instead of trying to render onboarding inside itself');
+    'Home does not try to render onboarding inside itself');
+
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  await frame.evaluate(() => { window.openai = { selectFiles: async () => [{fileId:'file_video',fileName:'clip.mp4',mimeType:'video/mp4'}] }; });
+  await frame.getByRole('button', { name: 'Upload a video' }).click();
+  await page.waitForFunction(() => window.messages.length === 1);
+  const uploadMessage = await page.evaluate(() => window.messages[0].content[0].text);
+  assert.match(uploadMessage, /selected.*clip\.mp4.*analy[sz]e/i);
+  assert.doesNotMatch(uploadMessage, /file_video/i);
+  assert.doesNotMatch(uploadMessage, internalWorkflowLanguage);
+
+  await input.fill('A fast desk makeover with one surprising constraint'); await input.press('Control+Enter');
+  await page.waitForFunction(() => window.messages.length === 2);
+  assert.match(await page.evaluate(() => window.messages[1].content[0].text), /desk makeover.*clarifying/i);
+  assert.equal(await page.evaluate(() => window.calls.filter(call => call.name === 'start_riff_creator').length), 0,
+    'plain ideas continue in chat without spending provider credits');
 
   const source = 'https://vm.tiktok.com/ZN8kT9uhV/';
-  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   await input.fill(source); await input.press('Control+Enter');
   await page.waitForFunction(() => window.calls.some(call => call.name === 'start_riff_creator'));
   const start = await page.evaluate(() => window.calls.find(call => call.name === 'start_riff_creator'));
@@ -75,25 +88,17 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   await page.waitForFunction(() => window.calls.some(call => call.name === 'start_creator_recommendations'));
   await frame.getByRole('heading', { name: 'Find your next breakout idea.' }).waitFor();
   await frame.getByRole('button', { name: 'Make it mine' }).click();
-  await page.waitForFunction(() => window.messages.length === 2);
-  assert.match(await page.evaluate(() => window.messages[1].content[0].text), /save_creator_scripts/);
-
-  await frame.waitForFunction(() => !document.querySelector('.riff-home__create')?.disabled);
-  await frame.locator('header').getByRole('button', { name: 'Create a video' }).click();
-  await frame.evaluate(() => { window.openai = { selectFiles: async () => [{fileId:'file_video',fileName:'clip.mp4',mimeType:'video/mp4'}] }; });
-  await frame.getByRole('button', { name: 'Upload a video' }).click();
   await page.waitForFunction(() => window.messages.length === 3);
-  assert.match(await page.evaluate(() => window.messages[2].content[0].text), /clip\.mp4.*file_video/i);
-
-  await frame.waitForFunction(() => !document.querySelector('.riff-home__submit')?.disabled);
-  await input.fill('A fast desk makeover with one surprising constraint'); await input.press('Control+Enter');
-  await page.waitForFunction(() => window.messages.length === 4);
-  assert.match(await page.evaluate(() => window.messages[3].content[0].text), /desk makeover.*clarifying/i);
+  const selectionMessage = await page.evaluate(() => window.messages[2].content[0].text);
+  assert.match(selectionMessage, /One useful desk change.*complete video direction/i);
+  assert.match(selectionMessage, /two or three.*filming variants/i);
+  assert.doesNotMatch(selectionMessage, internalUuid);
+  assert.doesNotMatch(selectionMessage, internalWorkflowLanguage);
   assert.equal(await page.evaluate(() => window.calls.filter(call => call.name === 'start_riff_creator').length), 1,
     'plain ideas continue in chat without spending provider credits');
 
   assert.deepEqual(await page.evaluate(() => window.messages.map(message => message._meta['openai/message'])),
-    Array.from({ length: 4 }, () => ({ target: 'active', send: true })));
+    Array.from({ length: 3 }, () => ({ target: 'active', send: true })));
   await page.evaluate(() => frame().postMessage({jsonrpc:'2.0',id:'teardown',method:'ui/resource-teardown',params:{}},'*'));
   await page.waitForFunction(() => window.tornDown);
   await frame.waitForFunction(() => document.querySelector('#mount').textContent === '');
@@ -340,9 +345,9 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
   const source = 'https://www.tiktok.com/@fixture/video/7000000000000000001';
   const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   await input.fill(source); await input.press('Control+Enter');
-  await frame.getByRole('button', { name: /Refresh saved job/ }).waitFor();
-  assert.match(await frame.locator('.riff-home__job-id').textContent(), /^Job [0-9a-f-]{36}$/i);
   await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).waitFor();
+  assert.equal(await frame.getByRole('button', { name: /Refresh saved job/ }).count(), 0);
+  assert.equal(await frame.locator('.riff-home__job-id').count(), 0);
   assert.equal(await page.evaluate(() => window.getCalls), 3, 'a transient read timeout does not stop bounded polling');
   await page.waitForFunction(() => window.listCalls >= 3);
   await frame.evaluate(() => window.bridge.dispose());

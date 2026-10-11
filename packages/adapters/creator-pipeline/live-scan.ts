@@ -1,8 +1,10 @@
 /** @internal Live scan mapping; only trusted transport receipts and server permissions belong here. */
-import { ProfileScanRequest, ProfileScanResult, type ObservationProvenance,
+import { z } from 'zod';
+import { ProfileScanRequest, ProfileScanResult, TikTokImageUrl, type ObservationProvenance,
   type ScanCostEvidence, type ScanCoverage } from '../../contracts/creator-profile.ts';
 import { characterizeFeed, characterizeProfile } from '../creator-scan/scrapecreators-characterization.ts';
 import type { HttpEvidence } from './http.ts';
+import { readTikTokVideoFacts } from './detail-json.ts';
 
 // Receipt IDs/timestamps are assigned by the transport, never accepted from source JSON.
 export type ScanReceipt = HttpEvidence & { id: string; source_observed_at: string | null };
@@ -51,6 +53,13 @@ export function normalizeLiveTikTokScan(input: {
   }
   const identity = { platform: 'tiktok' as const, native_id: profile.user.id };
   const url = `https://www.tiktok.com/@${profile.user.uniqueId}`;
+  const avatarCandidate = (() => {
+    try {
+      return z.object({ user: z.object({ avatarLarger: z.unknown().optional() }) })
+        .parse(JSON.parse(profileAttempt.body)).user.avatarLarger;
+    } catch { return undefined; }
+  })();
+  const avatar = TikTokImageUrl.safeParse(avatarCandidate);
   const provenance = (attempt: ScanReceipt, endpoint: string, source_url: string,
     caption: boolean): ObservationProvenance => ({
     provider: 'scrapecreators', endpoint, origin: 'live', retrieved_at: attempt.retrieved_at,
@@ -60,6 +69,21 @@ export function normalizeLiveTikTokScan(input: {
   });
   const replay = characterizeFeed({ profileBody: profileAttempt.body, attempts: input.feedAttempts,
     maxPages: request.max_pages, maxVideos: request.max_videos });
+  // Characterization deliberately understands only analysis fields. Parse the
+  // already-sanitized receipt again for optional display facts and bind by ID.
+  const presentation = input.feedAttempts.map(attempt => {
+    const byId = new Map<string, NonNullable<ReturnType<typeof readTikTokVideoFacts>>[]>();
+    try {
+      const rows = z.object({ aweme_list: z.array(z.unknown()).max(500) }).parse(JSON.parse(attempt.body)).aweme_list;
+      for (const row of rows) {
+        const facts = readTikTokVideoFacts(row);
+        if (!facts) continue;
+        const queue = byId.get(facts.native_id) ?? [];
+        queue.push(facts); byId.set(facts.native_id, queue);
+      }
+    } catch { /* malformed core rows are already counted/rejected by characterization */ }
+    return byId;
+  });
   for (let i = 0; i < replay.attempts; i++) {
     const attempt = input.feedAttempts[i]!;
     const succeeded = i < replay.pages.length;
@@ -69,12 +93,15 @@ export function normalizeLiveTikTokScan(input: {
   const videos = replay.observations.map(({ attempt, item }) => {
     const source = input.feedAttempts[attempt - 1]!;
     const canonical_url = `${url}/video/${item.aweme_id}`;
+    const facts = presentation[attempt - 1]?.get(item.aweme_id)?.shift();
     return { id: newId(), video: { platform: 'tiktok' as const, native_id: item.aweme_id },
       creator: identity, canonical_url, caption: item.desc,
       published_at: item.create_time === null ? null : new Date(item.create_time * 1000).toISOString(),
       duration_seconds: item.video?.duration ? item.video.duration / 1000 : null,
+      ...(facts?.thumbnail_url ? { thumbnail_url: facts.thumbnail_url } : {}),
       metrics: { views: item.statistics?.play_count ?? null, likes: item.statistics?.digg_count ?? null,
-        comments: item.statistics?.comment_count ?? null, shares: item.statistics?.share_count ?? null },
+        comments: item.statistics?.comment_count ?? null, shares: item.statistics?.share_count ?? null,
+        ...(facts?.saves !== undefined ? { saves: facts.saves } : {}) },
       provenance: provenance(source, '/v3/tiktok/profile/videos', canonical_url, item.desc !== null),
     };
   });
@@ -89,6 +116,7 @@ export function normalizeLiveTikTokScan(input: {
     profile_observations: [{ id: newId(), profile: identity, canonical_url: url,
       handle: profile.user.uniqueId, display_name: profile.user.nickname ?? null,
       bio: profile.user.signature, follower_count: profile.followerCount,
+      ...(avatar.success ? { avatar_url: avatar.data } : {}),
       provenance: provenance(profileAttempt, '/v1/tiktok/profile', url, false) }],
     video_observations: videos,
     coverage: { pages_received: replay.pages.length, unique_videos: replay.uniqueIds.length,

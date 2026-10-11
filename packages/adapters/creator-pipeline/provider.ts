@@ -2,7 +2,7 @@ import { topicalMatchingText } from '../creator-scan/topical-context.ts';
 import { z } from 'zod';
 import { CreatorDnaView } from '../../contracts/creator-operations.ts';
 import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview } from '../../contracts/creator-profile.ts';
-import { RecommendationBatch, CreatorScriptSet, FilmingVariant,
+import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment,
   type CreatorPipelineProvider, type CreatorProviderContext } from '../../contracts/creator-pipeline.ts';
 import { buildGroundedCreatorDna } from '../creator-scan/dna.ts';
 import { characterizeFeed, characterizeProfile } from '../creator-scan/scrapecreators-characterization.ts';
@@ -45,7 +45,24 @@ export type CreatorPipelineAdapterOptions = {
   timeouts?: { scrapeMs?: number; researchMs?: number; seedReviewMs?: number; modelMs?: number };
 };
 const seedReviewCaveat = 'Supplied video review, not whole-profile DNA. Reported access is a Lightreel claim, not independently verified video evidence.';
-const modelOutput = z.strictObject({ variants: z.array(FilmingVariant.omit({ id: true })).min(2).max(3) });
+// Persisted legacy variants may omit these fields, while a new strict model
+// response must always make an explicit structured choice for Paper Studio.
+// Segment-level on-screen text remains available in the persisted contract,
+// but the model dialect omits it because variant-level on_screen_text already
+// carries that content and strict structured outputs cannot declare optionals.
+const generatedTimedSegment = z.strictObject({
+  part: TimedFilmingSegment.shape.part,
+  start_seconds: TimedFilmingSegment.shape.start_seconds,
+  end_seconds: TimedFilmingSegment.shape.end_seconds,
+  spoken_text: TimedFilmingSegment.shape.spoken_text,
+  filming_direction: TimedFilmingSegment.shape.filming_direction,
+}).refine(segment => segment.end_seconds > segment.start_seconds, 'Timed segment must end after it starts');
+const generatedVariant = FilmingVariant.omit({ id: true }).extend({
+  timed_segments: z.array(generatedTimedSegment).min(1).max(10),
+  caption: FilmingVariant.shape.caption.unwrap(),
+  hashtags: FilmingVariant.shape.hashtags.unwrap(),
+});
+const modelOutput = z.strictObject({ variants: z.array(generatedVariant).min(2).max(3) });
 const modelSchema = z.toJSONSchema(modelOutput) as Record<string, unknown>;
 
 export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOptions): CreatorPipelineProvider {
@@ -112,6 +129,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const review = readLightreelSeedReview(seedReceipt.body, seedUrl);
         seedReview = LightreelSeedReview.parse({ url: seedUrl, provider: 'lightreel', conversation_id: review.conversationId,
           summary: review.answer.summary, access_basis: review.answer.access_basis,
+          ...(review.answer.dimensions ? { dimensions: review.answer.dimensions } : {}),
           limitations: review.answer.limitations.length < 20 ? [seedReviewCaveat, ...review.answer.limitations] : review.answer.limitations,
           provenance: { provider: 'lightreel', endpoint: '/v1/chat', origin: 'live',
             retrieved_at: seedReceipt.retrieved_at, source_observed_at: null, source_url: seedUrl,
@@ -169,6 +187,11 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       }
       if (result.urls === null) throw new CreatorProviderError('unavailable');
       const references: RecommendationBatch['references'] = [];
+      const observedViews = dna.evidence.flatMap(e => e.metrics?.views !== null && e.metrics?.views !== undefined && e.metrics.views > 0
+        ? [e.metrics.views] : []).sort((a, b) => a - b);
+      const medianViews = observedViews.length === 0 ? undefined : observedViews.length % 2 === 1
+        ? observedViews[Math.floor(observedViews.length / 2)]!
+        : (observedViews[observedViews.length / 2 - 1]! + observedViews[observedViews.length / 2]!) / 2;
       for (const url of result.urls) {
         const nativeId = parseTikTokUrl(url).videoId!;
         const r = await call(context, `video:${nativeId}`, 'scrapecreators', 'video', detailRequest(url, options.region), undefined,
@@ -180,11 +203,21 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             return clean;
           });
         const { observation: o } = readTikTokDetail(r.body, url, r.id, provenance(r, '/v2/tiktok/video', url));
+        const multiplier = medianViews !== undefined && o.metrics.views !== null
+          ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
         references.push({ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
           retrieved_at: o.provenance.retrieved_at, published_at: o.published_at,
-          caption: o.caption, views: o.metrics.views, origin: 'live', permission_basis: permission.basis,
+          caption: o.caption, views: o.metrics.views,
+          ...(o.thumbnail_url ? { thumbnail_url: o.thumbnail_url } : {}),
+          duration_seconds: o.duration_seconds, likes: o.metrics.likes,
+          ...(o.metrics.saves !== undefined ? { saves: o.metrics.saves } : {}),
+          ...(multiplier !== undefined && medianViews !== undefined ? { view_multiplier: multiplier,
+            view_multiplier_basis: { method: 'median_observed_profile_views' as const,
+              baseline_views: medianViews, sample_size: observedViews.length } } : {}),
+          origin: 'live', permission_basis: permission.basis,
           limitations: ['Caption and metadata only; no visual or pacing analysis.',
             'Views are an observation, not evidence of causal success or expected results.',
+            ...(multiplier !== undefined ? [`View multiplier compares observed views with the median of ${observedViews.length} displayed profile observation${observedViews.length === 1 ? '' : 's'}; it is not a performance prediction.`] : []),
             o.provenance.source_observed_at ? `Provider cache observation time: ${o.provenance.source_observed_at}.` : 'Source observation time is unknown; retrieval time does not establish metric freshness.'] });
       }
       return buildRecommendations(dna, references, { newId: await receiptIds(research.id, 5), now: () => research.retrieved_at });
@@ -197,7 +230,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const idea = batch.ideas.find(i => i.id === input.idea_id);
       if (!idea || batch.dna_id !== dna.dna_id || batch.dna_version !== dna.version || batch.contains_fixture_data ||
         batch.references.some(r => r.origin !== 'live')) throw new Error('Selection or DNA lineage mismatch');
-      const references = batch.references.filter(r => idea.reference_ids.includes(r.id));
+      const references = idea.reference_ids.map(referenceId => batch.references.find(reference => reference.id === referenceId)!);
       const body = scriptBody(options.model, options.maxOutputTokens,
         { idea, references, dna: { version: dna.version, claims: dna.claims, limitations: dna.limitations } }, modelSchema);
       const r = await call(context, 'generate', 'openai', 'generate', new URL('https://api.openai.com/v1/responses'), body,
@@ -214,7 +247,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const newId = await receiptIds(r.id, 4);
       return CreatorScriptSet.parse({ id: newId(), batch_id: batch.id, idea_id: idea.id,
         dna_id: dna.dna_id, dna_version: dna.version, version: 1, created_at: r.retrieved_at,
-        variants: output.variants.map(v => ({ ...v, id: newId() })), contains_fixture_data: false,
+        variants: output.variants.map(v => ({ ...v, id: newId() })), idea, references, contains_fixture_data: false,
         limitations: ['AI-generated proposals grounded in the selected evidence; human review required.',
           'Proposed visuals and pacing are filming instructions, not observed reference features or performance predictions.'] });
     },
@@ -229,27 +262,35 @@ function buildRecommendations(dna: CreatorDnaView, references: RecommendationBat
     !['this','that','with','from','content','audience','inferred','topics','captions','about','their'].includes(w)) ?? []);
   const ideas: RecommendationBatch['ideas'] = [];
   for (const ref of references) {
-    if (!ref.caption) continue;
-    const tokens = words(ref.caption);
+    const tokens = words(ref.caption ?? '');
     const claim = topical.find(c => [...words(topicalMatchingText(c))].some(w => tokens.has(w)));
     const review = dna.seed_review;
     const reviewMatch = review && ['video_access_reported','transcript_or_caption_only'].includes(review.access_basis) &&
       [...words(review.summary)].some(w => tokens.has(w));
-    if (!claim && !reviewMatch) continue;
-    const topic = claim?.statement ?? review!.summary.slice(0,2400);
-    ideas.push({ id: context.newId(), title: `Test a creator-specific variation ${ideas.length + 1}`,
+    const savedClaim = claim ?? topical[0] ?? dna.claims[0];
+    const captionEvidence = ref.caption === null ? 'Reference caption unavailable.'
+      : `Observed reference caption: “${ref.caption.slice(0,1800)}”`;
+    ideas.push({ id: context.newId(), title: `Reference-led variation ${ideas.length + 1}`,
       concept: (claim ? `Create an original video exploring your stated topic: ${claim.statement}` :
-        `Create an original video exploring this supplied-video topic: ${topic}`).slice(0,3000),
-      creator_fit: (claim ? `Uses DNA v${dna.version} (${claim.basis}): ${claim.statement}` :
-        `Uses the supplied video review, not whole profile: ${topic}. Access basis: ${review!.access_basis}; provider report, not independent verification.`).slice(0,3000),
-      evidence_summary: `Reference caption shares topic language with ${claim ? 'this DNA claim' : 'the supplied video review, not whole-profile DNA'}. ${ref.views === null ? 'Views unavailable.' : `Observed views: ${ref.views}; no performance prediction.`}`,
+        reviewMatch ? `Create an original video exploring this supplied-video topic: ${review.summary}` :
+        savedClaim ? `Create an original take on the selected reference for this saved creator context: ${savedClaim.statement}` :
+        'Create an original creator-led take on this selected reference. Confirm the subject fits before filming.').slice(0,3000),
+      creator_fit: (claim ? `Proposed fit based on DNA v${dna.version} (${claim.basis}): ${claim.statement}` :
+        reviewMatch ? `Proposed fit based on supplied video review, not whole profile: ${review.summary}. Access basis: ${review.access_basis}; provider report, not independent verification.` :
+        savedClaim ? `Proposed fit based on saved DNA v${dna.version} (${savedClaim.basis}): ${savedClaim.statement}` :
+        'Lightreel selected this reference for the captured creator context, but no saved topical claim independently confirms fit.').slice(0,3000),
+      evidence_summary: (`Lightreel selected this public reference for the saved creator context. ${captionEvidence} ` +
+        `${ref.views === null ? 'Views unavailable.' : `Observed views: ${ref.views}; no performance prediction.`}`).slice(0,3000),
       execution: 'Choose one concrete example from your own experience. State the problem, demonstrate your proposed change, and ask a relevant question. These are filming proposals, not observed reference structure.',
-      reference_ids: [ref.id], limitations: ['Topic overlap is a lexical baseline, not a validated semantic relevance score.',
-        claim?.uncertainty ?? 'Provider-authored supplied-video review; access and conclusions are not independently verified.', 'No measured audience demographics, visual analysis or causal performance claim.'] });
+      reference_ids: [ref.id], limitations: [
+        'Lightreel provider-selected relevance is grounded selection context, not independently verified semantic fit.',
+        ...(claim ? ['Topic overlap is a lexical baseline, not a validated semantic relevance score.'] : []),
+        savedClaim?.uncertainty ?? 'No saved DNA claim independently confirms the proposed creator fit.',
+        'No measured audience demographics, visual analysis or causal performance claim.'] });
   }
   return RecommendationBatch.parse({ id: context.newId(), dna_id: dna.dna_id, dna_version: dna.version,
     created_at: context.now(), references, ideas, contains_fixture_data: false,
     limitations: ['Bounded Lightreel discovery with at most three ScrapeCreators metadata enrichments.',
       'Suggestions are testable proposals; human review should assess relevance.',
-      ...(ideas.length ? [] : ['No caption/topic overlap supports a recommendation; correct or add topical DNA before another separately allocated search.'])] });
+      ...(ideas.length ? [] : ['Lightreel returned no usable public references for this bounded search.'])] });
 }

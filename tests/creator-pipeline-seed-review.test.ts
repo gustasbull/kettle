@@ -8,7 +8,12 @@ import { projectCreatorDna } from '../packages/application/creator-operations.ts
 
 function setup() {
  const f=providerHttpFixture(); const seedUrl=f.input.request.supplied_url+'/video/9000000000000000011';
- const answer={video_url:seedUrl,summary:'A desk demonstration in this supplied video; pacing is unverified.',access_basis:'transcript_or_caption_only',limitations:['Caption only.']};
+ const dimensions=[
+  ['hook','needs_attention'],['content','working_well'],['style_pacing','unknown'],
+  ['voice_language','working_well'],['script','needs_rework'],['cta','needs_attention'],
+ ].map(([dimension,status])=>({dimension,status,summary:`Evidence-bounded ${dimension} assessment.`,
+  ...(status==='unknown'?{}:{recommendation:`Proposed ${dimension} change.`})}));
+ const answer={video_url:seedUrl,summary:'A desk demonstration in this supplied video; pacing is unverified.',access_basis:'transcript_or_caption_only',dimensions,limitations:['Caption only.']};
  return {...f,seedUrl,answer};
 }
 test('exact supplied video is reviewed before SC calls, with allowlisted guarded replay and metadata-only attribution',async()=>{
@@ -18,7 +23,8 @@ test('exact supplied video is reviewed before SC calls, with allowlisted guarded
    if(new URL(url).hostname==='api.lightreel.ai') {
     seedCalls++;const request=JSON.parse(init.body as string);
     assert.equal(init.method,'POST');assert.match(request.question,/ONLY this exact supplied TikTok video/);
-    assert.ok(request.question.includes(f.seedUrl));assert.equal(Object.keys(request.response_fields).length,4);
+    assert.ok(request.question.includes(f.seedUrl));assert.equal(Object.keys(request.response_fields).length,5);
+    assert.match(request.response_fields.dimensions.description,/exactly six/i);
     const answer={...f.answer,unrequested:'DO_NOT_RETAIN'};
     return Response.json({conversationId:'seed-fixture',answer:asString?JSON.stringify(answer):answer,private:'DO_NOT_RETAIN'});
    }
@@ -29,6 +35,7 @@ test('exact supplied video is reviewed before SC calls, with allowlisted guarded
   assert.deepEqual(guard.calls[0],{key:'seed-review',provider:'lightreel',operation:'research'});
   assert.equal(analysis.seed_review?.url,f.seedUrl);assert.equal(analysis.seed_review?.summary,f.answer.summary);
   assert.equal(analysis.seed_review?.conversation_id,'seed-fixture');assert.equal(analysis.seed_review?.access_basis,'transcript_or_caption_only');
+  assert.deepEqual(analysis.seed_review?.dimensions,f.answer.dimensions);
   assert.deepEqual(analysis.seed_review?.provenance.permission,f.options.permission);
   assert.deepEqual(analysis.seed_review?.provenance.modalities,['metadata']);
   assert.equal(analysis.seed_review?.provenance.origin,'live');assert.equal(analysis.seed_review?.provenance.endpoint,'/v1/chat');
@@ -49,8 +56,15 @@ test('seed parser rejects wrong source, missing identity, invalid enums and boun
   {conversationId:'ok',answer:{...f.answer,summary:'x'.repeat(8001)}},
   {conversationId:'ok',answer:{...f.answer,limitations:Array(21).fill('x')}},
   {conversationId:'ok',answer:{...f.answer,limitations:['x'.repeat(1001)]}},
+  {conversationId:'ok',answer:{...f.answer,dimensions:f.answer.dimensions.slice(0,5)}},
+  {conversationId:'ok',answer:{...f.answer,dimensions:f.answer.dimensions.map((d,i)=>i===5?{...d,dimension:'hook'}:d)}},
+  {conversationId:'ok',answer:{...f.answer,dimensions:f.answer.dimensions.map((d,i)=>i===0?{...d,status:'great'}:d)}},
+  {conversationId:'ok',answer:{...f.answer,dimensions:f.answer.dimensions.map(d=>d.dimension==='style_pacing'?{...d,status:'needs_attention'}:d)}},
+  {conversationId:'ok',answer:{...f.answer,access_basis:'unavailable'}},
   {conversationId:'ok',answer:'prose instead of structured JSON'},
  ]) assert.throws(()=>readLightreelSeedReview(JSON.stringify(raw),f.seedUrl));
+ const {dimensions:_dimensions,...legacy}=f.answer;
+ assert.equal(readLightreelSeedReview(JSON.stringify({conversationId:'legacy',answer:legacy}),f.seedUrl).answer.dimensions,undefined);
  assert.throws(()=>seedReviewBody(f.input.request.supplied_url));
 });
 test('seed POST failure neither falls back to SC nor polls/resubmits, and errors contain only bounded diagnostic enums',async()=>{
@@ -75,12 +89,13 @@ test('seed source must match requested profile before dispatch; unavailable revi
  const mismatch=createCreatorPipelineProvider({...f.options,seedUrl:'https://www.tiktok.com/@different/video/1',fetch:async()=>{calls++;throw Error('must not call');}});
  await assert.rejects(mismatch.scan(f.input.request,fakeGuard().context),/permission/);assert.equal(calls,0);
  const fallback=f.options.fetch;
+ const {dimensions:_dimensions,...unavailableAnswer}=f.answer;
  const provider=createCreatorPipelineProvider({...f.options,seedUrl:f.seedUrl,fetch:async(url,init)=>new URL(url).hostname==='api.lightreel.ai'
-  ?Response.json({conversationId:'unavailable',answer:{...f.answer,summary:'No video content could be accessed.',access_basis:'unavailable'}}):fallback(url,init)});
+  ?Response.json({conversationId:'unavailable',answer:{...unavailableAnswer,summary:'No video content could be accessed.',access_basis:'unavailable'}}):fallback(url,init)});
  const result=await provider.scan(f.input.request,fakeGuard().context);assert.equal(result.seed_review?.access_basis,'unavailable');
  assert.ok(result.dna.claims.every(c=>!c.statement.includes('No video content')));
 });
-test('recommendations receive supplied-video context without minting profile claims; unavailable review cannot create a match',async()=>{
+test('recommendations receive supplied-video context without minting profile claims; unavailable review is not used as fit evidence',async()=>{
  const f=setup();const fallback=f.options.fetch;let seedDone=false;let query='';
  const provider=createCreatorPipelineProvider({...f.options,seedUrl:f.seedUrl,fetch:async(url,init)=>{
   if(new URL(url).hostname==='api.lightreel.ai'&&!seedDone){seedDone=true;return Response.json({conversationId:'seed',answer:f.answer});}
@@ -95,7 +110,8 @@ test('recommendations receive supplied-video context without minting profile cla
  assert.match(batch.ideas[0]!.creator_fit,/supplied video review, not whole profile/);
  assert.match(batch.ideas[0]!.limitations.join(' '),/not independently verified/);
  const noAccess=await provider.recommend({...dna,seed_review:{...dna.seed_review!,access_basis:'unavailable'}},fakeGuard().context);
- assert.equal(noAccess.ideas.length,0);
+ assert.equal(noAccess.ideas.length,1);
+ assert.doesNotMatch(noAccess.ideas[0]!.creator_fit,/supplied video review/);
 });
 test('only SC feeds accept a bounded 2MiB raw response; enlarged raw bodies still produce small allowlisted receipts',async()=>{
  const f=setup();const fallback=f.options.fetch;const guard=fakeGuard();

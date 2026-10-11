@@ -54,6 +54,22 @@ test('public projection excludes account, captured evidence, inputs, request IDs
   }
 });
 
+test('public scan source kind is derived only from a fully validated captured scan',()=>{
+  const analysis=creatorAnalysisFixture(),profile=stored('scan');
+  profile.captured={scan:analysis.scan.request};
+  assert.equal(publicCreatorJob(profile).source_kind,'profile');
+  const video=stored('scan');
+  video.captured={scan:analysis.scan.request,seed_url:`${analysis.scan.request.supplied_url}/video/9000000000000000011`};
+  assert.equal(publicCreatorJob(video).source_kind,'video');
+  const mismatched=stored('scan');
+  mismatched.captured={scan:analysis.scan.request,seed_url:'https://www.tiktok.com/@different_creator/video/9000000000000000011'};
+  assert.equal(publicCreatorJob(mismatched).source_kind,undefined);
+  const malformed=stored('scan');
+  assert.equal(publicCreatorJob(malformed).source_kind,undefined);
+  const nonScan=stored('recommendations');nonScan.captured=video.captured;
+  assert.equal(publicCreatorJob(nonScan).source_kind,undefined);
+});
+
 test('reads never dispatch; repeated durable queued start retains job identity; dispatch failure retains accepted intent',async()=>{
   const h=harness();for(let n=0;n<2;n++)assert.equal((await h.operations.execute('start_creator_recommendations','token',input())).ok,true);
   assert.deepEqual(h.dispatches,[[id(620),account],[id(620),account]]);
@@ -130,7 +146,11 @@ function approvedStored() {
   return {dna_id:analysis.dna.id,project_id:id(100),analysis};
 }
 function approvedBatch(){const batch=recommendationBatchFixture();batch.contains_fixture_data=false;batch.references.forEach(r=>{r.origin='live';r.permission_basis='Synthetic permission test only';});return batch;}
-function approvedScripts(){const scripts=creatorScriptsFixture();scripts.contains_fixture_data=false;return scripts;}
+function approvedScripts(batch=approvedBatch()){
+  const scripts=creatorScriptsFixture();scripts.contains_fixture_data=false;
+  const idea=batch.ideas[0]!;
+  return {...scripts,idea,references:idea.reference_ids.map(referenceId=>batch.references.find(reference=>reference.id===referenceId)!)};
+}
 
 test('model-processing authorization requires exact captured identity/version/snapshot and live approved underlying claim evidence',()=>{
   const saved=approvedStored();assert.equal(canProcessCapturedDna(saved,projectCreatorDna(saved)),true);
@@ -146,7 +166,7 @@ test('model-processing authorization requires exact captured identity/version/sn
 });
 
 function runner(kind:StoredCreatorJob['kind']='recommendations') {
-  const saved=approvedStored(),batch=approvedBatch(),scripts=approvedScripts();
+  const saved=approvedStored(),batch=approvedBatch(),scripts=approvedScripts(batch);
   const job=stored(kind,'running');job.captured=kind==='scan'?{scan:saved.analysis.scan.request}:{stored:saved,...(kind==='scripts'?{batch,idea_id:batch.ideas[0]!.id}:{})};
   const finishes:any[]=[],providerCalls:string[]=[],steps:string[]=[],ingests:unknown[]=[];
   const repository:PipelineRepository={async call(op,_account,raw){if(op==='run_creator_job')return wrapped(job);if(op==='finish_creator_job'){finishes.push(raw);return wrapped({...job,...raw as object});}throw Error(op);}};
@@ -168,6 +188,16 @@ test('runner rejects captured project and processing rights before provider call
 test('runner rejects recommendation and script output lineage mismatches',async()=>{
   for(const key of ['dna_id','dna_version','contains_fixture_data'] as const){const r=runner();if(key==='dna_version')r.batch[key]++;else if(key==='contains_fixture_data')r.batch[key]=true;else r.batch[key]=id(999);await r.run();assert.equal(r.finishes.at(-1).state,'failed');}
   for(const key of ['batch_id','idea_id','dna_id','dna_version','references','contains_fixture_data']){const r=runner('scripts');if(key==='dna_version')r.scripts.dna_version++;else if(key==='references')r.scripts.variants[0]!.reference_ids=[id(999)];else if(key==='contains_fixture_data')r.scripts.contains_fixture_data=true;else r.scripts[key as 'batch_id'|'idea_id'|'dna_id']=id(999);await r.run();assert.equal(r.finishes.at(-1).state,'failed');}
+});
+
+test('runner rejects missing or substituted Studio context from a script provider',async()=>{
+  for(const mode of ['missing','substituted'] as const){
+    const r=runner('scripts');
+    const providerOutput=r.scripts as {idea?:unknown;references?:Array<Record<string,unknown>>};
+    if(mode==='missing'){delete providerOutput.idea;delete providerOutput.references;}
+    else providerOutput.references=[{...providerOutput.references![0]!,caption:'Provider-substituted reference content'}];
+    await r.run();assert.equal(r.finishes.at(-1).state,'failed',mode);
+  }
 });
 
 test('runner rejects captured batch or selected idea mismatch before generation',async()=>{
@@ -215,6 +245,8 @@ test('ChatGPT drafted variants save with generated durable IDs and no provider c
   assert.equal(r.finishes.at(-1).state,'succeeded');assert.deepEqual(r.providerCalls,[]);
   const saved=r.finishes.at(-1).result.scripts;
   assert.equal(saved.variants.length,2);assert.equal(new Set(saved.variants.map((v:{id:string})=>v.id)).size,2);
+  assert.deepEqual(saved.idea,r.batch.ideas[0]);
+  assert.deepEqual(saved.references,r.batch.references.filter(reference=>r.batch.ideas[0]!.reference_ids.includes(reference.id)));
   assert.match(saved.limitations.join(' '),/No separate OpenAI API request/);
   assert.deepEqual(saved.variants.map(({id:_id,...v}:any)=>v),variants);
 });

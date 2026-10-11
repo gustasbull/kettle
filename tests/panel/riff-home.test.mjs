@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { build } from 'esbuild';
 
-test('Riff Home follows the canonical shell and starts work inside the app', async (t) => {
+test('Riff Home reproduces the Paper Home surface without app-owned chrome', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHome } from './apps/panel/riff-home/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
@@ -27,10 +27,10 @@ test('Riff Home follows the canonical shell and starts work inside the app', asy
   for (const viewport of [{ width: 320, height: 700 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
     const page = await browser.newPage({ viewport });
     await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
-    assert.equal(await page.getByRole('navigation', { name: 'Riff navigation' }).count(), 1);
-    for (const name of ['Home', 'Discover', 'Studio']) {
-      assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1);
-    }
+    assert.equal(await page.getByRole('navigation', { name: 'Riff navigation' }).count(), 0,
+      'Paper marks the panel chrome as ChatGPT-owned, so the app must not duplicate it');
+    assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
     assert.equal(await page.getByRole('heading', { name: 'Let’s make your next video go viral.' }).count(), 1);
     assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).count(), 0, 'welcome belongs in chat, not Home');
     const creatorInput = page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
@@ -39,9 +39,22 @@ test('Riff Home follows the canonical shell and starts work inside the app', asy
     for (const name of ['Upload a video', 'Find my next idea']) {
       assert.equal(await creatorForm.getByRole('button', { name }).count(), 1);
     }
-    for (const name of ['Trending videos', 'Hooks', 'Product showcases', 'Calls to action']) {
-      assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1);
+    const paperIcons = new Map([
+      ['Trending videos', 'm3 17 6-6 4 3 8-10'],
+      ['Hooks', 'm13 2-9 12h7l-1 8 10-12h-7l1-8Z'],
+      ['Product showcases', 'M8 7V5a4 4 0 0 1 8 0v2'],
+      ['Calls to action', 'm5 3 14 9-7 1-3 7-4-17Z'],
+    ]);
+    for (const [name, path] of paperIcons) {
+      const chip = page.getByRole('button', { name, exact: true });
+      assert.equal(await chip.count(), 1);
+      assert.equal(await chip.locator('svg').count(), 1, `${name} uses the Paper SVG icon`);
+      assert.equal(await chip.locator(`path[d="${path}"]`).count(), 1);
     }
+    assert.equal(await creatorForm.getByRole('button', { name: 'Upload a video' }).locator('svg').count(), 1,
+      'Paper upload icon is visible');
+    assert.equal(await page.getByRole('button', { name: 'View recent work' }).locator('svg').count(), 1,
+      'Paper recent-work arrow is visible');
     const messageCount = await page.evaluate(() => window.events.filter(event => event.kind === 'message').length);
     const trending = page.getByRole('button', { name: 'Trending videos', exact: true });
     await trending.click();
@@ -56,14 +69,18 @@ test('Riff Home follows the canonical shell and starts work inside the app', asy
       'library navigation stays inside Riff instead of starting a slow model turn');
     assert.equal(await page.getByText('Pick up where you left off').count(), 1);
     assert.equal(await page.getByText('Loading recent work…').count(), 1);
-    assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
 
-    const pendingId = await page.evaluate(() => { const job=window.fixture('queued'); window.view.showJob(job); return job.id; });
-    assert.equal(await page.getByText(`Job ${pendingId}`).count(), 1);
-    await page.getByRole('button', { name: `Refresh saved job ${pendingId}` }).click();
-    assert.deepEqual((await page.evaluate(() => window.events.at(-1))), { kind: 'refresh-job', jobId: pendingId });
-    await page.getByRole('button', { name: 'Create a video' }).click();
+    if (viewport.width === 1440) {
+      assert.equal(await page.locator('.riff-home__hero-mark').evaluate(node => getComputedStyle(node).width), '104px');
+      assert.equal(await page.getByRole('heading', { name: 'Let’s make your next video go viral.' }).evaluate(node => getComputedStyle(node).fontSize), '40px');
+      assert.equal(await page.locator('.riff-home__composer').evaluate(node => getComputedStyle(node).width), '760px');
+    }
+
+    await page.evaluate(() => window.view.showJob(window.fixture('queued')));
+    assert.equal(await page.getByText(/^Job [0-9a-f-]{36}$/).count(), 0, 'Paper has no app-owned job chrome');
+    assert.equal(await page.getByRole('button', { name: /Refresh saved job/ }).count(), 0);
+    await page.evaluate(() => window.view.showHome());
 
     await creatorInput.fill('https://vm.tiktok.com/ZN8kT9uhV/');
     await creatorInput.press('Control+Enter');
@@ -74,15 +91,14 @@ test('Riff Home follows the canonical shell and starts work inside the app', asy
 
     await page.evaluate(() => window.view.showJob(window.fixture('video-analysis')));
     assert.equal(await page.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).count(), 1);
-    assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 1, 'new-video entry stays available');
     assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 0);
-    await page.getByRole('button', { name: 'Create a video' }).click();
+    await page.evaluate(() => window.view.showHome());
     assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 1);
     await page.close();
   }
 });
 
-test('Riff Home renders owned recents, menu actions, and account recovery without fictional rows', async (t) => {
+test('Riff Home renders Paper-shaped owned recents and account recovery without fictional rows', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHome, riffHomeStructuredOutput } from './apps/panel/riff-home/index.ts';
     window.events=[];
@@ -107,14 +123,14 @@ test('Riff Home renders owned recents, menu actions, and account recovery withou
   assert.equal(await page.getByText('Loading recent work…').count(), 1);
   await page.evaluate(() => window.view.setRecentsState({status:'error',message:'Recent work is temporarily unavailable.'}));
   assert.equal(await page.getByText('Recent work is temporarily unavailable.').count(), 1);
-  await page.getByRole('button', { name: 'Try again' }).click();
+  await page.getByRole('button', { name: 'View recent work' }).click();
   assert.equal((await page.evaluate(() => window.events.at(-1))).kind, 'refresh-recents');
 
   await page.evaluate(() => {
     window.renderAccount(null);
     window.view.setRecents([
-      {job_id:'00000000-0000-4000-8000-000000000101',title:'@alex.focus',stage:'Analysis ready',state:'succeeded',updated_at:'2026-10-11T12:00:00Z'},
-      {job_id:'00000000-0000-4000-8000-000000000102',title:'FocusNest',stage:'Ideas saved',state:'succeeded',updated_at:'2026-10-11T11:00:00Z'},
+      {job_id:'00000000-0000-4000-8000-000000000101',title:'@alex.focus',stage:'Analysis ready',state:'succeeded',updated_at:'2026-10-11T12:00:00Z',platform:'tiktok',handle:'alex.focus'},
+      {job_id:'00000000-0000-4000-8000-000000000102',title:'FocusNest',stage:'Ideas saved',state:'succeeded',updated_at:'2026-10-11T11:00:00Z',platform:'tiktok',handle:'focusnest'},
     ]);
   });
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1);
@@ -122,13 +138,11 @@ test('Riff Home renders owned recents, menu actions, and account recovery withou
   await page.getByRole('button', { name: /Open @alex.focus/ }).click();
   assert.equal((await page.evaluate(() => window.events.at(-1))).kind, 'recent');
 
-  await page.getByRole('button', { name: 'Open Riff menu' }).click();
-  assert.equal(await page.getByRole('menu').count(), 1);
-  await page.getByRole('menuitem', { name: 'How Riff works' }).click();
-  assert.equal((await page.evaluate(() => window.events.at(-1))).kind, 'welcome');
+  assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
+  assert.equal(await page.getByRole('menu').count(), 0);
 
   await page.evaluate(() => window.renderAccount('2026-10-11T12:00:00Z'));
-  assert.match(await page.getByText(/Ready, Fictional Creator/).textContent(), /Fictional Creator/);
+  assert.equal(await page.locator('.riff-home__account').textContent(), 'Ready, Fictional Creator');
   await page.evaluate(() => window.renderError());
   assert.match(await page.getByRole('status').textContent(), /could not read this account/i);
   assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').count(), 1);

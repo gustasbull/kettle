@@ -2,8 +2,10 @@ import {
   App, PostMessageTransport, applyDocumentTheme, applyHostFonts, applyHostStyleVariables,
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps/app-with-deps';
+import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
+import { isCreatorJobView } from './riff-home-validation.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -37,13 +39,8 @@ const envelope = (raw: unknown) => {
 };
 
 function readJob(raw: unknown): CreatorJobView | undefined {
-  const result = envelope(raw); const data = object(result?.data); const job = object(data?.job);
-  if (result?.ok !== true || !job || typeof job.id !== 'string' || typeof job.project_id !== 'string'
-    || typeof job.revision !== 'number' || !['scan', 'recommendations', 'scripts'].includes(String(job.kind))
-    || !['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'].includes(String(job.state))
-    || typeof job.created_at !== 'string' || typeof job.updated_at !== 'string') return undefined;
-  if (job.state === 'succeeded' ? !object(job.result) : job.result !== null) return undefined;
-  return job as CreatorJobView;
+  const result = envelope(raw); const data = object(result?.data);
+  return result?.ok === true && isCreatorJobView(data?.job) ? data.job : undefined;
 }
 
 const failureCodes = new Set([
@@ -142,17 +139,22 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     };
     try {
       let request: Promise<unknown>;
-      if (!app.getHostCapabilities()?.message?.text && window.openai?.sendFollowUpMessage) {
-        request = window.openai.sendFollowUpMessage({ prompt, scrollToBottom: false });
-      } else if (!app.getHostCapabilities()?.message?.text) return {
-        status: 'unsupported' as const, message: 'Continue in the ChatGPT composer with this request.',
-      }; else {
-        const params = {
-          role: 'user' as const, content: [{ type: 'text' as const, text: prompt }],
-          _meta: { 'openai/message': { target: 'active', send: true } },
-        };
-        request = app.sendMessage(params);
+      const params: OpenAIMessageParams = {
+        role: 'user' as const, content: [{ type: 'text' as const, text: prompt }],
+        _meta: { 'openai/message': { target: 'active' as const, send: true as const } },
+      };
+      // ChatGPT can advertise its active-conversation extension independently
+      // of the generic MCP Apps message capability. Prefer that exact surface;
+      // the window alias remains a compatibility fallback for older hosts.
+      const capabilities = app.getHostCapabilities();
+      if (capabilities?.experimental?.['openai/message'] != null || capabilities?.message?.text) {
+        request = app.sendMessage(params as Parameters<typeof app.sendMessage>[0]);
       }
+      else if (window.openai?.sendFollowUpMessage) {
+        request = window.openai.sendFollowUpMessage({ prompt, scrollToBottom: false });
+      } else return {
+        status: 'unsupported' as const, message: 'Continue in the ChatGPT composer with this request.',
+      };
       // A host can keep ui/message open for the full model turn. Wait briefly
       // for acceptance/rejection, then report a truthful pending state.
       const outcome = await withDeadline(request, Math.min(toolTimeoutMs, 750));
@@ -222,7 +224,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         }
         if (!selected) return send('I want to analyze a video with Riff. Help me attach it in this ChatGPT conversation. Do not claim it was uploaded or analyzed until the host confirms the file.');
         const label = selected.fileName?.trim() || 'selected video';
-        return send(`I selected the ChatGPT video file “${label}” (file ID ${selected.fileId}) for Riff. Help me analyze it. If Riff cannot yet pass this file to its analysis tools, say so plainly and ask me for a public TikTok link; do not claim the file was processed.`);
+        return send(`I selected “${label}” in ChatGPT for Riff. Help me analyze this video. If Riff cannot yet pass the selected file to its analysis tools, say so plainly and ask me for a public TikTok link; do not claim the file was processed.`);
       } catch { return { status: 'failed', message: 'The file picker could not complete. Attach the video in ChatGPT instead.' }; }
     },
     showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'); },
@@ -273,9 +275,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       view.showJob(job); observe(job); if (active(job)) void loadWork();
       return { status: 'sent', message: 'Discovery started. Riff will update this saved job here.' };
     },
-    makeMine: ({ job, batch, idea }) => {
+    makeMine: ({ library, intent }) => {
       actionEpoch++;
-      return send(`Continue this Riff workflow using creator job ${job.id}, recommendation batch ${batch.id}, and selected idea ${idea.id} (“${idea.title}”). Draft two or three evidence-grounded filming variants, then call save_creator_scripts with a fresh request ID and render the saved scripts in Studio. Do not invent references or claim anything was saved before the tool succeeds.`);
+      if (library !== 'videos') return send(intent);
+      return send(`${intent} Create two or three evidence-grounded filming variants with timed hook, main-content, and CTA sections, concrete filming directions, a platform caption, and hashtags. Save them in Studio only if Riff confirms the write; otherwise show them in chat and say they are not saved.`);
     },
   });
   view.render(homeState);
@@ -327,18 +330,22 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
     const result = envelope(outcome.value); const data = object(result?.data);
-    if (result?.ok !== true || !Array.isArray(data?.work)) {
+    if (result?.ok !== true || !Array.isArray(data?.work) || data.work.length > 20) {
       view.setRecentsState({ status: 'error', message: failureMessage(outcome.value, 'Recent work is temporarily unavailable.') });
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
     const items = data.work.flatMap(item => {
-      const work = object(item);
-      if (!work || typeof work.job_id !== 'string' || typeof work.project_name !== 'string'
-        || typeof work.updated_at !== 'string' || !['scan', 'recommendations', 'scripts'].includes(String(work.kind))
-        || !['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'].includes(String(work.state))) return [];
+      const work = object(item); const source = object(work?.source);
+      if (!work || typeof work.job_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(work.job_id)
+        || typeof work.project_name !== 'string' || !work.project_name.trim() || work.project_name.length > 120
+        || typeof work.updated_at !== 'string' || Number.isNaN(Date.parse(work.updated_at))
+        || !['scan', 'recommendations', 'scripts'].includes(String(work.kind))
+        || !['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'].includes(String(work.state))
+        || source?.platform !== 'tiktok' || typeof source.handle !== 'string' || !/^[\w.]{1,100}$/.test(source.handle)) return [];
       return [{ job_id: work.job_id, title: work.project_name, updated_at: work.updated_at,
         stage: work.kind === 'recommendations' ? 'Discovery' : work.kind === 'scripts' ? 'Studio' : 'Analysis',
-        state: work.state as CreatorJobView['state'] }];
+        state: work.state as CreatorJobView['state'], platform: 'tiktok' as const, handle: source.handle,
+      }];
     });
     view.setRecents(items);
     return { status: 'sent', message: items.length ? 'Recent work refreshed.' : 'No recent work yet.' };

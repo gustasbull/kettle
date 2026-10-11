@@ -50,6 +50,8 @@ export function scriptBody(model: string, maxOutputTokens: number, grounding: un
       + 'References provide inspiration, never evidence that a proposed script will perform well. '
       + 'Do not invent metrics, measured audience traits, endorsements, observed visuals or pacing. '
       + 'Suggested filming actions are new proposals, not observations of the reference. '
+      + 'When supported, provide timed hook, main_content and cta segments within the estimated duration. '
+      + 'Any caption and hashtags are original drafting proposals, not observed reference text or performance claims. '
       + 'Do not copy reference captions verbatim. Return only the requested structured output.',
     input: [{ role: 'user', content: [{ type: 'input_text', text: source }] }],
     text: { format: { type: 'json_schema', name: 'creator_script', strict: true, schema } },

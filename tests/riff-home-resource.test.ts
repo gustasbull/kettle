@@ -11,7 +11,7 @@ import {
   riffHomeHtml,
 } from '../apps/worker/riff-home-resource.ts';
 
-test('Riff Home keeps the prior URI readable while publishing the current fullscreen, empty-network MCP App', async (t) => {
+test('Riff Home keeps the prior URI readable while publishing the current fullscreen MCP App', async (t) => {
   const server = new McpServer({ name: 'riff-home-fixture', version: '1' });
   registerRiffHomeResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -24,12 +24,18 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
   assert.deepEqual(listed.resources.map(({ name, uri, mimeType }) => ({ name, uri, mimeType })), [{
     name: 'riff-home', uri: RIFF_HOME_URI, mimeType: RIFF_HOME_MIME,
   }, {
+    name: 'riff-home-v2-compat', uri: 'ui://riff/home-v2.html', mimeType: RIFF_HOME_MIME,
+  }, {
     name: 'riff-home-v1-compat', uri: 'ui://riff/home-v1.html', mimeType: RIFF_HOME_MIME,
   }]);
   const content = (await client.readResource({ uri: RIFF_HOME_URI })).contents[0]!;
+  const prior = (await client.readResource({ uri: 'ui://riff/home-v2.html' })).contents[0]!;
   const legacy = (await client.readResource({ uri: 'ui://riff/home-v1.html' })).contents[0]!;
   assert.ok('text' in content);
+  assert.ok('text' in prior);
   assert.ok('text' in legacy);
+  assert.equal(prior.text, content.text,
+    'existing ChatGPT threads can reload their cached v2 resource with the current safe bundle');
   assert.equal(legacy.text, content.text,
     'existing ChatGPT threads can reload their cached v1 resource with the current safe bundle');
   assert.deepEqual(content._meta, RIFF_HOME_META);
@@ -37,7 +43,9 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
     availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen',
   });
   assert.deepEqual(RIFF_HOME_META.ui.csp, {
-    connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [],
+    connectDomains: [],
+    resourceDomains: ['https://tiktokcdn.com', 'https://*.tiktokcdn.com'],
+    frameDomains: [], baseUriDomains: [],
   });
   const html = content.text as string;
   assert.match(html, /Riff Home/);

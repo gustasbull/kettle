@@ -91,12 +91,12 @@ test('empty and link-only inputs invent no substitute context', () => {
   assert.equal(topics(scan).claims.length, 0);
 });
 
-test('fallback provides reference-search context and lexical matches use only source words, not attribution boilerplate', async () => {
+test('fallback provides reference-search context while lexical evidence uses only source words, not attribution boilerplate', async () => {
   const { createCreatorPipelineProvider } = await import('../packages/adapters/creator-pipeline/provider.ts');
   const { fakeGuard, providerHttpFixture } = await import('../evals/creator-loop/provider-http-fixtures.ts');
   const { analysis } = topics();
   const dna = projectCreatorDna({ analysis, dna_id: analysis.dna.id, project_id: options.id });
-  for (const [caption, expected] of [['Astronomy explanations for beginners.', 1], ['Attributed excerpt for topic context.', 0]] as const) {
+  for (const [caption, hasLexicalEvidence] of [['Astronomy explanations for beginners.', true], ['Attributed excerpt for topic context.', false]] as const) {
     const fixture = providerHttpFixture(); const fetch = fixture.options.fetch;
     const provider = createCreatorPipelineProvider({ ...fixture.options, fetch: async (url, init) => {
       const response = await fetch(url, init);
@@ -106,7 +106,8 @@ test('fallback provides reference-search context and lexical matches use only so
       return Response.json(body);
     } });
     const batch = await provider.recommend(dna, fakeGuard().context);
-    assert.equal(batch.ideas.length, expected);
+    assert.equal(batch.ideas.length, 1, 'Lightreel-selected reference remains a grounded candidate');
+    assert.equal(batch.ideas[0]!.limitations.some(value => value.includes('lexical baseline')), hasLexicalEvidence);
     const research = fixture.http.find(h => new URL(h.url).hostname === 'api.lightreel.ai')!;
     assert.match(JSON.parse(research.init.body as string).question, /Astronomy explanations/);
   }

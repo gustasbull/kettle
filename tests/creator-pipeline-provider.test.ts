@@ -27,13 +27,30 @@ test('offline full adapter chain uses guarded calls and validates shared envelop
   const batch = RecommendationBatch.parse(await provider.recommend(dna, recommendations.context));
   assert.equal(batch.ideas.length, 1); assert.equal(batch.references.length, 1);
   assert.equal(batch.dna_version, dna.version);
+  assert.equal(batch.references[0]!.duration_seconds,12);
+  assert.equal(batch.references[0]!.likes,0);
   assert.deepEqual(recommendations.calls.map(c => c.operation), ['research', 'video']);
   const generation = fakeGuard();
   const scripts = CreatorScriptSet.parse(await provider.generate({ batch, idea_id: batch.ideas[0]!.id, dna }, generation.context));
   assert.equal(scripts.variants.length, 2); assert.equal(scripts.idea_id, batch.ideas[0]!.id);
   assert.equal(scripts.dna_id, dna.dna_id);
+  assert.deepEqual(scripts.idea,batch.ideas[0]);
+  assert.deepEqual(scripts.references,batch.ideas[0]!.reference_ids.map(referenceId=>batch.references.find(reference=>reference.id===referenceId)!));
+  assert.equal(scripts.variants[0]!.timed_segments?.length,3);
+  assert.match(scripts.variants[0]!.caption!,/desk/i);
+  assert.deepEqual(scripts.variants[0]!.hashtags,['#desktips']);
   assert.deepEqual(generation.calls.map(c => c.operation), ['generate']);
   assert.equal(f.http.length, 5);
+  const modelRequest=JSON.parse(f.http.find(h=>new URL(h.url).hostname==='api.openai.com')!.init.body as string);
+  const variantSchema=modelRequest.text.format.schema.properties.variants.items;
+  for(const field of ['timed_segments','caption','hashtags']) {
+    assert.ok(variantSchema.properties[field]);
+    assert.ok(variantSchema.required.includes(field),`${field} must be required by the strict model response schema`);
+  }
+  const segmentSchema=variantSchema.properties.timed_segments.items;
+  assert.deepEqual(new Set(segmentSchema.required),new Set(Object.keys(segmentSchema.properties)),
+    'strict model response schemas must require every declared nested property');
+  assert.match(modelRequest.instructions,/original drafting proposals/);
   const before = f.http.length;
   assert.deepEqual(await provider.scan(f.input.request, guard.context), analysis);
   assert.deepEqual(await provider.recommend(dna, recommendations.context), batch);
@@ -41,6 +58,34 @@ test('offline full adapter chain uses guarded calls and validates shared envelop
   assert.equal(f.http.length, before, 'recorded successes replay without new fetch');
   const records = JSON.stringify([...guard.successes.values(), ...recommendations.successes.values(), ...generation.successes.values()]);
   for (const key of Object.values(f.options.credentials)) assert.ok(!records.includes(key));
+});
+test('Lightreel-selected references remain grounded candidates when English lexical overlap misses', async () => {
+  const { dna } = await setup();
+  const f = providerHttpFixture(); const fallback=f.options.fetch;
+  const provider=createCreatorPipelineProvider({...f.options,fetch:async(url,init)=>{
+    const u=new URL(url);
+    if(u.hostname==='api.lightreel.ai')return Response.json({conversationId:'selected-by-lightreel',answer:{
+      urls:['https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011']}});
+    const response=await fallback(url,init);
+    if(u.pathname!=='/v2/tiktok/video')return response;
+    const body=await response.json() as any;
+    body.aweme_detail.desc='Caf\u00e9 ma\u00f1ana \u65b0\u3057\u3044';
+    body.aweme_detail.statistics={...body.aweme_detail.statistics,play_count:480,digg_count:21,collect_count:13};
+    body.aweme_detail.video={...body.aweme_detail.video,cover:{url_list:['https://p16-sign-va.tiktokcdn.com/cover.jpeg']}};
+    return Response.json(body);
+  }});
+  const batch=await provider.recommend(dna,fakeGuard().context);
+  assert.equal(batch.ideas.length,1,'provider-selected reference must not collapse solely on lexical mismatch');
+  assert.match(batch.ideas[0]!.evidence_summary,/Caf\u00e9 ma\u00f1ana \u65b0\u3057\u3044/);
+  assert.match(batch.ideas[0]!.creator_fit,/Proposed fit/i);
+  assert.match(batch.ideas[0]!.limitations.join(' '),/provider-selected relevance/i);
+  assert.equal(batch.references[0]!.thumbnail_url,'https://p16-sign-va.tiktokcdn.com/cover.jpeg');
+  assert.equal(batch.references[0]!.duration_seconds,12);
+  assert.equal(batch.references[0]!.likes,21);
+  assert.equal(batch.references[0]!.saves,13);
+  assert.equal(batch.references[0]!.view_multiplier,4);
+  assert.deepEqual(batch.references[0]!.view_multiplier_basis,
+    {method:'median_observed_profile_views',baseline_views:120,sample_size:1});
 });
 test('guard denial stops dispatch; adapter has no permissive guard or permission default', async () => {
   const f = providerHttpFixture(); const p = createCreatorPipelineProvider(f.options);

@@ -24,6 +24,46 @@ test('metrics retain zero vs unknown; unsafe counts, dates and duration fail', (
   reject(v => { v.scan.video_observations[0]!.published_at = 'yesterday'; });
   reject(v => { v.scan.video_observations[0]!.duration_seconds = 0; });
 });
+test('optional provider media facts and six Paper review dimensions remain evidence bounded', () => {
+  const v = creatorAnalysisFixture();
+  const video = v.scan.video_observations[0]!;
+  const profile = v.scan.profile_observations[0]!;
+  video.thumbnail_url = 'https://p16-sign-va.tiktokcdn.com/tos-maliva-p-0068/cover.jpeg?x-expires=1';
+  video.metrics.saves = 7;
+  profile.avatar_url = 'https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/avatar.jpeg';
+  const dimensionStatuses = [
+    ['hook', 'needs_attention'], ['content', 'working_well'], ['style_pacing', 'needs_rework'],
+    ['voice_language', 'working_well'], ['script', 'needs_attention'], ['cta', 'unknown'],
+  ] as const;
+  const dimensions = dimensionStatuses.map(([dimension, status]) => ({ dimension, status,
+    summary: `${dimension} is bounded to the supplied video evidence.`,
+    ...(status === 'unknown' ? {} : { recommendation: `Proposed ${dimension} change.` }) }));
+  v.seed_review = {
+    url: `${v.scan.request.supplied_url}/video/9000000000000000011`, provider: 'lightreel',
+    conversation_id: 'review-1', summary: 'Review of the supplied video only.', access_basis: 'video_access_reported',
+    dimensions, limitations: ['Provider-authored review.'],
+    provenance: { ...structuredClone(video.provenance), provider: 'lightreel', endpoint: '/v1/chat' },
+  };
+  v.seed_review!.provenance.source_url = v.seed_review!.url;
+  assert.equal(CreatorAnalysis.parse(v).seed_review?.dimensions?.length, 6);
+
+  for (const unsafe of [
+    'http://p16-sign-va.tiktokcdn.com/cover.jpeg',
+    'https://user:secret@p16-sign-va.tiktokcdn.com/cover.jpeg',
+    'https://p16-sign-va.tiktokcdn.com:444/cover.jpeg',
+    'https://p16-sign-va.tiktokcdn.com/cover.jpeg#fragment',
+    'https://images.example.test/cover.jpeg',
+  ]) reject(value => { value.scan.video_observations[0]!.thumbnail_url = unsafe; });
+  reject(value => { value.scan.video_observations[0]!.metrics.saves = -1; });
+  reject(value => {
+    value.seed_review = structuredClone(v.seed_review);
+    value.seed_review!.dimensions = value.seed_review!.dimensions!.slice(0, 5);
+  });
+  reject(value => {
+    value.seed_review = structuredClone(v.seed_review);
+    value.seed_review!.dimensions![5]!.dimension = 'hook';
+  });
+});
 test('dated conflicting provider observations survive while duplicate IDs and false coverage fail', () => {
   const v = creatorAnalysisFixture(); const o = structuredClone(v.scan.video_observations[0]!);
   o.id = crypto.randomUUID(); o.metrics.views = 150; o.provenance.retrieved_at = '2026-10-10T12:00:00Z';

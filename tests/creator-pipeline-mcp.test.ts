@@ -71,6 +71,9 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
+  const saveScriptsTool=listing.result.tools.find(t=>t.name==='save_creator_scripts');
+  assert.match(saveScriptsTool.description,/timed segments.*caption.*hashtags/i,
+    'ChatGPT receives the persisted Studio fields needed by the Paper flow');
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
   const scanInput={project_id:projectId,request_id:crypto.randomUUID(),scan:f.input.request,seed_url:seedUrl};
   let scan=job(await call('start_creator_scan',scanInput));assert.equal(scan.state,'queued');assert.equal(f.http.length,0);
@@ -107,9 +110,13 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   assert.deepEqual((await call('render_creator_job',{job_id:saved.id},foreign)).result,(await call('render_creator_job',{job_id:crypto.randomUUID()},foreign)).result);
   const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);assert.match(foreignSave.result.content[0]!.text,/NOT_FOUND/);
   assert.equal(dispatches.length,dispatchCount);assert.equal(f.http.length,requests);
-  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v2.html'})).json() as any;
+  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v3.html'})).json() as any;
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));
-  assert.deepEqual(content._meta.ui.csp,{connectDomains:[],resourceDomains:[],frameDomains:[],baseUriDomains:[]});
+  assert.deepEqual(content._meta.ui.csp,{
+    connectDomains:[],
+    resourceDomains:['https://tiktokcdn.com','https://*.tiktokcdn.com'],
+    frameDomains:[],baseUriDomains:[],
+  });
   identity.block();
   const blocked=await (await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}},token)).json() as any;
   assert.equal(blocked.result.isError,true);assert.match(blocked.result._meta['mcp/www_authenticate'][0],/invalid_token/);

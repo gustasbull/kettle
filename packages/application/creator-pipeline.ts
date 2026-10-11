@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Id, Timestamp, result } from '../contracts/index.ts';
 import { CreatorJobView, CreatorJobOutput, pipelineContracts, RecommendationBatch, CreatorScriptSet,
   FilmingVariant, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider } from '../contracts/creator-pipeline.ts';
-import { CreatorAnalysis, ProfileScanRequest } from '../contracts/creator-profile.ts';
+import { CreatorAnalysis, CreatorUrl, ProfileScanRequest } from '../contracts/creator-profile.ts';
 import { StoredCreatorAnalysis } from '../contracts/creator-operations.ts';
 import { failure, type IdentityVerifier } from './operations.ts';
 import { projectCreatorDna, createCreatorIngestion, type CreatorRepository } from './creator-operations.ts';
@@ -18,8 +18,15 @@ export const StoredCreatorJob = z.object({
 });
 export type StoredCreatorJob = z.infer<typeof StoredCreatorJob>;
 export const StoredCreatorJobOutput = result(z.object({job:StoredCreatorJob}));
+const CapturedCreatorScan = z.strictObject({scan:ProfileScanRequest,seed_url:CreatorUrl.optional()})
+  .refine(captured=>!captured.seed_url||new URL(captured.seed_url).hostname.replace(/^www\./,'')==='tiktok.com'
+    &&new URL(captured.seed_url).pathname.startsWith(new URL(captured.scan.supplied_url).pathname.replace(/\/$/,'')+'/video/')
+    &&/^\/@[\w.]+\/video\/\d{1,30}$/.test(new URL(captured.seed_url).pathname),
+  'Seed video must belong to the captured profile');
 export function publicCreatorJob(job:StoredCreatorJob):CreatorJobView {
+  const capturedScan=job.kind==='scan'?CapturedCreatorScan.safeParse(job.captured):null;
   return CreatorJobView.parse({id:job.id,project_id:job.project_id,kind:job.kind,state:job.state,
+    ...(capturedScan?.success?{source_kind:capturedScan.data.seed_url?'video':'profile'}:{}),
     revision:job.revision,created_at:job.created_at,updated_at:job.updated_at,result:job.result,
     message:job.state==='needs_reconciliation'?'A provider request needs review before another attempt. No automatic resubmission.':
       job.state==='failed'?'This job could not complete. Check the research allowance and source permissions before starting a new request.':null});
@@ -119,7 +126,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
     const context=createGuardedProviderContext(repository,job,ceilings,durableStep);
     let output:NonNullable<CreatorJobView['result']>;
     if(job.kind==='scan') {
-      const captured=z.object({scan:ProfileScanRequest,seed_url:z.string().optional()}).parse(job.captured);
+      const captured=CapturedCreatorScan.parse(job.captured);
       const analysis=CreatorAnalysis.parse(await providerFor(job).scan(captured.scan,context));
       if(captured.seed_url && (analysis.seed_review?.url!==captured.seed_url || analysis.seed_review.provenance.origin!=='live'))throw new PipelineRunError('failed');
       if([...analysis.scan.profile_observations,...analysis.scan.video_observations].some(o=>o.provenance.origin!=='live')||JSON.stringify(analysis.scan.request)!==JSON.stringify(captured.scan))throw new PipelineRunError('failed');
@@ -138,13 +145,16 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
       }else{
         const batch=RecommendationBatch.parse(captured.batch),idea=batch.ideas.find(i=>i.id===captured.idea_id);
         if(!idea||batch.dna_id!==dna.dna_id||batch.dna_version!==dna.version)throw new PipelineRunError('failed');
+        const references=idea.reference_ids.map(referenceId=>batch.references.find(reference=>reference.id===referenceId));
+        if(references.some(reference=>reference===undefined))throw new PipelineRunError('failed');
         const scripts=CreatorScriptSet.parse(captured.variants
           ? await durableStep('save-chat-draft',async()=>({id:crypto.randomUUID(),batch_id:batch.id,idea_id:idea.id,dna_id:dna.dna_id,dna_version:dna.version,version:1,created_at:new Date().toISOString(),
-              variants:captured.variants!.map(v=>({...v,id:crypto.randomUUID()})),contains_fixture_data:false,
+              variants:captured.variants!.map(v=>({...v,id:crypto.randomUUID()})),idea,references,contains_fixture_data:false,
               limitations:['Drafted in the ChatGPT conversation and saved by Riff. No separate OpenAI API request was made.','Filming instructions are proposals; reference citations do not establish factual accuracy or predicted performance.']}))
           : await providerFor(job).generate({batch,idea_id:idea.id,dna},context));
         if(scripts.batch_id!==batch.id||scripts.idea_id!==idea.id||scripts.dna_id!==dna.dna_id||scripts.dna_version!==dna.version
-          ||scripts.contains_fixture_data||scripts.variants.some(v=>v.reference_ids.some(id=>!idea.reference_ids.includes(id))))throw new PipelineRunError('failed');
+          ||scripts.contains_fixture_data||scripts.variants.some(v=>v.reference_ids.some(id=>!idea.reference_ids.includes(id)))
+          ||JSON.stringify(scripts.idea)!==JSON.stringify(idea)||JSON.stringify(scripts.references)!==JSON.stringify(references))throw new PipelineRunError('failed');
         output={kind:'scripts',scripts};
       }
     }
