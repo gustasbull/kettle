@@ -33,6 +33,16 @@ const enumValue = <T extends string>(value: unknown, values: readonly T[]): valu
   typeof value === 'string' && values.includes(value as T);
 const unique = (values: unknown[], key: (value: any) => unknown) => new Set(values.map(key)).size === values.length;
 
+export function riffRecentLabel(kind:CreatorJobView['kind'],state:CreatorJobView['state'],
+  workState:'active'|'saved'|'filmed'|null):string{
+  const surface=kind==='scan'?'Analysis':kind==='recommendations'?'Formats':'Studio';
+  if(state!=='succeeded')return state==='queued'?`${surface} queued`:state==='running'?`${surface} in progress`:
+    state==='failed'?`${surface} failed`:`${surface} needs review`;
+  if(kind==='scan')return 'Analysis ready';
+  if(kind==='recommendations')return 'Formats ready';
+  return workState==='saved'?'Ideas saved':workState==='filmed'?'Filmed':'Continue script';
+}
+
 const creatorUrl = (value: unknown): value is string => {
   if (!text(value, 2_048)) return false;
   try {
@@ -326,18 +336,25 @@ function scripts(value: unknown) {
     && variants.every(entry=>(entry.reference_ids as unknown[]).every(referenceId=>referenceIds.has(referenceId)))
     && (!references.some(entry=>entry.origin==='fixture') || item.contains_fixture_data);
 }
+function workState(value:unknown,jobId:unknown){
+  const item=shape(value,['job_id','variant_id','state','version','updated_at']);
+  return !!item&&item.job_id===jobId&&id(item.variant_id)&&enumValue(item.state,['active','saved','filmed'])
+    &&Number.isSafeInteger(item.version)&&Number(item.version)>0&&timestamp(item.updated_at);
+}
 
 /** Lightweight full display-boundary validation. This deliberately avoids pulling
  * the server's Zod graph into Home's first-paint bundle. */
 export function isCreatorJobView(value: unknown): value is CreatorJobView {
   const candidate = object(value); if (!candidate) return false;
-  const job = shape(candidate, ['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','message'], ['source_kind']); if (!job) return false;
+  const job = shape(candidate, ['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','work_states','message'], ['source_kind']); if (!job) return false;
   try { if (JSON.stringify(job).length > 1_500_000) return false; } catch { return false; }
   if (!id(job.id) || !id(job.project_id) || !Number.isSafeInteger(job.revision) || Number(job.revision) < 1
     || !enumValue(job.kind, ['scan', 'recommendations', 'scripts'])
     || !enumValue(job.state, ['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'])
     || !enumValue(job.stage,['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','researching_formats','enriching_references','saving'])
     || !jobProgress(job.progress,String(job.kind))
+    || !Array.isArray(job.work_states)||job.work_states.length>3||!job.work_states.every(value=>workState(value,job.id))
+    || new Set(job.work_states.map(value=>(value as JsonObject).variant_id)).size!==job.work_states.length
     || !timestamp(job.created_at) || !timestamp(job.updated_at)
     || !(job.message === null || text(job.message, 1_000))) return false;
   if (job.source_kind !== undefined && (!enumValue(job.source_kind, ['video', 'profile']) || job.kind !== 'scan')) return false;
@@ -349,7 +366,7 @@ export function isCreatorJobView(value: unknown): value is CreatorJobView {
     ?{kind:'scan',profile:null,videos:[],limitations:[]}:job.kind==='recommendations'
       ?{kind:'recommendations',identities:[],references:[],limitations:[]}:{kind:'scripts',limitations:[]})))return false;
   if(job.state==='succeeded'&&job.stage!=='saving')return false;
-  if (job.state !== 'succeeded') return job.result === null;
+  if (job.state !== 'succeeded') return job.result === null&&job.work_states.length===0;
   const result = job.kind === 'scan' ? shape(job.result, ['kind','dna'])
     : job.kind === 'recommendations' ? shape(job.result, ['kind','batch']) : shape(job.result, ['kind','scripts']);
   if (!result || result.kind !== job.kind) return false;
@@ -358,5 +375,7 @@ export function isCreatorJobView(value: unknown): value is CreatorJobView {
     return object(result.dna)?.project_id === job.project_id;
   }
   if (result.kind === 'recommendations') return recommendations(result.batch);
-  return result.kind === 'scripts' && scripts(result.scripts);
+  if(result.kind!=='scripts'||!scripts(result.scripts))return false;
+  const variants=(result.scripts as JsonObject).variants as JsonObject[];
+  return job.work_states.every(value=>variants.some(variant=>variant.id===(value as JsonObject).variant_id));
 }

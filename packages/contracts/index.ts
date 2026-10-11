@@ -99,3 +99,5 @@ export const toolContracts = {
   get_project: { input: GetProjectInput, output: GetProjectOutput, scope: 'projects:read', readOnly: true },
   save_project: { input: SaveProjectInput, output: SaveProjectOutput, scope: 'projects:write', readOnly: false },
 } as const;
+
+export * from './riff-work-state.ts';

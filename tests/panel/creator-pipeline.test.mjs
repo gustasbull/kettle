@@ -33,7 +33,11 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         startRecommendations:async ({job,dna})=>{window.connectedActions.push({kind:'recommendations',jobId:job.id,dnaId:dna.dna_id,version:dna.version});return {status:'sent',message:'Discovery started.'}},
         makeMine:async ({job,batch,idea,library,filter,intent})=>{window.connectedActions.push({kind:'make-mine',jobId:job.id,batchId:batch.id,ideaId:idea.id,library,filter,intent});return {status:'sent',message:'Drafting in ChatGPT.'}},
         proposeCatalogReference:async proposal=>{window.catalogProposals.push(proposal);return {status:'sent',message:'Proposal sent.'}},
-        setVariantState:async ({job,scripts,variant,state})=>{window.connectedActions.push({kind:'variant-state',jobId:job.id,scriptsId:scripts.id,variantId:variant.id,state});return {status:'sent',message:state==='saved'?'Saved for later.':'Marked as filmed.'}},
+        setVariantState:async ({job,scripts,variant,state})=>{window.connectedActions.push({kind:'variant-state',jobId:job.id,scriptsId:scripts.id,variantId:variant.id,state});
+          const previous=job.work_states.find(item=>item.variant_id===variant.id);const workState={job_id:job.id,variant_id:variant.id,state,
+            version:(previous?.version??0)+1,updated_at:'2026-10-11T09:10:46.000Z'};
+          window.job={...job,work_states:[...job.work_states.filter(item=>item.variant_id!==variant.id),workState]};
+          return {status:'confirmed',message:state==='saved'?'Saved for later.':'Marked as filmed.',workState,job:window.job};},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
     };
@@ -903,6 +907,20 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('.riff-script-part').nth(2).textContent(), /CTA.*What would you change/s);
   });
 
+  await t.test('a confirmed save renders the exact Paper confirmation and undo restores Studio',async()=>{
+    await page.evaluate(()=>bootConnected('scripts'));
+    await root.getByRole('button',{name:'Save for later'}).click();
+    const card=root.locator('.riff-saved-confirmation');
+    assert.equal(await card.getByRole('heading',{name:'Your viral script, saved.'}).count(),1);
+    assert.equal(await card.getByText('My videos · Reference and ready-to-film script saved.',{exact:true}).count(),1);
+    assert.deepEqual(await card.evaluate(node=>{const s=getComputedStyle(node);return {width:s.width,padding:s.padding,radius:s.borderRadius,gap:s.gap};}),
+      {width:'576px',padding:'24px',radius:'18px',gap:'12px'});
+    assert.equal(await card.getByRole('button',{name:'Open vault'}).count(),1);
+    await card.getByRole('button',{name:'Undo save'}).click();
+    assert.equal(await root.getByRole('button',{name:'Save for later'}).count(),1);
+    assert.deepEqual((await page.evaluate(()=>window.connectedActions)).slice(-2).map(item=>item.state),['saved','active']);
+  });
+
   await t.test('Studio uses ID-keyed variants, actual timings, complete provenance and local-only controls', async () => {
     await page.evaluate(() => {
       boot('three-variants','fullscreen');
@@ -1029,10 +1047,11 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     });
     await page.evaluate(() => bootConnected('scripts'));
     await root.getByRole('button', { name: 'Save for later' }).click();
+    await root.getByRole('button',{name:'Undo save'}).click();
     await root.getByRole('button', { name: 'I filmed it' }).click();
-    assert.equal(await page.evaluate(() => window.connectedActions.filter(action=>action.kind==='variant-state').length),0,
-      'Task 6 never treats the optional future work-state seam as persistence');
-    assert.deepEqual(await page.evaluate(() => window.actions.slice(-2).map(prompt=>/not persisted/i.test(prompt))),[true,true]);
+    assert.deepEqual(await page.evaluate(() => window.connectedActions.filter(action=>action.kind==='variant-state').slice(-3).map(action=>action.state)),
+      ['saved','active','filmed'],'Task 7 persists save, undo, and factual filmed state through the connected seam');
+    assert.match(await root.locator('.riff-pipeline__status').textContent(),/filmed/i);
     await page.evaluate(() => boot('hostile', 'fullscreen'));
     assert.equal(await root.locator('img,iframe,script').count(), 0);
     for (const width of [320, 375, 768, 1200]) {

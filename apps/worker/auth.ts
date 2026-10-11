@@ -12,6 +12,8 @@ import { createMcpVerifierForRequest, createWebsiteVerifierForRequest } from './
 import type { CreatorLatencyObserver } from '../../packages/application/creator-observability.ts';
 import { createRiffVideoOperations } from '../../packages/application/riff-videos.ts';
 import { createRiffVideoSupabaseRepository } from '../../packages/database/riff-videos-supabase.ts';
+import { createRiffWorkStateOperations } from '../../packages/application/riff-work-state.ts';
+import { createRiffWorkStateSupabaseRepository } from '../../packages/database/riff-work-state-supabase.ts';
 export { authConfig } from './auth-config.ts';
 
 export async function authServices(env: Env, config: RuntimeAuthConfig, defer:CreatorTaskDefer, telemetry?: CreatorLatencyObserver) {
@@ -30,7 +32,10 @@ export async function authServices(env: Env, config: RuntimeAuthConfig, defer:Cr
   }, verifier, schedule, () => pipelineConfigured(env), fetch, telemetry);
   const riffVideoOperations=createRiffVideoOperations(verifier,
     createRiffVideoSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry));
-  return { config: config.mcp, verifier, operations, creatorOperations, pipelineOperations, riffCreatorOperations, riffVideoOperations };
+  const riffWorkStateOperations=createRiffWorkStateOperations(verifier,
+    createRiffWorkStateSupabaseRepository(env.SUPABASE_URL!,env.SUPABASE_SERVICE_ROLE_KEY!,fetch));
+  return { config: config.mcp, verifier, operations, creatorOperations, pipelineOperations, riffCreatorOperations, riffVideoOperations,
+    riffWorkStateOperations };
 }
 
 /** Resolve a password session through the same trusted issuer/subject mapping

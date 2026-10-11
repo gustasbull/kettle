@@ -62,6 +62,13 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
         }
         if(m.method==='tools/call') { window.calls.push(m); if(window.respond) {
           const active=location.search==='?start'?window.startOutput.data.job:window.output.data.job;
+          if(m.params.name==='set_riff_work_state'){
+            const input=m.params.arguments,previous=active.work_states.find(item=>item.variant_id===input.variant_id);
+            const work_state={job_id:active.id,variant_id:input.variant_id,state:input.state,version:(previous?.version??0)+1,
+              updated_at:'2026-10-11T09:10:46.000Z'};
+            active.work_states=[...active.work_states.filter(item=>item.variant_id!==input.variant_id),work_state];
+            return window.reply(m.id,{structuredContent:{ok:true,data:{work_state}},content:[]});
+          }
           const structuredContent=m.params.name==='get_creator_job_status'?window.makeStatus(active):
             m.params.name==='list_riff_videos'?(window.catalogPage??{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}):
             {ok:true,data:{job:active}};
@@ -143,6 +150,20 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
       assert.match(text,/Keep the current script unchanged/);assert.match(text,/unsaved proposal/);
       assert.doesNotMatch(text,/has been selected|has been saved|has been written/i);
     }
+  });
+  await t.test('Studio persists save and undo only through matching receipts and a reconciled full reread',async()=>{
+    frame=await launch('?scripts');await page.evaluate(()=>{window.calls=[];});
+    await frame.getByRole('button',{name:'Open Studio'}).click();
+    await frame.getByRole('button',{name:'Save for later'}).click();
+    await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
+    await frame.getByRole('button',{name:'Undo save'}).click();
+    await frame.getByRole('button',{name:'Save for later'}).waitFor();
+    const writes=await page.evaluate(()=>window.calls.filter(call=>call.params.name==='set_riff_work_state').map(call=>call.params.arguments));
+    assert.equal(writes.length,2);assert.deepEqual(writes.map(write=>write.state),['saved','active']);
+    assert.deepEqual(writes.map(write=>write.expected_version),[0,1]);
+    assert.notEqual(writes[0].request_id,writes[1].request_id);
+    assert.ok(writes.every(write=>!('account_id'in write)&&Object.keys(write).sort().join(',')==='expected_version,job_id,request_id,state,variant_id'));
+    assert.equal(await page.evaluate(()=>window.calls.filter(call=>call.params.name==='get_creator_job').length),2);
   });
   frame=await launch();
   await t.test('explicit refresh reads only compact status; duplicate calls suppressed',async()=>{

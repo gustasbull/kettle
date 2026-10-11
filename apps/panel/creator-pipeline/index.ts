@@ -1,6 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../../packages/contracts/creator-pipeline.ts';
 import type { CreatorDnaView } from '../../../packages/contracts/creator-operations.ts';
 import type { RiffVideoCard } from '../../../packages/contracts/riff-videos.ts';
+import type { RiffWorkState } from '../../../packages/contracts/riff-work-state.ts';
 import type { RiffVideoCatalogState } from '../riff-video-catalog-loader.ts';
 import { mountRiffMenu, type RiffMenuAccount, type RiffMenuRecent } from '../riff-shell/menu.ts';
 import { riffSymbol } from '../riff-ui/brand.ts';
@@ -77,8 +78,10 @@ export type CreatorPipelineOptions = {
     job: CreatorJobView;
     scripts: ScriptResult['scripts'];
     variant: ScriptResult['scripts']['variants'][number];
-    state: 'saved' | 'filmed';
-  }) => Promise<RiffActionResult>;
+    state: 'active' | 'saved' | 'filmed';
+  }) => Promise<RiffActionResult | {status:'confirmed';message:string;workState:RiffWorkState;job:CreatorJobView}
+    | {status:'conflict';message:string;job:CreatorJobView}|{status:'stale';message:string}>;
+  openVault?: () => void;
   onDiscoveryOpen?: (scope:{projectId?:string}) => void;
   embeddedChrome?:boolean;
   menu?: {
@@ -93,7 +96,7 @@ export type CreatorPipelineOptions = {
     onRequestTheme?: () => void | RiffActionResult | Promise<void | RiffActionResult>;
   };
 };
-export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string};
+export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string;variantId?:string};
 
 export const creatorLoadingVariants = {
   fetchVideo:{title:'Fetching your video',subtitle:'Opening your link and loading the available video details.',activity:'Loading the video and its captions…',done:'Link received',next:'Analyzing next',preview:'video',sourceTitle:'Your video',sourceCopy:'Loading your linked video…'},
@@ -244,6 +247,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let discoveryFilter = 'For you';
   let studioTab = 0;
   let studioVariantId:string|undefined;
+  let pendingVariantMutation:{jobId:string;variantId:string}|undefined;
   let studioPlatform:'tiktok'|'reels'='tiktok';
   let catalogIndex=0;
   let catalogActiveId:string|undefined;
@@ -301,7 +305,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const control = el('button', label, className); control.type = 'button'; control.dataset.focus = focus;
     control.addEventListener('click', handler); return control;
   };
-  const run = async (action: () => Promise<RiffActionResult>, menuFeedback = false) => {
+  const run = async (action: () => Promise<{message:string}>, menuFeedback = false) => {
     if (menuFeedback) status.dataset.menuFeedback = 'true'; else delete status.dataset.menuFeedback;
     setStatus('Working…');
     try { setStatus((await action()).message); }
@@ -821,17 +825,57 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     screen('studio');
     const variant=scripts.variants.find(item=>item.id===studioVariantId)??scripts.variants[0]!;
     studioVariantId=variant.id;
+    const persisted=job.work_states.find(item=>item.variant_id===variant.id);
+    const mutate=async(state:'active'|'saved'|'filmed')=>{
+      if(pendingVariantMutation)return {status:'pending' as const,message:'This script change is still being confirmed.'};
+      pendingVariantMutation={jobId:job.id,variantId:variant.id};
+      content.querySelectorAll<HTMLButtonElement>('button').forEach(control=>{control.disabled=true;});
+      try{
+      if(!options.setVariantState){
+        const result=await sendPrompt(state==='saved'
+          ?`Help me save the ${variant.label} script for later. This action is not persisted in Riff; do not claim success.`
+          :`I filmed the ${variant.label} script. This milestone is not persisted in Riff; do not claim a saved or published milestone.`);
+        return {...result,message:`${result.message} This action is not persisted in Riff.`};
+      }
+      const result=await options.setVariantState({job,scripts,variant,state});
+      if((result.status==='confirmed'||result.status==='conflict')&&result.job.id===job.id&&current?.id===job.id&&studioVariantId===variant.id){
+        render(result.job);
+        queueMicrotask(()=>{
+          const focus=result.status==='confirmed'&&state==='saved'?content.querySelector<HTMLElement>('.riff-saved-confirmation h1'):
+            content.querySelector<HTMLElement>(state==='active'?'[data-focus="save-later"]':'[data-focus="filmed-it"]');
+          focus?.focus({preventScroll:true});
+        });
+      }
+      return result;
+      }finally{
+        pendingVariantMutation=undefined;
+        if(current?.id===job.id)content.querySelectorAll<HTMLButtonElement>('button').forEach(control=>{control.disabled=false;});
+      }
+    };
+    if(persisted?.state==='saved'){
+      screen('saved');
+      const card=el('section',undefined,'riff-saved-confirmation');
+      const heading=el('h1','Your viral script, saved.');heading.tabIndex=-1;
+      card.append(heading,el('p','My videos · Reference and ready-to-film script saved.'));
+      const cardActions=actions(
+        button('Open vault','riff-button riff-button--primary',()=>{options.openVault?.();setStatus('Opening My videos.');},'open-vault'),
+        button('Undo save','riff-button riff-button--soft',()=>void run(()=>mutate('active')),'undo-save'),
+      );
+      cardActions.classList.add('riff-saved-confirmation__actions');card.append(cardActions);content.append(card);
+      setStatus('Saved for later.');return heading;
+    }
     const completeReferences=(scripts.references??[]).filter(item=>variant.reference_ids.includes(item.id));
     const header = el('header', undefined, 'riff-studio-header');
     const { group, heading } = title('Your script, ready to film.', 'riff-studio-title');
     if (scripts.idea?.title) group.append(el('p', `${scripts.idea.title}${completeReferences.some(item=>item.platform==='tiktok')?' · TikTok':''}`, 'riff-studio-subtitle'));
     header.append(group);
     const studioActions = actions(
-      button('Save for later', 'riff-button', () => void run(async()=>{const result=await sendPrompt(`Help me save the ${variant.label} script for later. This Task 6 handoff is not persisted in Riff because no save-state tool is available; do not claim success.`);return {...result,message:`${result.message} This action is not persisted in Riff.`};}), 'save-later'),
-      button('I filmed it', 'riff-button riff-button--primary', () => void run(async()=>{const result=await sendPrompt(`I filmed the ${variant.label} script. This acknowledgement is not persisted in Riff because no filmed-state tool is available; do not claim a saved, published, or verified milestone.`);return {...result,message:`${result.message} This milestone is not persisted in Riff.`};}), 'filmed-it'),
+      button('Save for later', 'riff-button', () => void run(()=>mutate('saved')), 'save-later'),
+      button('I filmed it', 'riff-button riff-button--primary', () => void run(()=>mutate('filmed')), 'filmed-it'),
     );
     studioActions.classList.add('riff-studio-actions'); studioActions.setAttribute('role', 'group'); studioActions.setAttribute('aria-label', 'Studio actions');
     header.append(studioActions); content.append(header);
+    if(persisted?.state==='filmed')content.append(el('p','Marked as filmed in Riff.','riff-studio-filmed-status'));
     const variantSelector=el('div',undefined,'riff-studio-variants');variantSelector.setAttribute('role','radiogroup');variantSelector.setAttribute('aria-label','Script variant');
     scripts.variants.forEach((candidate,index)=>{
       const selected=candidate.id===variant.id;
@@ -964,10 +1008,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
     if (!same) {
+      pendingVariantMutation=undefined;
       ideaIndex = 0; catalogIndex=0;catalogActiveId=undefined;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;studioVariantId=undefined;studioPlatform='tiktok';sourceUrl=undefined;studioExplore=undefined;
       if(current?.project_id!==job.project_id){catalogState={status:'loading'};catalogScopeKey=undefined;}
     }
     if(!preserveStudioCatalog)studioExplore=undefined;
+    if(presentation.variantId&&job.result?.kind==='scripts'&&job.result.scripts.variants.some(item=>item.id===presentation.variantId))
+      studioVariantId=presentation.variantId;
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
     identity = nextIdentity; current = job;currentStatus=presentation.status;wrapper.dataset.mode = mode;

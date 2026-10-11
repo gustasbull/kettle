@@ -53,13 +53,14 @@ test('zero paid budget and no allowance are seeded; client roles cannot call or 
 test('account ownership, immutable intent, global start request namespace, and replay after allowance withdrawal',async()=>{
  await allow(); const input=scanInput(); const first=await rpc('start_creator_scan',input); assert.equal(first.ok,true);
  assert.equal(first.data.job.revision,1); assert.deepEqual(first.data.job.captured,{scan:input.scan});
- assert.deepEqual(await rpc('start_creator_scan',input),first);
+ const reopened={...first,data:{job:{...first.data.job,work_states:[]}}};
+ assert.deepEqual(await rpc('start_creator_scan',input),reopened);
  assert.equal((await rpc('start_creator_scan',{...input,scan:{...input.scan,max_videos:5}})).error?.code,'IDEMPOTENCY_CONFLICT');
  assert.equal((await rpc('start_creator_recommendations',{dna_id:crypto.randomUUID(),expected_version:1,request_id:input.request_id})).error?.code,'IDEMPOTENCY_CONFLICT');
  assert.equal((await rpc('get_creator_job',{job_id:first.data.job.id},accountB)).error?.code,'NOT_FOUND');
  assert.equal((await rpc('start_creator_scan',scanInput(),accountB)).error?.code,'NOT_FOUND');
  await allow(false);
- assert.deepEqual(await rpc('start_creator_scan',input),first);
+ assert.deepEqual(await rpc('start_creator_scan',input),reopened);
  assert.equal((await rpc('start_creator_scan',scanInput())).error?.code,'FORBIDDEN');
  assert.equal((await rpc('run_creator_job',{job_id:first.data.job.id})).error?.code,'FORBIDDEN');
  assert.deepEqual((await rpc('list_creator_dispatches',{})).data.jobs,[]);
@@ -268,7 +269,7 @@ test('ChatGPT-authored variants are captured immutably with shared script-stage 
  const saved=await rpc('save_creator_scripts',input);assert.equal(saved.ok,true);
  assert.equal(saved.data.job.kind,'scripts');
  assert.deepEqual(saved.data.job.captured,{stored:stored.data,batch,idea_id:input.idea_id,variants});
- assert.deepEqual(await rpc('save_creator_scripts',input),saved);
+ assert.deepEqual(await rpc('save_creator_scripts',input),{...saved,data:{job:{...saved.data.job,work_states:[]}}});
  assert.equal((await rpc('save_creator_scripts',{...input,variants:variants.map(v=>({...v,hook:'Changed hook'}))})).error?.code,'IDEMPOTENCY_CONFLICT');
  const {variants:_variants,...withoutVariants}=input;
  assert.equal((await rpc('start_creator_scripts',withoutVariants)).error?.code,'IDEMPOTENCY_CONFLICT');

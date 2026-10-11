@@ -455,7 +455,7 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
   const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   const submit = frame.getByRole('button', { name: 'Find my next idea' });
   await frame.getByRole('button', { name: 'Open Riff menu' }).click();
-  await frame.getByRole('button', { name: 'Open First account work — Analysis' }).waitFor();
+  await frame.getByRole('button', { name: 'Open First account work — Analysis ready' }).waitFor();
   const drawer = frame.getByRole('dialog', { name: 'Riff menu' });
   await frame.getByRole('button', { name: 'Close Riff menu' }).last().click();
   const source = 'https://vm.tiktok.com/ZN8kT85EE/';

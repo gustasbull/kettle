@@ -7,6 +7,7 @@ import {
 } from '../riff-product-context/index.ts';
 import type { ProductDraft } from '../riff-product-context-validation.ts';
 import type { Project } from '../../../packages/contracts/index.ts';
+import type { RiffWorkState } from '../../../packages/contracts/riff-work-state.ts';
 import { mountRiffMenu } from '../riff-shell/menu.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
@@ -25,6 +26,8 @@ export type RiffRecentWork = {
   updated_at: string;
   platform?: 'tiktok';
   handle?: string;
+  variant_id?:string|null;
+  work_state?:RiffWorkState|null;
 };
 
 export type RiffRecentsState =
@@ -47,7 +50,7 @@ export type RiffHomeActions = {
   support?: () => Promise<RiffActionResult>;
   feedback?: () => Promise<RiffActionResult>;
   requestTheme?: () => Promise<RiffActionResult>;
-  openRecent?: (jobId: string) => Promise<RiffActionResult>;
+  openRecent?: (jobId: string,variantId?:string) => Promise<RiffActionResult>;
   refreshRecents?: () => Promise<RiffActionResult>;
   refreshJob?: (job: CreatorJobView) => Promise<RiffActionResult>;
   startRecommendations?: (context: {
@@ -61,8 +64,8 @@ export type RiffHomeActions = {
     job: CreatorJobView;
     scripts: ScriptResult['scripts'];
     variant: ScriptResult['scripts']['variants'][number];
-    state: 'saved' | 'filmed';
-  }) => Promise<RiffActionResult>;
+    state: 'active' | 'saved' | 'filmed';
+  }) => ReturnType<NonNullable<import('../creator-pipeline/index.ts').CreatorPipelineOptions['setVariantState']>>;
   onDiscoveryOpen?:(scope:{projectId?:string})=>void;
 };
 
@@ -356,7 +359,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
     startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
     proposeCatalogReference:actions.proposeCatalogReference,onCatalogRetry:actions.retryCatalog,
-    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,
+    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,openVault:showHome,
     });
   };
   const showProduct=(description:string)=>{
@@ -383,7 +386,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       const item=recentsState.status==='ready'?recentsState.items.find(candidate=>candidate.job_id===recent.id):undefined;
       if(!item)return;
       pipeline?.leaveCatalog();
-      void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
+      void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id,item.variant_id??undefined):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
     },
     onCreate(){
       invocationEpoch++;input.value='';pendingIntent='';intent.hidden=true;actions.inputChanged?.('');status.textContent='';showHome();input.focus({preventScroll:true});
@@ -465,7 +468,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       copy.append(node('span', item.title, 'riff-home__recent-title'), node('span', item.stage, 'riff-home__recent-stage'));
       card.append(source, copy);
       card.addEventListener('click', () => void invoke(
-        actions.openRecent ? () => actions.openRecent!(item.job_id) : () => actions.send(`Open my saved Riff work, “${item.title}”.`),
+        actions.openRecent ? () => actions.openRecent!(item.job_id,item.variant_id??undefined) : () => actions.send(`Open my saved Riff work, “${item.title}”.`),
         `Opening ${item.title}…`,
         card,
       ));

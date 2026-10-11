@@ -48,12 +48,12 @@ const storedJob = {
   kind: 'scan' as const, state: 'queued' as const, revision: 1,
   stage: 'accepted' as const, progress: { kind: 'scan' as const, profile: null, videos: [], limitations: [] },
   created_at: timestamp, updated_at: timestamp,
-  input: { project_id: projectId, request_id: requestId }, captured: {}, result: null, message: null,
+  input: { project_id: projectId, request_id: requestId }, captured: {}, result: null, work_states:[],message: null,
 };
 const storedSuccess = { ok: true as const, data: { project, job: storedJob, source } };
 const workSuccess = { ok: true as const, data: { work: [{
   project_id: projectId, project_name: project.name, job_id: jobId, kind: 'scan' as const,
-  state: 'queued' as const, updated_at: timestamp, source,
+  state: 'queued' as const, updated_at: timestamp, source,variant_id:null,work_state:null,
 }] } };
 
 test('start contract accepts only a request ID and HTTPS source URL', () => {
@@ -157,7 +157,7 @@ test('canonical creator start skips preflight and schedules one queued dispatch'
     job: {
       id: jobId, project_id: projectId, kind: 'scan', state: 'queued', revision: 1,
       stage: 'accepted', progress: { kind: 'scan', profile: null, videos: [], limitations: [] },
-      created_at: timestamp, updated_at: timestamp, result: null, message: null,
+      created_at: timestamp, updated_at: timestamp, result: null, work_states:[],message: null,
     },
     source,
   });
@@ -298,7 +298,7 @@ test('creator start lookup is a provider-free authenticated exact read', async (
       job: {
         id: jobId, project_id: projectId, kind: 'scan', state: 'queued', revision: 1,
         stage: 'accepted', progress: { kind: 'scan', profile: null, videos: [], limitations: [] },
-        created_at: timestamp, updated_at: timestamp, result: null, message: null,
+        created_at: timestamp, updated_at: timestamp, result: null, work_states:[],message: null,
       },
       source,
     },

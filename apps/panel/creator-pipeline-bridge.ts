@@ -8,6 +8,7 @@ import { createCreatorPipelineController, creatorJobStatusStructuredOutput, crea
 import { panelPerformanceFromDocument } from './creator-performance.ts';
 import { parseStartRiffCreatorInput } from './creator-pipeline-validation.ts';
 import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
+import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 
 const WAIT_MS = 10_000;
 
@@ -30,6 +31,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
   let currentProjectId:string|undefined;
+  let currentJobId:string|undefined;
   const catalogOwnerKey=`authenticated-bridge:${crypto.randomUUID()}`;
   const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
@@ -88,20 +90,35 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     if(!projectId||projectId!==currentProjectId||!bridgeReady)return;
     return catalogLoader.load({ownerKey:catalogOwnerKey,projectId});
   };
+  const workStateClient=createRiffWorkStateClient(
+    input=>app.callServerTool({name:'set_riff_work_state',arguments:input},{timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}),
+    async jobId=>{
+      const result=creatorJobStructuredOutput(await app.callServerTool({name:'get_creator_job',arguments:{job_id:jobId}},
+        {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}));
+      return result?.ok?result.data.job:undefined;
+    },
+  );
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
     job(snapshot, status) {
+      if(currentJobId&&currentJobId!==snapshot.job.id)workStateClient.invalidate();
+      currentJobId=snapshot.job.id;
+      const latestVariant=[...snapshot.job.work_states].sort((left,right)=>
+        right.updated_at.localeCompare(left.updated_at)||right.version-left.version||left.variant_id.localeCompare(right.variant_id))[0]?.variant_id;
       view ??= mountCreatorPipeline(card, {
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
         sendPrompt, requestFullscreen,
         onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
         proposeCatalogReference:proposal=>sendPrompt(riffCatalogProposalHandoff(proposal)),
         onCatalogRetry:()=>void catalogLoader.retry(),
+        setVariantState:({job,variant,state})=>workStateClient.set(job,variant.id,state),
+        openVault:()=>void sendPrompt('Open Riff Home and show My videos with this saved script selected.'),
       });
       if(currentProjectId!==snapshot.job.project_id){
         currentProjectId=snapshot.job.project_id;catalogLoader.reset();
       }
-      view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{})});
+      view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{}),
+        ...(latestVariant?{variantId:latestVariant}:{})});
       if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length)sourceByJob.delete(snapshot.job.id);
       message.textContent = status.notice ?? '';
       message.hidden = !status.notice;
@@ -161,6 +178,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     handshake.abort();
     stopResize();
     controller.dispose();
+    workStateClient.invalidate();
     view?.dispose(); view = undefined; host.remove();
     clearTimeout(initialTimer);
     window.removeEventListener('pagehide', dispose);

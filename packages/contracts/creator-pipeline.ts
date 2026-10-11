@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Id, Timestamp, result } from './index.ts';
 import { ProfileScanRequest, CreatorAnalysis, CreatorUrl, TikTokImageUrl, VideoObservation } from './creator-profile.ts';
 import { CreatorDnaView } from './creator-operations.ts';
+import { RiffWorkState } from './riff-work-state.ts';
 import type { RiffVideoRole, TrustedCatalogObservation } from './riff-videos.ts';
 
 const text = (max: number) => z.string().trim().min(1).max(max);
@@ -165,6 +166,7 @@ export const CreatorJobView = z.strictObject({
     z.strictObject({kind:z.literal('recommendations'),batch:RecommendationBatch}),
     z.strictObject({kind:z.literal('scripts'),scripts:CreatorScriptSet}),
   ]).nullable(),
+  work_states:z.array(RiffWorkState).max(3).default([]),
   message:text(1000).nullable(),
 }).superRefine((job, context) => {
   if ((job.state === 'succeeded') !== (job.result !== null)) {
@@ -187,6 +189,14 @@ export const CreatorJobView = z.strictObject({
     context.addIssue({code:'custom',message:'Queued jobs begin with empty accepted progress'});
   if(job.state==='succeeded'&&job.stage!=='saving')
     context.addIssue({code:'custom',message:'Succeeded jobs have reached saving'});
+  if(new Set(job.work_states.map(state=>state.variant_id)).size!==job.work_states.length)
+    context.addIssue({code:'custom',message:'Work states must have unique variant IDs'});
+  if(job.work_states.some(state=>state.job_id!==job.id))
+    context.addIssue({code:'custom',message:'Work states must belong to the projected job'});
+  const scriptVariantIds=new Set(job.result?.kind==='scripts'?job.result.scripts.variants.map(variant=>variant.id):[]);
+  if(job.work_states.length&&(job.state!=='succeeded'||job.result?.kind!=='scripts'||
+    job.work_states.some(state=>!scriptVariantIds.has(state.variant_id))))
+    context.addIssue({code:'custom',message:'Work states require persisted variants from a successful script job'});
 });
 export const CreatorJobOutput=result(z.strictObject({job:CreatorJobView}));
 export const CreatorJobStatusView=z.strictObject({

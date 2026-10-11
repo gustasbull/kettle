@@ -5,6 +5,7 @@ import { creatorContracts } from '../../packages/contracts/creator-operations.ts
 import { pipelineContracts } from '../../packages/contracts/creator-pipeline.ts';
 import { riffCreatorContracts } from '../../packages/contracts/riff-creator.ts';
 import { riffVideoContracts } from '../../packages/contracts/riff-videos.ts';
+import { riffWorkStateContract } from '../../packages/contracts/riff-work-state.ts';
 import { CONTRACT_VERSION, toolContracts } from '../../packages/contracts/index.ts';
 import { OpenAIProfile } from '../../packages/contracts/openai-profile.ts';
 import { oauthScopes } from '../../packages/auth/index.ts';
@@ -23,6 +24,7 @@ export type McpToolAvailability = {
   pipeline: boolean;
   riffCreator: boolean;
   riffVideos?: boolean;
+  riffWorkState?: boolean;
 };
 
 function deepFreezePlain<T>(value: T): T {
@@ -202,6 +204,17 @@ export const RIFF_VIDEO_TOOLS=Object.freeze([{
     registration:{title:tool.title,description:tool.description,inputSchema:contract.input,annotations,_meta:meta}});
 }));
 
+export const RIFF_WORK_STATE_TOOLS=Object.freeze([{
+  name:'set_riff_work_state',operation:'set_riff_work_state' as const,title:'Set Riff work state',
+  description:'Change the signed-in account’s selected saved or filmed state for an owned persisted script variant. Supply job_id, variant_id, current expected_version, state, and a new request_id; an exact ambiguous retry reuses the identical input and ID. This does not create or rewrite scripts, fetch providers, publish content, or infer that filming occurred.',
+}].map(tool=>{
+  const contract=riffWorkStateContract;
+  const annotations={readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false};
+  const meta={securitySchemes:OAUTH_SECURITY,ui:{visibility:['model','app'] as const}};
+  return freezeTool({...tool,contract,securitySchemes:OAUTH_SECURITY,annotations,_meta:meta,
+    registration:{title:tool.title,description:tool.description,inputSchema:contract.input,annotations,_meta:meta}});
+}));
+
 export const ACCOUNT_CONTRACT = toolContracts.get_account_state;
 const OPENAI_HOME_UI = deepFreezePlain({
   preferredModelDisplayMode: 'fullscreen',
@@ -231,7 +244,8 @@ const inputSchema = (schema: z.ZodType) =>
 const outputSchema = (schema: z.ZodType) =>
   ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema, { reused: 'ref' }), type: 'object' });
 const descriptorFor = (tool: typeof PRODUCT_TOOLS[number] | typeof CREATOR_TOOLS[number]
-  | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number] | typeof RIFF_VIDEO_TOOLS[number]): AuthTool => {
+  | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number] | typeof RIFF_VIDEO_TOOLS[number]
+  | typeof RIFF_WORK_STATE_TOOLS[number]): AuthTool => {
   return deepFreezePlain({
     name: tool.name, title: tool.title, description: tool.description,
     // Keep ChatGPT app refresh bounded while retaining the truthful result
@@ -272,12 +286,13 @@ const HOME_DESCRIPTOR = deepFreezePlain({
 const availabilityKey = (availability: McpToolAvailability) => {
   const authenticated = availability.authenticated;
   return [authenticated, authenticated && availability.creator, authenticated && availability.pipeline,
-    authenticated && availability.riffCreator,authenticated && Boolean(availability.riffVideos)].map(Number).join('');
+    authenticated && availability.riffCreator,authenticated && Boolean(availability.riffVideos),
+    authenticated && Boolean(availability.riffWorkState)].map(Number).join('');
 };
 const catalogs: Record<string, readonly AuthTool[]> = {};
 for (const authenticated of [false, true]) for (const creator of [false, true]) {
   for (const pipeline of [false, true]) for (const riffCreator of [false, true]) {
-   for(const riffVideos of [false,true]){
+   for(const riffVideos of [false,true])for(const riffWorkState of [false,true]){
     const descriptors: AuthTool[] = [DIAGNOSTIC_DESCRIPTOR];
     if (authenticated) {
       descriptors.push(WELCOME_DESCRIPTOR, ...PRODUCT_TOOLS.map(descriptorFor));
@@ -285,9 +300,10 @@ for (const authenticated of [false, true]) for (const creator of [false, true]) 
       if (pipeline) descriptors.push(...PIPELINE_TOOLS.map(descriptorFor));
       if (riffCreator) descriptors.push(...RIFF_CREATOR_TOOLS.map(descriptorFor));
       if(riffVideos)descriptors.push(...RIFF_VIDEO_TOOLS.map(descriptorFor));
+      if(riffWorkState)descriptors.push(...RIFF_WORK_STATE_TOOLS.map(descriptorFor));
       descriptors.push(PROFILE_DESCRIPTOR, HOME_DESCRIPTOR);
     }
-    catalogs[availabilityKey({ authenticated, creator, pipeline, riffCreator, riffVideos })] = Object.freeze(descriptors);
+    catalogs[availabilityKey({ authenticated, creator, pipeline, riffCreator, riffVideos, riffWorkState })] = Object.freeze(descriptors);
    }
   }
 }

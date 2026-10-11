@@ -2,6 +2,7 @@ import type { createPipelineOperations } from '../../packages/application/creato
 import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import type { createRiffCreatorOperations } from '../../packages/application/riff-creator.ts';
 import type { createRiffVideoOperations } from '../../packages/application/riff-videos.ts';
+import type { createRiffWorkStateOperations } from '../../packages/application/riff-work-state.ts';
 import { registerCreatorPipelineResource } from './creator-pipeline-resource.ts';
 import type { createCreatorOperations } from '../../packages/application/creator-operations.ts';
 import type { CreatorDnaView } from '../../packages/contracts/creator-operations.ts';
@@ -17,7 +18,7 @@ import { registerRiffOnboardingResource } from './riff-onboarding-resource.ts';
 import { registerRiffHomeResource } from './riff-home-resource.ts';
 import {
   ACCOUNT_CONTRACT, CREATOR_TOOLS, DIAGNOSTIC_REGISTRATION, HOME_REGISTRATION,
-  PIPELINE_TOOLS, PRODUCT_TOOLS, PROFILE_REGISTRATION, RIFF_CREATOR_TOOLS, RIFF_VIDEO_TOOLS,
+  PIPELINE_TOOLS, PRODUCT_TOOLS, PROFILE_REGISTRATION, RIFF_CREATOR_TOOLS, RIFF_VIDEO_TOOLS, RIFF_WORK_STATE_TOOLS,
   WELCOME_REGISTRATION, selectMcpToolDescriptors,
 } from './mcp-definitions.ts';
 export { selectMcpToolDescriptors } from './mcp-definitions.ts';
@@ -34,6 +35,7 @@ export interface McpAuth {
   creatorOperations?: ReturnType<typeof createCreatorOperations>;
   riffCreatorOperations?: ReturnType<typeof createRiffCreatorOperations>;
   riffVideoOperations?:ReturnType<typeof createRiffVideoOperations>;
+  riffWorkStateOperations?:ReturnType<typeof createRiffWorkStateOperations>;
 }
 const MCP_INSTRUCTIONS = [
   'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
@@ -190,6 +192,19 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
       });
     }
   }
+  if(auth?.riffWorkStateOperations){
+    for(const tool of RIFF_WORK_STATE_TOOLS){
+      server.registerTool(tool.name,tool.registration,async(input:unknown)=>{
+        const result=await auth.riffWorkStateOperations!.execute(token,input);
+        const needsAuth=!result.ok&&(result.error.code==='UNAUTHENTICATED'||
+          (result.error.code==='FORBIDDEN'&&token&&!(await auth.verifier.verify(token))?.scopes.includes(tool.contract.scope)));
+        if(!result.ok)return {content:[{type:'text' as const,text:summarizeFailure(result)}],structuredContent:result,isError:true,
+          ...(needsAuth?{_meta:{'mcp/www_authenticate':[challenge(auth.config,result.error.code==='FORBIDDEN'?'insufficient_scope':'invalid_token')]}}:{})};
+        const state=result.data.work_state;
+        return {content:[{type:'text' as const,text:`Riff work state is ${state.state} (version ${state.version}).`}],structuredContent:result};
+      });
+    }
+  }
   if (auth?.creatorOperations) {
     const operations = auth.creatorOperations;
     registerCreatorReviewResource(server);
@@ -261,6 +276,7 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
     pipeline: Boolean(auth?.pipelineOperations),
     riffCreator: Boolean(auth?.riffCreatorOperations),
     riffVideos:Boolean(auth?.riffVideoOperations),
+    riffWorkState:Boolean(auth?.riffWorkStateOperations),
   });
   server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...descriptors] }));
   // A new stateless transport per request works across Worker isolates. Product

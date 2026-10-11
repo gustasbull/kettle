@@ -208,6 +208,15 @@ html, body { margin: 0; background: transparent; }
 .riff-studio-subtitle { color: #6d6d72; font-size: 14px; line-height: 20px; }
 .riff-studio-actions { flex: 0 0 auto; justify-content: flex-end; }
 .riff-studio-actions .riff-button:first-child { font-weight:500; }
+.riff-saved-confirmation { width: min(576px,100%); padding:24px; border:1px solid #e1e4ea; border-radius:18px; display:flex; flex-direction:column; gap:12px; background-color:#fff; background-image:radial-gradient(circle at 14% 18%,rgba(224,211,246,.75) 0 2px,transparent 3px),radial-gradient(circle at 88% 78%,rgba(204,232,246,.8) 0 2px,transparent 3px); box-shadow:0 16px 40px rgba(64,42,92,.1); }
+.riff-saved-confirmation h1 { margin:0; font-size:20px; line-height:26px; font-weight:600; }
+.riff-saved-confirmation p { margin:0; font-size:15px; line-height:22px; }
+.riff-saved-confirmation__actions { padding-top:4px; gap:8px; }
+.riff-saved-confirmation__actions .riff-button { min-height:44px; font-size:14px; line-height:22px; }
+.riff-saved-confirmation__actions .riff-button:first-child { width:103px; }
+.riff-saved-confirmation__actions .riff-button:last-child { width:99px; }
+.riff-button--soft { background:#edf3ff; color:#544276; }
+.riff-studio-filmed-status { align-self:flex-start; margin:0; color:#3c6849; font-size:14px; line-height:22px; }
 .riff-studio-variants { display:flex;align-self:flex-start;max-width:900px;gap:4px;padding:3px;overflow-x:auto;border:1px solid #e3e8f1;border-radius:999px;background:#f0f3f7;scrollbar-width:none; }
 .riff-studio-variant { appearance:none;min-height:32px;padding:6px 12px;border:1px solid transparent;border-radius:999px;color:#52617a;background:transparent;font:600 13px/18px var(--font-sans,system-ui,sans-serif);white-space:nowrap;cursor:pointer; }
 .riff-studio-variant[aria-checked="true"] { color:#6933a1;background:#fff;box-shadow:0 1px 3px #18243a14; }

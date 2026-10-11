@@ -5,6 +5,7 @@ import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReferenc
   CreatorJobProgress, CreatorJobStatusView, CreatorJobStage, CreatorAttemptOutcomeInput,
   StartCreatorRecommendationsInput, pipelineContracts } from '../packages/contracts/creator-pipeline.ts';
 import { recommendationBatchFixture, creatorScriptsFixture, creatorJobFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
+import { RiffWorkSummary } from '../packages/contracts/riff-creator.ts';
 test('pipeline contracts retain reference lineage and fictional origin without padding',()=>{
  const batch=recommendationBatchFixture(); assert.equal(batch.ideas.length,1);
  assert.ok(!RecommendationBatch.safeParse({...batch,contains_fixture_data:false}).success);
@@ -92,6 +93,24 @@ test('job status cannot expose premature, mismatched or cross-project scan resul
  assert.ok(!CreatorJobView.safeParse({...job, project_id: job.id}).success);
  assert.ok(CreatorJobView.safeParse({...job, state: 'queued', stage:'accepted',
   progress:{kind:'scan',profile:null,videos:[],limitations:[]},result: null}).success);
+});
+
+test('public Riff work-state projections enforce exact job and persisted variant lineage',()=>{
+ const job=creatorJobFixture('scripts');if(job.result?.kind!=='scripts')throw new Error('scripts fixture mismatch');
+ const variantId=job.result.scripts.variants[0]!.id;
+ const workState={job_id:job.id,variant_id:variantId,state:'saved' as const,version:1,updated_at:job.updated_at};
+ assert.ok(CreatorJobView.safeParse({...job,work_states:[workState]}).success);
+ assert.ok(!CreatorJobView.safeParse({...job,work_states:[{...workState,job_id:job.project_id}]}).success);
+ assert.ok(!CreatorJobView.safeParse({...job,work_states:[{...workState,variant_id:job.project_id}]}).success);
+ assert.ok(!CreatorJobView.safeParse({...job,work_states:[workState,workState]}).success);
+ assert.ok(!CreatorJobView.safeParse({...creatorJobFixture('scan'),work_states:[workState]}).success);
+ const summary={project_id:job.project_id,project_name:'Fixture',job_id:job.id,kind:'scripts' as const,
+  state:'succeeded' as const,updated_at:job.updated_at,source:{platform:'tiktok' as const,kind:'video' as const,
+   handle:'fixture',canonical_url:'https://www.tiktok.com/@fixture/video/1',profile_url:'https://www.tiktok.com/@fixture',
+   video_url:'https://www.tiktok.com/@fixture/video/1'},variant_id:variantId,work_state:workState};
+ assert.ok(RiffWorkSummary.safeParse(summary).success);
+ assert.ok(!RiffWorkSummary.safeParse({...summary,variant_id:null}).success);
+ assert.ok(!RiffWorkSummary.safeParse({...summary,job_id:job.project_id}).success);
 });
 
 const provenance={origin:'live' as const,retrieved_at:'2026-10-11T08:00:00.000Z',source_observed_at:null,

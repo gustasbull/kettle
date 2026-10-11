@@ -12,6 +12,7 @@ import { failure, type IdentityVerifier } from './operations.ts';
 import { projectCreatorDna, createCreatorIngestion, type CreatorRepository } from './creator-operations.ts';
 import { observed, type CreatorLatencyObserver } from './creator-observability.ts';
 import { parseRiffVideoIngestReceipt, riffVideoCatalogInput, type RiffVideoRepository } from './riff-videos.ts';
+import { RiffWorkState } from '../contracts/riff-work-state.ts';
 
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
   | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'record_creator_attempt_outcome'
@@ -24,6 +25,7 @@ export const StoredCreatorJob = z.object({
   stage:CreatorJobStage,progress:CreatorJobProgress,
   created_at:Timestamp,updated_at:Timestamp,input:z.record(z.string(),z.unknown()),captured:z.unknown(),
   result:CreatorJobView.shape.result,message:z.string().nullable(),
+  work_states:z.array(RiffWorkState).default([]),
 });
 export type StoredCreatorJob = z.infer<typeof StoredCreatorJob>;
 export const StoredCreatorJobOutput = result(z.object({job:StoredCreatorJob}));
@@ -49,6 +51,7 @@ export function publicCreatorJob(job:StoredCreatorJob):CreatorJobView {
   return CreatorJobView.parse({id:job.id,project_id:job.project_id,kind:job.kind,state:job.state,
     ...(capturedScan?.success?{source_kind:capturedScan.data.seed_url?'video':'profile'}:{}),
     revision:job.revision,stage:job.stage,progress:job.progress,created_at:job.created_at,updated_at:job.updated_at,result:job.result,
+    work_states:job.work_states,
     message:job.state==='needs_reconciliation'?'A provider request needs review before another attempt. No automatic resubmission.':
       job.state==='failed'?'This job could not complete. Check the research allowance and source permissions before starting a new request.':null});
 }

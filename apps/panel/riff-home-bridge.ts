@@ -16,7 +16,9 @@ import {
   validateProductDraft,
   type ProductDraft,
 } from './riff-product-context-validation.ts';
+import { riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
+import { createRiffWorkStateClient,parseRiffWorkState } from './riff-work-state-client.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -131,6 +133,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   let actionEpoch = 0;
   const terminalWorkRefreshes = new Set<string>();
   const sourceByJob=new Map<string,string>();
+  const selectedVariantByJob=new Map<string,string>();
+  let activeWorkStateJobId:string|undefined;
   let catalogDeferred:{projectId?:string}|undefined;
   let controller!:ReturnType<typeof createCreatorPipelineController>;
 
@@ -260,6 +264,16 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     }
     return { status: 'ambiguous' };
   };
+
+  const workStateClient=createRiffWorkStateClient<CreatorJobView>(async input=>{
+    const outcome=await callTool('set_riff_work_state',input);
+    if(outcome.status==='response')return outcome.value;
+    if(outcome.status==='application_error')return {ok:false,error:{code:outcome.failure.code}};
+    throw new Error('Ambiguous work-state write');
+  },async jobId=>{
+    const outcome=await callTool('get_creator_job',{job_id:jobId});
+    return outcome.status==='response'?readJob(outcome.value):undefined;
+  });
 
   let view!:ReturnType<typeof mountRiffHome>;
   const catalogLoader=createRiffVideoCatalogLoader(async args=>{
@@ -415,7 +429,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       } catch { return { status: 'failed', message: 'The file picker could not complete. Attach the video in ChatGPT instead.' }; }
     },
     showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'); },
-    async openRecent(jobId) {
+    async openRecent(jobId,variantId) {
       const epoch = ++actionEpoch;
       const outcome = await callTool('get_creator_job', { job_id: jobId });
       if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
@@ -425,6 +439,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (outcome.status !== 'response') return { status: 'failed', message: 'Riff could not confirm the latest saved state. Try again.' };
       const job = readJob(outcome.value);
       if (!job) return { status: 'failed', message: 'That saved Riff job could not be opened.' };
+      if(variantId)selectedVariantByJob.set(jobId,variantId);else selectedVariantByJob.delete(jobId);
       observe(job);return { status: 'sent', message: 'Saved Riff work opened.' };
     },
     refreshRecents: () => loadWork(),
@@ -468,6 +483,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
     proposeCatalogReference:proposal=>send(riffCatalogProposalHandoff(proposal)),
     retryCatalog:()=>void catalogLoader.retry(),
+    setVariantState:({job,variant,state})=>workStateClient.set(job,variant.id,state),
   });
   const render = (state: RiffHomeState) => { const finish = localPerformance.start('panel_render'); view.render(state); finish('ok'); };
   render(homeState);
@@ -481,8 +497,17 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   controller=createCreatorPipelineController({
     loading(){view.setBusy('Loading your saved creator job…');},
     job(snapshot){
+      if(activeWorkStateJobId&&activeWorkStateJobId!==snapshot.job.id){
+        workStateClient.invalidate();
+        const selected=selectedVariantByJob.get(snapshot.job.id);selectedVariantByJob.clear();
+        if(selected)selectedVariantByJob.set(snapshot.job.id,selected);
+      }
+      activeWorkStateJobId=snapshot.job.id;
       const source=sourceByJob.get(snapshot.job.id);
-      view.showJob(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(source?{sourceUrl:source}:{})});
+      const latestVariant=[...snapshot.job.work_states].sort((left,right)=>
+        right.updated_at.localeCompare(left.updated_at)||right.version-left.version||left.variant_id.localeCompare(right.variant_id))[0]?.variant_id;
+      view.showJob(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(source?{sourceUrl:source}:{}),
+        ...((selectedVariantByJob.get(snapshot.job.id)??latestVariant)?{variantId:selectedVariantByJob.get(snapshot.job.id)??latestVariant}:{})});
       const observedState=snapshot.status?.state??snapshot.job.state;
       if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length||observedState!=='queued'&&observedState!=='running')sourceByJob.delete(snapshot.job.id);
       if(observedState!=='queued'&&observedState!=='running')refreshTerminalWork(snapshot.job,observedState,snapshot.status?.revision);
@@ -550,9 +575,16 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         || !['scan', 'recommendations', 'scripts'].includes(String(work.kind))
         || !['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'].includes(String(work.state))
         || source?.platform !== 'tiktok' || typeof source.handle !== 'string' || !/^[\w.]{1,100}$/.test(source.handle)) return [];
+      const parsedWorkState=work.work_state===null||work.work_state===undefined?null:parseRiffWorkState(work.work_state);
+      if(work.work_state!==null&&work.work_state!==undefined&&!parsedWorkState)return [];
+      const variantId=work.variant_id===null||work.variant_id===undefined?null:typeof work.variant_id==='string'&&/^[0-9a-f-]{36}$/i.test(work.variant_id)?work.variant_id:undefined;
+      if(variantId===undefined)return [];
+      if((variantId===null)!==(parsedWorkState===null)||parsedWorkState&&
+        (parsedWorkState.job_id!==work.job_id||parsedWorkState.variant_id!==variantId))return [];
       return [{ job_id: work.job_id, title: work.project_name, updated_at: work.updated_at,
-        stage: work.kind === 'recommendations' ? 'Discovery' : work.kind === 'scripts' ? 'Studio' : 'Analysis',
+        stage:riffRecentLabel(work.kind as CreatorJobView['kind'],work.state as CreatorJobView['state'],parsedWorkState?.state??null),
         state: work.state as CreatorJobView['state'], platform: 'tiktok' as const, handle: source.handle,
+        variant_id:variantId,work_state:parsedWorkState,
       }];
     });
     view.setRecents(items);
@@ -573,6 +605,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     recommendationRequest = undefined;
     workLoadEpoch++;
     controller.reset();sourceByJob.clear();catalogDeferred=undefined;catalogLoader.reset();
+    workStateClient.invalidate();selectedVariantByJob.clear();
     terminalWorkRefreshes.clear();
     initialWorkLoadStarted = false;
     view.clearPrivate();
@@ -594,7 +627,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   }, timeoutMs);
   function dispose() {
     if (disposed) return;
-    disposed = true; connected = false;controller.dispose();clearTimeout(timer); handshake.abort(); view.dispose();
+    disposed = true; connected = false;controller.dispose();workStateClient.invalidate();clearTimeout(timer); handshake.abort(); view.dispose();
     window.removeEventListener('pagehide', dispose);
     root.ownerDocument.removeEventListener('visibilitychange',visibilityChanged);
     app.ontoolresult = undefined; app.ontoolcancelled = undefined; app.onhostcontextchanged = undefined;

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CreatorJobView } from './creator-pipeline.ts';
 import { CreatorUrl } from './creator-profile.ts';
 import { Id, Project, result } from './index.ts';
+import { RiffWorkState } from './riff-work-state.ts';
 
 const SourceUrl = z.url().max(2_048).refine(value => {
   const url = new URL(value);
@@ -53,6 +54,14 @@ export const RiffWorkSummary = z.strictObject({
   state: CreatorJobView.shape.state,
   updated_at: CreatorJobView.shape.updated_at,
   source: CanonicalRiffCreatorSource,
+  variant_id: Id.nullable().default(null),
+  work_state: RiffWorkState.nullable().default(null),
+}).superRefine((work,context)=>{
+  if((work.variant_id===null)!==(work.work_state===null))
+    context.addIssue({code:'custom',message:'Recent variant and work state must be present together'});
+  if(work.work_state&&(work.kind!=='scripts'||work.state!=='succeeded'||work.work_state.job_id!==work.job_id||
+    work.work_state.variant_id!==work.variant_id))
+    context.addIssue({code:'custom',message:'Recent work state must match its successful script job and variant'});
 });
 export const ListRiffWorkOutput = result(z.strictObject({
   work: z.array(RiffWorkSummary).max(20),
