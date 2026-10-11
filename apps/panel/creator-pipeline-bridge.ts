@@ -83,9 +83,9 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
       {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}),
     page=>view?.setCatalog(page),
   );
-  const loadCatalog=(projectId=currentProjectId,cursor?:string)=>{
+  const loadCatalog=(projectId=currentProjectId)=>{
     if(!projectId||projectId!==currentProjectId||!bridgeReady)return;
-    return catalogLoader.load({ownerKey:projectId,projectId},cursor);
+    return catalogLoader.load({ownerKey:projectId,projectId});
   };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
@@ -94,7 +94,6 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
         sendPrompt, requestFullscreen,
         onDiscoveryOpen:({projectId}={})=>void loadCatalog(projectId),
-        onCatalogNextPage:({cursor,projectId})=>void loadCatalog(projectId,cursor),
       });
       if(currentProjectId!==snapshot.job.project_id){
         currentProjectId=snapshot.job.project_id;catalogLoader.reset();

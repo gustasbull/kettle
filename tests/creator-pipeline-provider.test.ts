@@ -151,7 +151,12 @@ test('recommendation reuses the latest valid fresh captured feed observation wit
   assert.equal(batch.references[0]!.caption,'Latest valid feed caption');
   assert.equal(batch.references[0]!.source_observed_at,'2026-10-08T12:00:00.000Z');
   assert.equal(batch.references[0]!.views,null);assert.equal(batch.references[0]!.likes,null);
-  assert.deepEqual(guard.catalogs,[],'an already-cataloged captured observation is not inserted again');
+  assert.equal(guard.catalogs.length,1,'the recommendation records its own source link for the reused observation');
+  assert.equal(guard.catalogs[0]!.key,'recommend:detail:9000000000000000011');
+  assert.equal(guard.catalogs[0]!.role,'discovered_reference');
+  assert.equal((guard.catalogs[0]!.observations[0] as any).id,latest.id);
+  assert.ok(guard.events.indexOf('checkpoint:recommend:detail:9000000000000000011')<
+    guard.events.indexOf('catalog:recommend:detail:9000000000000000011:discovered_reference'));
 });
 test('stale, incomplete, foreign-lineage, mismatched, or permission-incompatible feed data takes the guarded detail path',async()=>{
   const {analysis,dna}=await setup(),base=structuredClone(analysis.scan.video_observations[0]!);

@@ -289,10 +289,10 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 0);
     assert.equal(await root.getByRole('heading', { name: 'Top videos' }).count(), 1,
       'the approved Paper heading is retained');
-    assert.match(await root.locator('.riff-profile-reviewed').textContent(),
-      /Ranked by views among the \d+ recent TikTok videos? reviewed\./i,
-      'the existing reviewed line explicitly bounds the ranking claim');
-    assert.equal(await root.getByRole('link', { name: 'Open video from this review' }).count(), 1);
+    assert.match(await root.locator('.riff-profile-reviewed').textContent(), /^\d+ TikTok videos? reviewed$/,
+      'the exact Paper reviewed line is retained without an unsupported ranking claim');
+    assert.equal(await root.getByRole('link', { name: 'Open top video' }).count(), 1);
+    assert.doesNotMatch(await root.locator('.riff-profile-reviewed').textContent(), /Ranked by views|recent/i);
     assert.doesNotMatch(await root.textContent(), /Captured DNA|DNA ID|Analysis created|Oldest post|Newest post|Limitations|Observed/i);
 
     await page.evaluate(() => {
@@ -425,7 +425,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.doesNotMatch(await root.textContent(), /Batch limitations|DNA ID/i);
   });
 
-  await t.test('provider-free catalog requests the next page only at the eight-card Paper threshold', async () => {
+  await t.test('provider-free catalog retains but never consumes the cursor beyond the eight-card Paper page', async () => {
     const loadsAtStart = await page.evaluate(() => window.discoveryLoads.length);
     await page.evaluate(() => {
       boot('scan', 'fullscreen');
@@ -475,11 +475,15 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       'the first seven loaded positions stay local');
     await root.getByRole('button', { name: 'Next video' }).click();
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 8/);
-    assert.deepEqual(await page.evaluate(() => window.discoveryLoads.at(-1)), {
-      kind: 'next', request: { cursor: 'page-2', projectId: '00000000-0000-4000-8000-000000000100' },
-    });
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsAtStart + 1,
+      'the retained next cursor is not consumed at the eighth card');
     assert.equal(await root.locator('[data-catalog-card]').count(), 8,
       'the Paper carousel never renders more than its approved page size');
+    await root.getByRole('button', { name: 'Next video' }).click();
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/,
+      'the bounded carousel wraps locally after the eighth card');
+    await root.getByRole('button', { name: 'Previous video' }).click();
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 8/);
     await page.evaluate(() => {
       const cards = Array.from({ length: 8 }, (_, offset) => {
         const index=offset+8;
@@ -500,10 +504,11 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     });
     assert.equal(await root.locator('[data-catalog-card]').count(), 8);
     await root.getByRole('button', { name: 'Next video' }).click();
-    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 9/);
+    assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 1/,
+      'even an oversized retained payload is defensively bounded to its first approved page');
     await root.getByRole('button', { name: 'Previous video' }).click();
     assert.match(await root.locator('[data-active-catalog]').textContent(), /Observed catalog caption 8/,
-      'a loaded prior page remains locally navigable');
+      'the retained first page remains locally navigable');
     const loadsBeforeLocalControls = await page.evaluate(() => window.discoveryLoads.length);
     await root.getByRole('button', { name: 'Quick demos', exact: true }).click();
     assert.equal(await root.locator('[data-catalog-card]').count(), 0, 'an unbacked filter remains empty');

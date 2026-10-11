@@ -497,8 +497,8 @@ test('Riff Home defers a catalog shortcut until the first account is ready', asy
     window.openai={callTool:async(name,args)=>{
       window.toolNames.push(name);
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
-      if(name==='list_riff_videos'){window.catalogCalls.push(args);const second=args.cursor==='page-2';return {structuredContent:{ok:true,data:{
-        cards:Array.from({length:8},(_,offset)=>card(offset+(second?8:0))),next_cursor:second?null:'page-2',
+      if(name==='list_riff_videos'){window.catalogCalls.push(args);return {structuredContent:{ok:true,data:{
+        cards:Array.from({length:8},(_,offset)=>card(offset)),next_cursor:'page-2',
         coverage:'Saved observations only.',freshness:'As last observed.'}}};}
     }};
     window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
@@ -532,17 +532,17 @@ test('Riff Home defers a catalog shortcut until the first account is ready', asy
   for(let index=0;index<6;index+=1)await frame.getByRole('button',{name:'Next video'}).click();
   assert.equal(await frame.evaluate(()=>window.catalogCalls.length),1,'positions before the eighth card stay local');
   await frame.getByRole('button',{name:'Next video'}).click();
-  await frame.waitForFunction(()=>window.catalogCalls.length===2);
-  assert.deepEqual(await frame.evaluate(()=>window.catalogCalls[1]),{sort:'observed_at_desc',limit:8,cursor:'page-2'});
+  assert.equal(await frame.evaluate(()=>window.catalogCalls.length),1,'the eighth card does not consume the retained cursor');
   assert.equal(await frame.locator('[data-catalog-card]').count(),8,'only one Paper page is rendered');
   await frame.getByRole('button',{name:'Next video'}).click();
-  assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 9/);
+  assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 1/,
+    'the one-page carousel wraps locally');
   await frame.getByRole('button',{name:'Previous video'}).click();
   assert.match(await frame.locator('[data-active-catalog]').textContent(),/Home catalog caption 8/);
-  const callsAfterPagination=await frame.evaluate(()=>window.catalogCalls.length);
+  const callsAfterBrowsing=await frame.evaluate(()=>window.catalogCalls.length);
   await frame.getByRole('button',{name:'Quick demos',exact:true}).click();
   await frame.getByRole('button',{name:'For you',exact:true}).click();
-  assert.equal(await frame.evaluate(()=>window.catalogCalls.length),callsAfterPagination,'loaded filters stay local');
+  assert.equal(await frame.evaluate(()=>window.catalogCalls.length),callsAfterBrowsing,'loaded filters stay local');
   assert.equal(await frame.evaluate(()=>window.toolNames.some(name=>/^start_|refresh|discover|generate/.test(name))),false,
     'catalog browsing never invokes a provider-start tool');
 });

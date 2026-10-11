@@ -124,6 +124,46 @@ test('source/receipt failure rolls back identity and observation before a clean 
   assert.equal((await ingest(job,key,'own_profile',[video])).ok,true);
 });
 
+test('one immutable observation retains exact source-specific links and limitations across scan and recommendation jobs',async()=>{
+  const nativeId='9501',scanKey='scan:feed:6';
+  const scanVideo=observation(id(501),nativeId,{limitations:['Scan catalog caveat.']});
+  const scanJob=await source('scan',accountA,projectA,scanKey,'reading_posts',[scanVideo]);
+  assert.equal((await ingest(scanJob,scanKey,'own_profile',[scanVideo])).ok,true);
+
+  const recommendationVideo={...scanVideo,limitations:['Recommendation reference caveat.']};
+  const recommendationKey=`recommend:detail:${nativeId}`;
+  const recommendationJob=await source('recommendations',accountA,projectA,recommendationKey,'enriching_references',[recommendationVideo]);
+  const linked=await ingest(recommendationJob,recommendationKey,'discovered_reference',[recommendationVideo]);
+  assert.equal(linked.ok,true,'a captured observation may gain a recommendation source link without duplicating the observation');
+  assert.deepEqual(await ingest(recommendationJob,recommendationKey,'discovered_reference',[recommendationVideo]),linked,
+    'the source-link receipt remains exact-replayable');
+  assert.equal((await ingest(recommendationJob,recommendationKey,'discovered_reference',[
+    {...recommendationVideo,limitations:['Changed replay caveat.']},
+  ])).error?.code,'IDEMPOTENCY_CONFLICT');
+  const conflictingVideo={...scanVideo,caption:'Conflicting immutable caption.'};
+  const conflictingJob=await source('recommendations',accountA,projectA,recommendationKey,'enriching_references',[conflictingVideo]);
+  assert.equal((await ingest(conflictingJob,recommendationKey,'discovered_reference',[conflictingVideo])).error?.code,
+    'IDEMPOTENCY_CONFLICT','a different job cannot mutate facts under an existing observation ID');
+
+  assert.deepEqual((await db.query<{observations:number;sources:number}>(`select
+    (select count(*)::int from public.riff_video_observations where id=$1) observations,
+    (select count(*)::int from public.riff_video_observation_sources where observation_id=$1) sources`,[scanVideo.id])).rows,
+  [{observations:1,sources:2}]);
+  const own=await list({project_id:projectA,role:'own_profile'}),discovered=await list({project_id:projectA,role:'discovered_reference'});
+  assert.deepEqual(own.data!.cards.find((card:any)=>card.id===scanVideo.id).limitations,['Scan catalog caveat.']);
+  assert.deepEqual(discovered.data!.cards.find((card:any)=>card.id===scanVideo.id).limitations,['Recommendation reference caveat.']);
+});
+
+test('a recommendation can catalog a reused observation captured before catalog persistence existed',async()=>{
+  const nativeId='9502',key=`recommend:detail:${nativeId}`;
+  const legacyCapture=observation(id(502),nativeId,{limitations:['Pre-catalog captured analysis.']});
+  const job=await source('recommendations',accountA,projectA,key,'enriching_references',[legacyCapture]);
+  const stored=await ingest(job,key,'discovered_reference',[legacyCapture]);
+  assert.equal(stored.ok,true);
+  assert.equal((await db.query<{n:number}>('select count(*)::int n from public.riff_video_observations where id=$1',[legacyCapture.id])).rows[0]!.n,1);
+  assert.equal((await list({project_id:projectA,role:'discovered_reference'})).data!.cards.some((card:any)=>card.id===legacyCapture.id),true);
+});
+
 test('owned filtering precedes latest-per-identity collapse and cursor pages are deterministic',async()=>{
   const oldKey='scan:feed:2',oldVideo=observation(id(201),'shared');
   const oldJob=await source('scan',accountA,projectA,oldKey,'reading_posts',[oldVideo]);

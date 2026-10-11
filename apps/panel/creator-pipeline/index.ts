@@ -32,7 +32,6 @@ export type CreatorPipelineOptions = {
     state: 'saved' | 'filmed';
   }) => Promise<RiffActionResult>;
   onDiscoveryOpen?: (scope:{projectId?:string}) => void;
-  onCatalogNextPage?: (request:{cursor:string;projectId?:string}) => void;
   embeddedChrome?:boolean;
 };
 export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string};
@@ -169,9 +168,6 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let studioTab = 0;
   let catalogIndex=0;
   let catalogScopeKey:string|undefined;
-  let catalogProjectId:string|undefined;
-  const requestedCatalogCursors=new Set<string>();
-  const catalogPageSize=8;
 
   const enterDiscovery=(loadCatalog=false,projectId?:string)=>{
     screenKind='discovery';
@@ -179,7 +175,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const nextScope=projectId??'account';
     if(catalogScopeKey!==nextScope){
       const changingKnownScope=catalogScopeKey!==undefined;
-      catalogScopeKey=nextScope;catalogProjectId=projectId;if(changingKnownScope)catalog=undefined;catalogIndex=0;requestedCatalogCursors.clear();
+      catalogScopeKey=nextScope;if(changingKnownScope)catalog=undefined;catalogIndex=0;
       options.onDiscoveryOpen?.(projectId?{projectId}:{});
     }
   };
@@ -445,15 +441,14 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       const group = el('section', undefined, 'riff-profile-top'); group.append(el('h2', 'Top videos'));
       const videos = el('div', undefined, 'riff-profile-videos');
       top.forEach(item => {
-        const media = safeLink(item.url, 'Open video from this review', 'riff-profile-video');
-        const preview = mediaImage(item.thumbnail_url, 'Reviewed video preview', 'riff-media-image'); if (preview) media.append(preview);
+        const media = safeLink(item.url, 'Open top video', 'riff-profile-video');
+        const preview = mediaImage(item.thumbnail_url, 'Top video preview', 'riff-media-image'); if (preview) media.append(preview);
         const badge = el('span', undefined, 'riff-profile-video__metric'); badge.append(eyeIcon('#FFFFFF'), el('span', formatMetric(item.metrics!.views!)));
         media.append(badge); videos.append(media);
       });
       group.append(videos); profile.append(group);
     }
-    const reviewed=`${dna.coverage.unique_videos} recent TikTok ${dna.coverage.unique_videos === 1 ? 'video' : 'videos'} reviewed`;
-    profile.append(el('p', top.length?`Ranked by views among the ${reviewed}.`:`${reviewed}.`, 'riff-profile-reviewed'));
+    profile.append(el('p', `${dna.coverage.unique_videos} TikTok ${dna.coverage.unique_videos === 1 ? 'video' : 'videos'} reviewed`, 'riff-profile-reviewed'));
     const analysis = el('section', undefined, 'riff-profile-analysis');
     for (const claim of dna.claims) {
       const insight = el('article', undefined, 'riff-profile-insight'); insight.append(el('p', claim.statement)); analysis.append(insight);
@@ -633,34 +628,17 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     view.filters.forEach(label=>{const selected=label===discoveryFilter;const control=button(label,`riff-filter${selected?' riff-filter--active':''}`,()=>{
       discoveryFilter=label;catalogIndex=0;renderCatalogDiscovery();
     },`filter-${label}`);control.setAttribute('aria-pressed',String(selected));filters.append(control);});content.append(filters);
-    const allCards=discoveryLibrary==='videos'&&discoveryFilter==='For you'?(catalog?.cards??[]):[];
-    catalogIndex=Math.min(catalogIndex,Math.max(0,allCards.length-1));
-    const pageStart=Math.floor(catalogIndex/catalogPageSize)*catalogPageSize;
-    const cards=allCards.slice(pageStart,pageStart+catalogPageSize);
+    const cards=discoveryLibrary==='videos'&&discoveryFilter==='For you'?(catalog?.cards.slice(0,8)??[]):[];
     if(!cards.length){setStatus('No videos are available.');return;}
-    const localIndex=catalogIndex-pageStart;
-    const requestNextPage=()=>{
-      const cursor=catalog?.next_cursor;
-      const loaded=catalog?.cards??[];
-      const loadedPageStart=Math.floor(catalogIndex/catalogPageSize)*catalogPageSize;
-      const loadedPageLength=loaded.slice(loadedPageStart,loadedPageStart+catalogPageSize).length;
-      if(!cursor||catalogIndex!==loaded.length-1||loadedPageLength!==catalogPageSize||catalogIndex-loadedPageStart!==catalogPageSize-1
-        ||requestedCatalogCursors.has(cursor))return;
-      requestedCatalogCursors.add(cursor);
-      options.onCatalogNextPage?.({cursor,...(catalogProjectId?{projectId:catalogProjectId}:{})});
-    };
-    const move=(direction:1|-1)=>{
-      if(direction===1)catalogIndex=catalogIndex<allCards.length-1?catalogIndex+1:catalog?.next_cursor?catalogIndex:0;
-      else catalogIndex=catalogIndex>0?catalogIndex-1:allCards.length-1;
-      renderCatalogDiscovery();requestNextPage();
-    };
-    const select=(index:number)=>{catalogIndex=pageStart+index;renderCatalogDiscovery();requestNextPage();};
+    catalogIndex=Math.min(catalogIndex,cards.length-1);
+    const move=(direction:1|-1)=>{catalogIndex=(catalogIndex+direction+cards.length)%cards.length;renderCatalogDiscovery();};
+    const select=(index:number)=>{catalogIndex=index;renderCatalogDiscovery();};
     const carousel=el('section',undefined,'riff-discovery-carousel');carousel.dataset.discoveryCarousel='';carousel.tabIndex=0;
-    carousel.dataset.focus='discovery-carousel';carousel.setAttribute('aria-label',`Video ${localIndex+1} of ${cards.length}`);
+    carousel.dataset.focus='discovery-carousel';carousel.setAttribute('aria-label',`Video ${catalogIndex+1} of ${cards.length}`);
     carousel.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft'].includes(event.key))return;event.preventDefault();
       move(event.key==='ArrowRight'?1:-1);});
     const stage=el('div',undefined,'riff-discovery-stage');cards.forEach((card,index)=>{
-      let delta=index-localIndex;if(delta>Math.floor(cards.length/2))delta-=cards.length;if(delta< -Math.floor(cards.length/2))delta+=cards.length;
+      let delta=index-catalogIndex;if(delta>Math.floor(cards.length/2))delta-=cards.length;if(delta< -Math.floor(cards.length/2))delta+=(cards.length);
       const position=delta===0?'active':delta===-1?'left-one':delta===1?'right-one':delta<0?'left-two':'right-two';
       const article=el('article',undefined,`riff-idea-card riff-idea-card--${position}`);article.dataset.catalogCard=card.id;if(delta===0)article.dataset.activeCatalog=card.id;
       const media=safeLink(card.canonical_url,'Open saved video','riff-idea-media');const preview=mediaImage(card.thumbnail_url??undefined,'Saved video preview','riff-media-image');if(preview)media.append(preview);
@@ -673,7 +651,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     });
     carousel.append(stage);const navigation=el('div',undefined,'riff-carousel-navigation');
     const previous=button('','riff-carousel-arrow',()=>move(-1),'previous-video');previous.setAttribute('aria-label','Previous video');previous.append(arrowIcon('previous'));
-    const dots=el('div',undefined,'riff-discovery-dots');dots.setAttribute('role','group');dots.setAttribute('aria-label','Video position');cards.forEach((_card,index)=>{const dot=button('','riff-discovery-dot',()=>select(index),`catalog-dot-${index}`);dot.setAttribute('aria-label',`Go to video ${index+1}`);dot.setAttribute('aria-current',String(index===localIndex));dots.append(dot);});
+    const dots=el('div',undefined,'riff-discovery-dots');dots.setAttribute('role','group');dots.setAttribute('aria-label','Video position');cards.forEach((_card,index)=>{const dot=button('','riff-discovery-dot',()=>select(index),`catalog-dot-${index}`);dot.setAttribute('aria-label',`Go to video ${index+1}`);dot.setAttribute('aria-current',String(index===catalogIndex));dots.append(dot);});
     const next=button('','riff-carousel-arrow',()=>move(1),'next-video');next.setAttribute('aria-label','Next video');next.append(arrowIcon('next'));
     navigation.append(previous,dots,next);carousel.append(navigation,el('p','Use the left and right arrow keys','riff-carousel-hint'));content.append(carousel);setStatus(`${cards.length} videos shown.`);
   }
@@ -796,7 +774,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
     if (!same) {
       ideaIndex = 0; catalogIndex=0;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;
-      if(current?.project_id!==job.project_id){catalog=undefined;catalogScopeKey=undefined;catalogProjectId=undefined;requestedCatalogCursors.clear();}
+      if(current?.project_id!==job.project_id){catalog=undefined;catalogScopeKey=undefined;}
     }
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
@@ -818,11 +796,11 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   return {
     render,
-    setCatalog(page){catalog=page?structuredClone(page):undefined;if(!page)requestedCatalogCursors.clear();if(showingCatalog)renderCatalogDiscovery();},
+    setCatalog(page){catalog=page?structuredClone(page):undefined;if(showingCatalog)renderCatalogDiscovery();},
     showCatalog(library='videos',scope={}){if(disposed)return;discoveryLibrary=library;discoveryFilter=library==='showcases'?'Quick demos':'For you';catalogIndex=0;
       const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(library==='videos',projectId);renderCatalogDiscovery();},
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
-    dispose() { if (disposed) return; disposed = true; current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;catalogProjectId=undefined;requestedCatalogCursors.clear();root.replaceChildren(); },
+    dispose() { if (disposed) return; disposed = true; current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;root.replaceChildren(); },
   };
 }

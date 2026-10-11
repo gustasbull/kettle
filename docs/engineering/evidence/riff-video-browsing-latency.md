@@ -43,9 +43,9 @@ entry can be tied to deployed bytes.
 
 | Panel/resource | SHA-256 bundle version | Raw bytes / budget | Gzip bytes / budget |
 | --- | --- | ---: | ---: |
-| Riff Home `riff-home-v3` | `sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450` | 142,850 / 500,000 | 40,454 / 110,000 |
+| Riff Home `riff-home-v3` | `sha256:f70b423132a9ab54a95a237e75562d4a14e1f17dd13a4ae065732a674052b8e8` | 141,946 / 500,000 | 40,217 / 110,000 |
 | Onboarding `riff-onboarding-v1` | `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0` | 382,496 / 400,000 | 80,543 / 85,000 |
-| Pipeline `creator-pipeline-v3` | `sha256:fc6bbf1be1a5556fe398d7e137ee69dfb1bcff7e8ff8d964ea176a5d23dae120` | 114,785 / 250,000 | 31,949 / 75,000 |
+| Pipeline `creator-pipeline-v3` | `sha256:f27c7a9380afd7ddeab4475dd29c30ad75576174ad99138d6f09d2b2bf88b5da` | 113,949 / 250,000 | 31,737 / 75,000 |
 
 Evidence class: `fixture`; proof surface: `local-process`. These are the values
 consumed from the generated local manifest by the Task 9 fixture benchmark. They
@@ -59,12 +59,12 @@ current-live ChatGPT, Cloudflare, Supabase, or provider percentiles.
 ### Browser
 
 Headless Chromium loaded the exact final Home artifact above,
-`sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450`:
+`sha256:f70b423132a9ab54a95a237e75562d4a14e1f17dd13a4ae065732a674052b8e8`:
 
 - `first-paint`: 36.0 ms from navigation start.
 - `first-contentful-paint`: 36.0 ms from navigation start.
 - twelve local tab clicks measured from click through two animation frames:
-  `11.4, 12.6, 14.0, 14.6, 15.3, 15.3, 13.4, 15.2, 15.7, 15.0, 13.5, 13.6 ms`.
+  `7.4, 15.9, 16.1, 16.0, 16.0, 16.1, 16.1, 16.3, 16.1, 15.7, 16.1, 15.8 ms`.
 
 The click sample exercises already-loaded local state only; it performs no MCP,
 database, or provider call.

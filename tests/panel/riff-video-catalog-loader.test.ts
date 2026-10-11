@@ -28,27 +28,24 @@ const envelope = (start: number, next_cursor: string | null) => ({ structuredCon
   freshness: 'As last observed.',
 } } });
 
-test('standalone project catalog loader reads an explicit next cursor and keeps loaded pages local', async () => {
+test('standalone project catalog loader reads one page and retains its unconsumed cursor locally', async () => {
   const calls: Record<string, unknown>[] = [];
   const published: any[] = [];
   const loader = createRiffVideoCatalogLoader(async args => {
     calls.push(args);
-    return args.cursor === 'project-page-2' ? envelope(9, null) : envelope(1, 'project-page-2');
+    return envelope(1, 'project-page-2');
   }, page => published.push(page));
 
   const scope = { ownerKey: 'standalone-session', projectId: '00000000-0000-4000-8000-000000000100' };
   await loader.load(scope);
   assert.deepEqual(calls, [{ project_id: scope.projectId, sort: 'observed_at_desc', limit: 8 }]);
   assert.equal(published.at(-1).cards.length, 8);
+  assert.equal(published.at(-1).next_cursor, 'project-page-2', 'the server cursor remains available as structured state');
 
-  await loader.load(scope, 'not-the-advertised-cursor');
-  assert.equal(calls.length, 1, 'only the cursor advertised by the loaded page can be read');
-  await loader.load(scope, 'project-page-2');
-  assert.deepEqual(calls[1], { project_id: scope.projectId, sort: 'observed_at_desc', limit: 8, cursor: 'project-page-2' });
-  assert.equal(published.at(-1).cards.length, 16);
+  await loader.load(scope);
+  assert.equal(calls.length, 1, 'reopening the same scope republishes the retained first page without consuming its cursor');
+  assert.equal(published.at(-1).cards.length, 8);
   assert.deepEqual(published.at(-1).cards.slice(0, 2).map((item: any) => item.caption), ['Catalog caption 1', 'Catalog caption 2']);
-  await loader.load(scope, 'project-page-2');
-  assert.equal(calls.length, 2, 'a cursor is read at most once per owner/project scope');
 });
 
 test('catalog loader clears and rejects late pages across owner/project boundaries', async () => {

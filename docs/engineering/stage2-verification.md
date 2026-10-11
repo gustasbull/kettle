@@ -180,7 +180,7 @@ remain product inputs. Billing and public distribution remain separate later wor
 Task 9 added a strict, import-safe creator-latency benchmark. The final combined
 source revision passed these local commands:
 
-- `npm run check`: TypeScript, 514 Node tests, the dry-run Worker build, local
+- `npm run check`: TypeScript, 516 Node tests, the dry-run Worker build, local
   workerd smoke, and 77 real-browser tests.
 - `npm run test:db`: 13/13 tests against the actual migrations in PGlite.
 - `npm run benchmark:creator -- --fixture`: one validated fixture/local-process
@@ -189,10 +189,10 @@ source revision passed these local commands:
 - `git diff --check`: clean.
 
 The final generated resource fingerprints were
-`sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450`
-for Riff Home (142,850 raw / 40,454 gzip),
-`sha256:fc6bbf1be1a5556fe398d7e137ee69dfb1bcff7e8ff8d964ea176a5d23dae120`
-for the creator pipeline (114,785 / 31,949), and
+`sha256:f70b423132a9ab54a95a237e75562d4a14e1f17dd13a4ae065732a674052b8e8`
+for Riff Home (141,946 raw / 40,217 gzip),
+`sha256:f27c7a9380afd7ddeab4475dd29c30ad75576174ad99138d6f09d2b2bf88b5da`
+for the creator pipeline (113,949 / 31,737), and
 `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0`
 for onboarding (382,496 / 80,543). All remain inside their local budgets.
 

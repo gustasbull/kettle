@@ -376,7 +376,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(result.value.observation)]};
         try {const checkpointKey=`recommend:detail:${candidates[index]!.nativeId}`;
           await context.checkpoint(checkpointKey,'enriching_references',recommendationProgress);
-          if(!result.value.reused)await context.ingestCatalog(checkpointKey,'discovered_reference',[
+          await context.ingestCatalog(checkpointKey,'discovered_reference',[
             trustedCatalogObservation(result.value.observation,result.value.reference.limitations)]);}
         catch(error){checkpointFailure=error;break;}
       }
