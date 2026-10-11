@@ -382,6 +382,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     onOpenRecent(recent){
       const item=recentsState.status==='ready'?recentsState.items.find(candidate=>candidate.job_id===recent.id):undefined;
       if(!item)return;
+      pipeline?.leaveCatalog();
       void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
     },
     onCreate(){

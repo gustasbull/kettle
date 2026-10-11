@@ -154,6 +154,71 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
   }
 });
 
+test('Riff Home drawer recents clear Studio discovery context for current and different jobs', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHome } from './apps/panel/riff-home/index.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.events=[];
+    window.currentJob=pipelineFixture('scripts');
+    window.currentJob.id='00000000-0000-4000-8000-000000000975';
+    window.differentJob=structuredClone(window.currentJob);
+    window.differentJob.id='00000000-0000-4000-8000-000000000976';
+    window.differentJob.project_id='00000000-0000-4000-8000-000000000977';
+    window.jobs=new Map([[window.currentJob.id,window.currentJob],[window.differentJob.id,window.differentJob]]);
+    window.view=mountRiffHome(document.getElementById('root'), {
+      start:async()=>({status:'sent',message:'Started.'}),
+      send:async()=>({status:'sent',message:'Sent.'}),
+      openRecent:async jobId=>{window.events.push({kind:'recent',jobId});window.view.showJob(window.jobs.get(jobId));return {status:'sent',message:'Opened.'}},
+      proposeCatalogReference:async proposal=>{window.events.push({kind:'catalog-proposal',proposal});return {status:'sent',message:'Proposed.'}},
+    });
+    window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fictional Creator',onboarding_seen_at:'2026-10-11T12:00:00Z'}});
+    window.view.setRecents([
+      {job_id:window.currentJob.id,title:'Current Studio',stage:'Script ready',state:'succeeded',updated_at:'2026-10-11T12:00:00Z'},
+      {job_id:window.differentJob.id,title:'Different Studio',stage:'Script ready',state:'succeeded',updated_at:'2026-10-11T11:00:00Z'},
+    ]);
+    window.reference={id:'00000000-0000-4000-8000-000000000978',platform:'tiktok',native_id:'9000000000000000978',
+      canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000978',caption:'Recent navigation reference',thumbnail_url:null,
+      published_at:null,duration_seconds:null,metrics:{views:0,likes:null,comments:null,shares:null,saves:null},
+      retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',origin:'fixture',role:'discovered_reference',
+      permission_basis:'Authored recent navigation fixture.',limitations:[]};
+    window.readyCatalog=()=>window.view.setCatalogState({status:'ready',page:{cards:[window.reference],next_cursor:null,coverage:'Saved only.',freshness:'As observed.'}});
+    window.view.showJob(window.currentJob);window.readyCatalog();
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1200, height: 850 } });
+  await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
+
+  const enterHookCatalog = async () => {
+    await page.getByRole('tab',{name:'Hook',exact:true}).click();
+    await page.getByRole('button',{name:'Explore hooks'}).click();
+    await page.evaluate(()=>window.readyCatalog());
+  };
+  const openDrawerRecent = async (name) => {
+    await page.getByRole('button',{name:'Open Riff menu'}).click();
+    await page.getByRole('dialog',{name:'Riff menu'}).getByRole('button',{name}).click();
+  };
+
+  await enterHookCatalog();
+  await openDrawerRecent(/Open Current Studio/);
+  assert.equal(await page.getByRole('tab',{name:'Hook',exact:true}).count(),1,
+    'selecting the current Studio job is navigation and must not restore its old catalog');
+  assert.equal(await page.getByRole('heading',{name:'Stop the scroll.'}).count(),0);
+  await page.evaluate(()=>{window.view.showCatalog('hooks');window.readyCatalog();});
+  await page.getByRole('button',{name:'Use this hook'}).click();
+  assert.equal((await page.evaluate(()=>window.events.filter(event=>event.kind==='catalog-proposal').at(-1).proposal)).studioExplore,undefined,
+    'a catalog opened after current-job Recent navigation has no stale Studio intent');
+
+  await page.evaluate(()=>window.view.showJob(window.currentJob));
+  await enterHookCatalog();
+  await openDrawerRecent(/Open Different Studio/);
+  assert.equal(await page.getByRole('tab',{name:'Hook',exact:true}).count(),1,
+    'different-job Recent navigation also returns to the selected Studio job');
+  assert.equal(await page.getByRole('heading',{name:'Stop the scroll.'}).count(),0);
+  assert.deepEqual(await page.evaluate(()=>window.events.filter(event=>event.kind==='recent').map(event=>event.jobId)),
+    ['00000000-0000-4000-8000-000000000975','00000000-0000-4000-8000-000000000976']);
+});
+
 test('Riff Home renders Paper-shaped owned recents and account recovery without fictional rows', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHome, riffHomeStructuredOutput } from './apps/panel/riff-home/index.ts';

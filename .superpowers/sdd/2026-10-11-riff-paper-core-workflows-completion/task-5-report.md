@@ -129,10 +129,10 @@ rerendering the retained catalog. A different account, project, job, library, or
 stale scope cannot restore that context.
 
 Intentional navigation now uses an explicit `leaveCatalog()` boundary. Home,
-Create, recent-job navigation, and non-Discovery menu navigation clear both the
-catalog screen and its Studio context, so reopening the same job after leaving does
-not revive stale UI. Existing Discovery shortcuts continue to establish their own
-trusted library and scope.
+Create, and the standalone pipeline's recent-job and non-Discovery menu navigation
+clear both the catalog screen and its Studio context, so reopening the same job
+after leaving does not revive stale UI. Existing Discovery shortcuts continue to
+establish their own trusted library and scope.
 
 ### Regression-first TDD record
 
@@ -163,3 +163,50 @@ trusted library and scope.
 
 Fix commit: this commit (`fix: preserve Studio discovery context`); its final hash
 is returned in the agent handoff because a Git object cannot contain its own hash.
+
+## Fix round 2/5 — clear Discovery context on Recent navigation
+
+Fix base: `25e39f59ab548fb3a95f37408b9754ecb8eae597`.
+
+The embedded Home drawer owns its own Recent handler, separate from the standalone
+pipeline menu fixed in round 1. Selecting a Recent while a Studio catalog was open
+called `openRecent` without first leaving that catalog. When the selected job was
+the currently open job, the trusted same-identity refresh correctly met the round-1
+preservation predicate and therefore restored context that navigation should have
+discarded.
+
+The drawer Recent handler now calls `pipeline?.leaveCatalog()` after validating the
+selected owned recent and before beginning the asynchronous open. Different-job
+navigation remains protected by the identity reset; current-job navigation now has
+the same explicit boundary. Home-page recent cards need no additional call because
+they are reachable only after `showHome()` has already left the catalog.
+
+### Regression-first TDD record
+
+- RED — the focused current/different Recent browser regression passed 0/1. On the
+  current-job branch, the expected Studio Hook tab count was zero because the old
+  `Stop the scroll.` catalog had been restored.
+- GREEN — the focused regression passed 1/1. It verifies current-job navigation
+  clears the visible catalog and proposal context, and different-job navigation
+  continues to clear by identity.
+- GREEN — the combined creator-pipeline and Riff Home component suites passed
+  19/19.
+- GREEN — the creator-pipeline and Riff Home bridge suites passed 29/29, and the
+  focused TypeScript check passed.
+
+### Fix verification
+
+- `npm run check` — PASS:
+  - 536/536 Node tests;
+  - dry-run Worker build at 4,031.02 KiB / 817.97 KiB gzip;
+  - local workerd smoke test;
+  - 94/94 real-browser tests.
+- Creator-pipeline bundle: 146,662 bytes raw / 40,806 bytes gzip,
+  `sha256:ef3313b5d4f753d660e7bf98712798d1c3d72af4e60562f5e87a8be31093a2d4`.
+- Riff Home bundle: 208,474 bytes raw / 59,268 bytes gzip,
+  `sha256:62b3bf1f38bc4f223ca4f14acc8f7c9f57a7f9afd58335fd6c2cdef116d18e7d`.
+- `git diff --check` — PASS.
+
+Fix commit: this commit (`fix: clear discovery context on recent navigation`); its
+final hash is returned in the agent handoff because a Git object cannot contain its
+own hash.
