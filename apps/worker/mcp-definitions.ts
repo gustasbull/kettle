@@ -13,6 +13,7 @@ import { CREATOR_REVIEW_URI } from './creator-review-resource.ts';
 import { PROJECT_REVIEW_URI } from './project-review-resource.ts';
 import { RIFF_HOME_URI } from './riff-home-resource.ts';
 import { RIFF_ONBOARDING_URI } from './riff-onboarding-resource.ts';
+import { PUBLISHED_RESULT_OUTPUT_SCHEMA } from './mcp-published-schema.ts';
 
 type SecurityScheme = { type: string; scopes?: string[] };
 export type AuthTool = Tool & { securitySchemes: SecurityScheme[] };
@@ -233,7 +234,10 @@ const descriptorFor = (tool: typeof PRODUCT_TOOLS[number] | typeof CREATOR_TOOLS
   | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number] | typeof RIFF_VIDEO_TOOLS[number]): AuthTool => {
   return deepFreezePlain({
     name: tool.name, title: tool.title, description: tool.description,
-    inputSchema: inputSchema(tool.contract.input), outputSchema: outputSchema(tool.contract.output),
+    // Keep ChatGPT app refresh bounded while retaining the truthful result
+    // discriminant. Runtime registrations and application operations still
+    // validate their complete tool-specific success projections.
+    inputSchema: inputSchema(tool.contract.input), outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
     annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
   }) as AuthTool;
 };
@@ -261,7 +265,7 @@ const PROFILE_DESCRIPTOR = deepFreezePlain({
 }) as AuthTool;
 const HOME_DESCRIPTOR = deepFreezePlain({
   name: 'open_riff', title: HOME_REGISTRATION.title, description: HOME_REGISTRATION.description,
-  inputSchema: inputSchema(ACCOUNT_CONTRACT.input), outputSchema: outputSchema(ACCOUNT_CONTRACT.output),
+  inputSchema: inputSchema(ACCOUNT_CONTRACT.input), outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
   annotations: READ_ONLY, securitySchemes: OAUTH_SECURITY, _meta: HOME_META,
 }) as AuthTool;
 

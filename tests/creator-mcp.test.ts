@@ -55,7 +55,9 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
     const tool = listing.result.tools.find(t => t.name === name)!; assert.ok(tool);
     const contract = creatorContracts[name === 'correct_creator_dna' ? name : 'get_creator_dna'];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output,{reused:'ref'}),type:'object'});
+    const outputSchema = tool.outputSchema as { oneOf: { required: string[] }[] };
+    assert.deepEqual(outputSchema.oneOf.map(branch => branch.required),
+      [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t => /ingest|scan|generate/.test(String(t.name))));

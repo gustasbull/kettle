@@ -52,7 +52,9 @@ test('project-review render tool uses signed identity, exact read contract and r
   const tool = list.result.tools.find((item) => item.name === 'show_project_brief')!;
   assert.ok(tool);
   assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(GetProjectInput), type: 'object' });
-  assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(GetProjectOutput, { reused: 'ref' }), type: 'object' });
+  const outputSchema = tool.outputSchema as { oneOf: { required: string[] }[] };
+  assert.deepEqual(outputSchema.oneOf.map(branch => branch.required),
+    [['ok', 'data'], ['ok', 'error']]);
   const securitySchemes = [{ type: 'oauth2', scopes: [...oauthScopes] }];
   assert.deepEqual(tool.securitySchemes, securitySchemes);
   assert.deepEqual(tool._meta, { securitySchemes, ui: { resourceUri: PROJECT_REVIEW_URI } });

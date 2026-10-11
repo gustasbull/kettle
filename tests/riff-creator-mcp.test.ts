@@ -26,8 +26,8 @@ test('Riff creator entry and recents are authenticated MCP tools usable by Home'
   for (const name of ['start_riff_creator', 'get_riff_creator_start', 'list_riff_work'] as const) {
     const tool = listing.result.tools.find(candidate => candidate.name === name); assert.ok(tool, name);
     assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].input), type: 'object' });
-    assert.deepEqual(tool.outputSchema,
-      { ...z.toJSONSchema(riffCreatorContracts[name].output, { reused: 'ref' }), type: 'object' });
+    assert.deepEqual(tool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
+      [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: [...oauthScopes] }]);
     assert.equal(tool.annotations.readOnlyHint, name !== 'start_riff_creator');
     assert.equal(tool.annotations.openWorldHint, name === 'start_riff_creator');

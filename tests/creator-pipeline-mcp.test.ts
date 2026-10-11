@@ -73,12 +73,14 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     const tool=listing.result.tools.find(t=>t.name===name);assert.ok(tool,name);
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output,{reused:'ref'}),type:'object'});
+    assert.deepEqual(tool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
+      [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   const statusTool=listing.result.tools.find(t=>t.name==='get_creator_job_status');assert.ok(statusTool);
   assert.deepEqual(statusTool.inputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.input),type:'object'});
-  assert.deepEqual(statusTool.outputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.output,{reused:'ref'}),type:'object'});
+  assert.deepEqual(statusTool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
+    [['ok', 'data'], ['ok', 'error']]);
   assert.deepEqual(statusTool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   assert.deepEqual(statusTool.annotations,{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false});
   assert.equal(statusTool._meta.ui.resourceUri,undefined);assert.match(statusTool.description,/provider-free/i);
