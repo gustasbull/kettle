@@ -841,6 +841,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         const target=event.key==='Home'?0:event.key==='End'?scripts.variants.length-1:
           (index+(event.key==='ArrowRight'?1:-1)+scripts.variants.length)%scripts.variants.length;
         studioVariantId=scripts.variants[target]!.id;render(job);
+        [...content.querySelectorAll<HTMLElement>('[role="radio"]')].find(node=>node.dataset.variant===studioVariantId)?.focus({preventScroll:true});
       });variantSelector.append(control);
     });
     content.append(variantSelector);
@@ -857,6 +858,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault(); studioTab = event.key === 'Home' ? 0 : event.key === 'End' ? tabNames.length - 1
           : (studioTab + (event.key === 'ArrowRight' ? 1 : -1) + tabNames.length) % tabNames.length; render(job);
+        content.querySelector<HTMLElement>(`#riff-studio-tab-${studioTab}`)?.focus({preventScroll:true});
       });
       tabControls.push(tab); tabs.append(tab);
     });
@@ -901,10 +903,11 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       discoveryLibrary=library;discoveryFilter=discoveryLibraryViews[library].filters[0];renderCatalogDiscovery();
     }, `explore-${studioTab}`));
     panel.append(panelHeader);
-    const mainTip = [...variant.shots, ...variant.b_roll, ...variant.on_screen_text, variant.showcase_timing, variant.pacing].join(' · ');
+    const mainTip = [...variant.shots, ...variant.b_roll, variant.showcase_timing, variant.pacing].join(' · ');
+    const mainOnScreenText=variant.on_screen_text.join(' · ');
     const appendFallback = (part: typeof partOrder[number]) => {
       if (part === 'hook') panel.append(scriptPart('Hook', variant.hook, variant.opening_visual,undefined,true));
-      else if (part === 'main_content') panel.append(scriptPart('Main content', variant.script, mainTip,undefined,true));
+      else if (part === 'main_content') panel.append(scriptPart('Main content', variant.script, mainTip,mainOnScreenText,true));
       else panel.append(scriptPart('CTA', variant.cta));
     };
     for (const part of visibleParts) {

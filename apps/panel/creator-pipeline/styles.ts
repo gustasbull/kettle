@@ -25,7 +25,7 @@ html, body { margin: 0; background: transparent; }
   position: absolute; inset: 0; z-index: -1; background: radial-gradient(circle, rgba(203, 213, 225, .314) .8px, transparent .9px) 12px 12px / 24px 24px; content: "";
 }
 .riff-paper--discovery { gap: 16px; padding: 28px 28px 32px; border-radius: 0 0 24px 24px; }
-.riff-paper--studio { gap: 20px; padding: 24px 28px 32px; border-radius: 0 0 24px 24px; }
+.riff-paper--studio { gap: 20px; overflow: clip; padding: 24px 28px 32px; border-radius: 0 0 24px 24px; }
 .riff-paper--pending { align-items: flex-start; padding: 0; background: transparent; }
 .riff-paper--failure { align-items: flex-start; padding: 0; background: transparent; }
 .riff-paper--partial-analysis { align-items: flex-start; padding: 0; background: transparent; }
@@ -227,7 +227,7 @@ html, body { margin: 0; background: transparent; }
 .riff-studio-panel { display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; gap: 16px; }
 .riff-studio-panel__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .riff-studio-panel__header h2 { color: #242426; font-size: 24px; font-weight: 600; line-height: 30px; letter-spacing: -.025em; }
-.riff-script-part { overflow: hidden; border-radius: 12px; background: #eff4ff; box-shadow: 0 2px 4px #18243a0c, 0 5px 12px #18243a14; }
+.riff-script-part { overflow: hidden; border-radius: 12px; background: #f0f3f7; box-shadow: 0 2px 4px #18243a0c, 0 5px 12px #18243a14; }
 .riff-script-part > h3 { padding: 7px 14px; color: #4e5663; font-size: 13px; font-weight: 600; line-height: 18px; }
 .riff-script-part__body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #fff; }
 .riff-script-part__body > p { color: #242426; font-size: 16px; line-height: 23px; white-space: pre-wrap; }

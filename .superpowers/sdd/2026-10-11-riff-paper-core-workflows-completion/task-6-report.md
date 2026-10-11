@@ -112,3 +112,52 @@ implementation input and Paper was not mutated.
   was freshly confirmed; a later visual reviewer with Paper edit access can rerun
   those reads without changing Task 6 behavior.
 - Save/Filmed persistence is intentionally absent until Task 7.
+
+## Fix round 1/5 — align Paper Studio details
+
+Fix base: `55c2b337dfd7171582e6d6e9251b9676bfef12cd`.
+
+Independent review found one Important and two Minor issues. Legacy variants without
+timed segments now render persisted `on_screen_text` once in the distinct labelled
+on-screen treatment; only shots, B-roll, showcase timing, and pacing remain in
+**General filming guidance**. Caption handling remains separate and unchanged.
+
+The Studio screen now uses Paper's `overflow: clip`, and the script-card title band
+uses Paper's `#F0F3F7`. Real computed-style assertions cover both values and the
+existing viewport checks continue to prove no document overflow.
+
+The controller's additional keyboard audit found that selection moved but generic
+render focus recovery returned focus to the prior radio/tab. Arrow, Home, and End now
+move DOM focus to the newly selected ID-keyed variant radio or Studio tab after the
+render, preserving the roving-tabindex contract.
+
+### Regression-first TDD record
+
+- RED — the first Studio browser run passed 14/17. The two failing subtests showed
+  ArrowRight retained focus on **Full video** and **Reference-led** after selecting
+  Hook and Creator Fit.
+- RED — after the focused keyboard fix, the next run reached the style assertion and
+  reported Studio overflow `hidden` instead of `clip`.
+- RED — after the overflow fix, the next run reported the script-card band as
+  `rgb(239, 244, 255)` instead of `rgb(240, 243, 247)`.
+- RED — after the colour fix, the legacy regression showed `One desk change`
+  flattened into **General filming guidance** instead of a separate on-screen label.
+- GREEN — the Studio browser suite passed 17/17 with every regression active.
+- GREEN — typecheck passed and the combined Studio/standalone-bridge suites passed
+  30/30.
+
+### Fix verification
+
+- `npm run check` — PASS:
+  - 537/537 Node tests;
+  - dry-run Worker build at 4,046.54 KiB / 821.74 KiB gzip;
+  - local workerd smoke test;
+  - 95/95 real-browser tests.
+- Creator-pipeline bundle: 154,063 bytes raw / 42,591 bytes gzip,
+  `sha256:2ea1e908d2dcd024f4371f8f60144bc161097de530424434d185871f4716849f`.
+- Riff Home bundle: 215,889 bytes raw / 61,018 bytes gzip,
+  `sha256:bcfeab4790c25e532f095d8f50dbc03e002b0c371bd5ff00b9c14c034416cbc7`.
+- `git diff --check` — PASS.
+
+Fix commit: this commit (`fix: align Paper Studio details`); its final hash is
+returned in the agent handoff because a Git object cannot contain its own hash.

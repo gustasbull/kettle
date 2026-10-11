@@ -802,9 +802,18 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       'the real persisted variants have one compact non-Paper local selector');
     assert.equal(await root.getByRole('radio').count(),2);
     for (const tab of ['Full video', 'Hook', 'Main content', 'CTA']) assert.equal(await root.getByRole('tab', { name: tab, exact: true }).count(), 1);
+    await root.getByRole('tab',{name:'Full video',exact:true}).focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Hook','ArrowRight moves focus with the selected Studio tab');
+    await page.keyboard.press('End');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'CTA','End moves focus to the last Studio tab');
+    await page.keyboard.press('Home');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Full video','Home moves focus to the first Studio tab');
     assert.deepEqual(await root.locator('.riff-studio-player').evaluate(node => {
       const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
     }), { width: '240px', height: '427px', radius: '16px' });
+    assert.equal(await root.locator('.riff-paper--studio').evaluate(node=>getComputedStyle(node).overflow),'clip');
+    assert.equal(await root.locator('.riff-script-part').first().evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 243, 247)');
     assert.equal(await root.locator('.riff-studio-player__unavailable').textContent(),'Reference media unavailable');
     assert.equal(await root.locator('.riff-studio-references__unavailable').filter({hasText:'Reference details unavailable for this script.'}).count(),1);
     assert.equal(await root.locator('.riff-script-part').count(), 3);
@@ -815,6 +824,13 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /One small change for this desk|Wide shot/);
     await root.getByRole('tab', { name: 'Main content', exact: true }).click();
     assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /Here is my current setup|Wide setup|Hand placing/);
+    const legacyPanel=root.locator('[role="tabpanel"]:not([hidden])');
+    const legacyGuidance=legacyPanel.locator('.riff-filming-tip--legacy');
+    assert.equal(await legacyGuidance.count(),1);
+    assert.match(await legacyGuidance.textContent(),/General filming guidance: Wide setup · Close-up of the change · Final wide shot · Hand placing the item · Show the change at approximately 5 seconds\. · Three steady shots; timing is an estimate\./);
+    assert.doesNotMatch(await legacyGuidance.textContent(),/One desk change/,'legacy on-screen copy is not flattened into general filming guidance');
+    assert.equal(await legacyPanel.locator('.riff-on-screen-text').textContent(),'On-screen text: One desk change');
+    assert.equal((await legacyPanel.textContent()).match(/One desk change/g)?.length,1,'legacy on-screen copy renders once');
     await root.getByRole('tab', { name: 'CTA', exact: true }).click();
     assert.match(await root.locator('[role="tabpanel"]:not([hidden])').textContent(), /What would you change/);
 
@@ -915,6 +931,15 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     const selector=root.getByRole('radiogroup',{name:'Script variant'});
     assert.equal(await selector.getByRole('radio').count(),3);
     assert.equal(await selector.getByRole('radio',{name:'Reference-led'}).getAttribute('aria-checked'),'true');
+    await selector.getByRole('radio',{name:'Reference-led'}).focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Creator Fit','ArrowRight moves focus with the selected variant radio');
+    await page.keyboard.press('Home');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Reference-led','Home moves focus to the first variant radio');
+    await page.keyboard.press('End');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Experimental','End moves focus to the last variant radio');
+    await page.keyboard.press('Home');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'Reference-led','variant focus can return to the persisted first ID');
     assert.equal(await root.getByRole('heading',{name:'Your complete video'}).count(),1);
     assert.equal(await root.locator('.riff-script-part').count(),4,'all ordered persisted segments render');
     assert.equal(await root.locator('.riff-on-screen-text').filter({hasText:'On-screen text: RESULT'}).count(),1);
