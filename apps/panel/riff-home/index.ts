@@ -1,6 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../../packages/contracts/creator-pipeline.ts';
 import { mountCreatorPipeline, type RiffDiscoveryLibrary, type RiffDiscoverySelection } from '../creator-pipeline/index.ts';
 import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import { mountRiffMenu } from '../riff-shell/menu.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
@@ -34,6 +35,10 @@ export type RiffHomeActions = {
   send: RiffPanelAction;
   upload?: () => Promise<RiffActionResult>;
   showWelcome?: () => Promise<RiffActionResult>;
+  accountSettings?: () => Promise<RiffActionResult>;
+  support?: () => Promise<RiffActionResult>;
+  feedback?: () => Promise<RiffActionResult>;
+  requestTheme?: () => Promise<RiffActionResult>;
   openRecent?: (jobId: string) => Promise<RiffActionResult>;
   refreshRecents?: () => Promise<RiffActionResult>;
   refreshJob?: (job: CreatorJobView) => Promise<RiffActionResult>;
@@ -211,12 +216,6 @@ function paperRecentArrow(doc: Document) {
   return svg;
 }
 
-function paperRailIcon(doc:Document){
-  const svg=iconRoot(doc);svg.setAttribute('width','18');svg.setAttribute('height','18');
-  svg.append(svgNode(doc,'rect',{x:'3',y:'4',width:'18',height:'16',rx:'3',fill:'none',stroke:'#697180','stroke-width':'1.6'}),
-    svgNode(doc,'path',{d:'M9 4v16',fill:'none',stroke:'#697180','stroke-width':'1.6'}));return svg;
-}
-
 function tiktokBadge(doc: Document) {
   const svg = iconRoot(doc);
   const d = 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z';
@@ -250,11 +249,11 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     return item;
   };
   const style = node('style'); style.textContent = homeStyles;
-  const app = node('main', undefined, 'riff-app riff-home');
+  const app = node('main', undefined, 'riff-app riff-home riff-menu-scope');
   const chrome=node('header',undefined,'riff-home__chrome');const trail=node('div',undefined,'riff-home__chrome-trail');
-  const rail=node('span',undefined,'riff-home__rail-symbol');rail.setAttribute('aria-hidden','true');rail.append(paperRailIcon(doc));
+  const menuHost=node('span');
   const brand=node('span',undefined,'riff-home__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,node('span','Riff'));
-  const separator=node('span','/','riff-home__separator');const location=node('span','Home','riff-home__location');trail.append(rail,brand,separator,location);chrome.append(trail);
+  const separator=node('span','/','riff-home__separator');const location=node('span','Home','riff-home__location');trail.append(menuHost,brand,separator,location);chrome.append(trail);
   const account = node('p', 'Connecting…', 'riff-home__account');
   const home = node('section', undefined, 'riff-home__home');
   const hero = node('section', undefined, 'riff-home__hero');
@@ -305,6 +304,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
 
   let disposed = false;
   let pipeline: ReturnType<typeof mountCreatorPipeline> | undefined;
+  let menu!: ReturnType<typeof mountRiffMenu>;
   let recentsState: RiffRecentsState = { status: 'loading' };
   const invoke = async (action: () => Promise<RiffActionResult>, pending: string, control?: HTMLButtonElement) => {
     if (disposed) return;
@@ -323,6 +323,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     if (disposed) return;
     invocationEpoch++;
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
+    menu?.render({ activeRoute: 'home' });
   };
   const ensurePipeline=()=>pipeline??=mountCreatorPipeline(workflowRoot,{
     displayMode:'fullscreen',sendPrompt:actions.send,embeddedChrome:false,
@@ -333,8 +334,26 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const showCatalog=(library:RiffDiscoveryLibrary='videos')=>{
     if(disposed)return;
     invocationEpoch++;location.textContent='Discover videos';home.hidden=true;workflow.hidden=false;
+    menu?.render({ activeRoute: 'discover' });
     ensurePipeline().showCatalog(library,{accountWide:true});workflow.scrollIntoView({block:'start'});
   };
+  menu=mountRiffMenu(menuHost,{
+    account:undefined,recents:[],activeRoute:'home',
+    onNavigate(route){if(route==='home')showHome();else showCatalog('videos');},
+    onOpenRecent(recent){
+      const item=recentsState.status==='ready'?recentsState.items.find(candidate=>candidate.job_id===recent.id):undefined;
+      if(!item)return;
+      void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
+    },
+    onCreate(){
+      invocationEpoch++;input.value='';actions.inputChanged?.('');status.textContent='';showHome();input.focus({preventScroll:true});
+    },
+    onClose(){ /* Closing the local drawer does not mutate workflow state. */ },
+    onAccountSettings:actions.accountSettings ?? (()=>actions.send('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.')),
+    onSupport:actions.support ?? (()=>actions.send('I need support with Riff. Help me describe the issue and show the available support handoff.')),
+    onFeedback:actions.feedback ?? (()=>actions.send('I want to give feedback about Riff. Help me send it through the available ChatGPT handoff.')),
+    onRequestTheme:actions.requestTheme ?? (()=>actions.send('Open ChatGPT appearance settings. Riff follows the host theme and cannot change ChatGPT’s theme itself.')),
+  });
 
   form.addEventListener('submit', event => {
     event.preventDefault(); const rawValue=input.value;
@@ -371,6 +390,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       recents.append(node('p', state.message, 'riff-home__recent-state')); return;
     }
     const items = state.items;
+    menu.render({ recents: items.map(item=>({id:item.job_id,title:item.title,stage:item.stage,platform:item.platform})) });
     if (!items.length) {
       recents.append(node('p', 'No recent work yet.', 'riff-home__recent-state')); return;
     }
@@ -408,6 +428,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       }
       account.textContent = `Ready, ${state.account.name}`;
       recentSection.hidden = state.account.onboarding_seen_at === null;
+      menu.render({ account: state.account });
       if (/Reconnect|incomplete|could not/i.test(status.textContent)) status.textContent = '';
     },
     setRecents(items) { if (!disposed) renderRecentsState({ status: 'ready', items }); },
@@ -417,6 +438,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       if (disposed) return;
       invocationEpoch++;
       location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
+      menu.render({ activeRoute: job.kind==='recommendations'?'discover':job.kind==='scripts'?'studio':'analysis' });
       home.hidden=true; workflow.hidden = false;
       ensurePipeline().render(job,presentation);
       workflow.scrollIntoView({ block: 'start' });
@@ -425,10 +447,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setCatalog(page){pipeline?.setCatalog(page);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
-    clearPrivate(){if(disposed)return;input.value='';pipeline?.dispose();pipeline=undefined;workflowRoot.replaceChildren();showHome();},
+    clearPrivate(){if(disposed)return;input.value='';menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
-      if (disposed) return; disposed = true; pipeline?.dispose(); pipeline = undefined; root.replaceChildren();
+      if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); pipeline = undefined; root.replaceChildren();
     },
   };
 }

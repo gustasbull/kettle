@@ -68,6 +68,12 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.ok(geometry.textHeight <= 20, `breadcrumb text wrapped to ${geometry.textHeight}px`);
     assert.equal(Math.round(geometry.logoWidth), 22);
     assert.match(await root.locator('.riff-pipeline__chrome-trail').textContent(), /Riff\s*\/\s*Analysis/);
+    assert.equal(await root.getByRole('button', { name: 'Open Riff menu' }).count(), 1);
+    await root.getByRole('button', { name: 'Open Riff menu' }).click();
+    assert.equal(await root.getByRole('dialog', { name: 'Riff menu' }).evaluate(node => getComputedStyle(node).width), '288px');
+    assert.equal(await root.getByRole('button', { name: 'Create a video' }).count(), 1);
+    assert.equal(await root.getByText(/10 (?:runs|analysis) left/i).count(), 0);
+    await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 1200, height: 900 });
   });
 
@@ -77,7 +83,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.doesNotMatch(await root.textContent(), /Saved Riff job|Job [0-9a-f-]+|Refresh job/i);
     assert.equal(await root.locator('[role="progressbar"]').count(), 1);
     assert.equal(await root.locator('[role="progressbar"][aria-valuenow]').count(), 0);
-    assert.equal(await root.locator('button,a').count(), 0);
+    assert.equal(await root.locator('.riff-pipeline__content button, .riff-pipeline__content a').count(), 0);
     assert.equal(await root.getByRole('heading', { name: 'Finding videos for your next idea' }).count(), 1);
     assert.match(await root.textContent(), /Looking through relevant creators, videos and formats\.|Comparing hooks and product showcases…|Your brief is ready|Choosing matching references/);
     assert.equal(await root.locator('.riff-loading-reference').count(), 7);
@@ -269,7 +275,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         backgroundImage: style.backgroundImage, borderWidth: style.borderWidth,
       };
     }), { minHeight: '44px', fontSize: '16px', lineHeight: '24px', backgroundImage: 'none', borderWidth: '0px' });
-    assert.equal(await root.getByRole('button').count(), 1);
+    assert.equal(await root.locator('.riff-pipeline__content').getByRole('button').count(), 1);
     assert.equal(await root.locator('.riff-analysis-card, .riff-inline-result').count(), 0);
     assert.doesNotMatch(await card.textContent(), /Partial analysis|transcript only|Provider|Limitations|DNA|Open analysis|Explore viral formats/i);
     await action.click();
@@ -355,7 +361,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.ok(await root.locator('svg path[d="M3 2h10v14l-5-3-5 3Z"]').count() >= 1, 'Paper bookmark icon is present');
     assert.doesNotMatch(await carousel.textContent(), /Views|Likes|Saves|[0-9.]+×/,
       'the three-idea fixture has no persisted metrics');
-    const text = await root.textContent();
+    const text = await root.locator('.riff-pipeline__content').textContent();
     assert.doesNotMatch(text, /Batch limitations|Captured DNA|DNA ID|created|evidence-backed|Idea [0-9]+ \/|Why it fits|How to film|Sources/i);
     await carousel.focus(); await page.keyboard.press('ArrowRight');
     assert.match(await carousel.textContent(), /Fictional desk idea 2/);
@@ -568,7 +574,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
     }), { width: '240px', height: '427px', radius: '16px' });
     assert.equal(await root.locator('.riff-script-part').count(), 3);
-    const text = await root.textContent();
+    const text = await root.locator('.riff-pipeline__content').textContent();
     assert.doesNotMatch(text, /Caption.*not available|publishing fields|Variant limitations|Script set limitations|Captured DNA|DNA ID|Create a video/i);
     assert.ok(await root.locator('svg path[d="M9 18h6M10 21h4M9 15c0-2-3-3-3-7a6 6 0 0 1 12 0c0 4-3 5-3 7v1H9z"]').count() >= 1, 'Paper filming-tip icon is present');
     await root.getByRole('tab', { name: 'Hook', exact: true }).click();

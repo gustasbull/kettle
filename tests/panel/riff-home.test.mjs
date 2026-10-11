@@ -28,10 +28,12 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
   for (const viewport of [{ width: 320, height: 700 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
     const page = await browser.newPage({ viewport });
     await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
-    assert.equal(await page.getByRole('navigation', { name: 'Riff navigation' }).count(), 0,
-      'Paper marks the panel chrome as ChatGPT-owned, so the app must not duplicate it');
-    assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 0);
-    assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 1,
+      'the panel owns only its reusable Riff drawer trigger, not ChatGPT chrome');
+    await page.getByRole('button', { name: 'Open Riff menu' }).click();
+    assert.equal(await page.getByRole('navigation', { name: 'Riff navigation' }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 1);
+    await page.keyboard.press('Escape');
     assert.match(await page.locator('.riff-home__chrome').textContent(),/Riff\s*\/\s*Home/);
     const brandGeometry = await page.locator('.riff-home__brand').evaluate(node => ({
       height: node.getBoundingClientRect().height,
@@ -185,8 +187,11 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
   await page.getByRole('button', { name: /Open @alex.focus/ }).click();
   assert.equal((await page.evaluate(() => window.events.at(-1))).kind, 'recent');
 
-  assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
-  assert.equal(await page.getByRole('menu').count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 1);
+  await page.getByRole('button', { name: 'Open Riff menu' }).click();
+  assert.equal(await page.getByRole('dialog', { name: 'Riff menu' }).count(), 1);
+  assert.equal(await page.getByRole('dialog', { name: 'Riff menu' }).getByRole('button', { name: /Open @alex.focus/ }).count(), 1);
+  await page.keyboard.press('Escape');
 
   await page.evaluate(() => window.renderAccount('2026-10-11T12:00:00Z'));
   assert.equal(await page.locator('.riff-home__account').textContent(), 'Ready, Fictional Creator');

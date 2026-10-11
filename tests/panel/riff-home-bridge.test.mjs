@@ -98,8 +98,22 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   assert.equal(await page.evaluate(() => window.calls.filter(call => call.name === 'start_riff_creator').length), 1,
     'plain ideas continue in chat without spending provider credits');
 
+  await frame.getByRole('button', { name: 'Open Riff menu' }).click();
+  await frame.getByRole('button', { name: 'Fixture account menu' }).click();
+  for (const [label, expectedCount] of [['Account settings', 4], ['Dark mode', 5], ['Support', 6], ['Give feedback', 7]]) {
+    await frame.getByRole('menuitem', { name: label, exact: true }).click();
+    await page.waitForFunction(count => window.messages.length === count, expectedCount);
+  }
+  const menuMessages = await page.evaluate(() => window.messages.slice(3).map(message => message.content[0].text));
+  assert.match(menuMessages[0], /account settings.*host confirms/i);
+  assert.match(menuMessages[1], /appearance settings.*follows the host theme.*cannot change/i);
+  assert.match(menuMessages[2], /support with Riff.*support handoff/i);
+  assert.match(menuMessages[3], /give feedback.*ChatGPT handoff/i);
+  assert.equal(await frame.getByRole('menu', { name: 'Account' }).isVisible(), true,
+    'host handoffs remain available without pretending navigation completed');
+
   assert.deepEqual(await page.evaluate(() => window.messages.map(message => message._meta['openai/message'])),
-    Array.from({ length: 3 }, () => ({ target: 'active', send: true })));
+    Array.from({ length: 7 }, () => ({ target: 'active', send: true })));
   await page.evaluate(() => frame().postMessage({jsonrpc:'2.0',id:'teardown',method:'ui/resource-teardown',params:{}},'*'));
   await page.waitForFunction(() => window.tornDown);
   await frame.waitForFunction(() => document.querySelector('#mount').textContent === '');
@@ -387,9 +401,14 @@ test('Riff Home safely maps host-rejected allowance and validation failures with
 test('Riff Home does not carry an ambiguous request ID across an account change', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
-    window.starts=[];window.lookups=0;
+    window.starts=[];window.lookups=0;window.activeAccountId='00000000-0000-4000-8000-000000000001';
+    const firstWork={
+      project_id:'00000000-0000-4000-8000-000000000010',project_name:'First account work',
+      job_id:'00000000-0000-4000-8000-000000000011',kind:'scan',state:'succeeded',updated_at:'2026-10-11T00:00:00Z',
+      source:{platform:'tiktok',kind:'profile',handle:'old.creator',canonical_url:'https://www.tiktok.com/@old.creator',profile_url:'https://www.tiktok.com/@old.creator',video_url:null}
+    };
     window.openai={callTool:async(name,args)=>{
-      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:window.activeAccountId.endsWith('1')?[firstWork]:[]}}};
       if(name==='get_riff_creator_start'){window.lookups++;return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};}
       if(name==='start_riff_creator'){
         window.starts.push(args);
@@ -404,7 +423,7 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
       window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      const account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      const account=id=>{frame().activeAccountId=id;frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:id.endsWith('1')?'First account':'Second account',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');};
       window.changeAccount=()=>account('00000000-0000-4000-8000-000000000002');
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'account-change',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
@@ -420,11 +439,24 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
   const frame = page.frames().find((item) => item.url().endsWith('/frame'));
   const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   const submit = frame.getByRole('button', { name: 'Find my next idea' });
+  await frame.getByRole('button', { name: 'Open Riff menu' }).click();
+  await frame.getByRole('button', { name: 'Open First account work — Analysis' }).waitFor();
+  const drawer = frame.getByRole('dialog', { name: 'Riff menu' });
+  await frame.getByRole('button', { name: 'Close Riff menu' }).last().click();
   const source = 'https://vm.tiktok.com/ZN8kT85EE/';
   await input.fill(source); await submit.click();
   await frame.waitForFunction(() => window.starts.length === 1);
+  await frame.getByRole('button', { name: 'Open Riff menu' }).click();
   await page.evaluate(() => window.changeAccount());
+  await frame.waitForFunction(() => document.querySelector('.riff-menu__account-trigger')?.getAttribute('aria-label') === 'Second account account menu');
+  assert.equal(await drawer.isHidden(), true, 'account replacement closes the open menu');
+  assert.equal(await frame.getByText('First account work').count(), 0,
+    'account replacement clears old private recents before the new load completes');
   await frame.waitForFunction(() => !document.querySelector('.riff-home__submit')?.disabled);
+  await frame.getByRole('button', { name: 'Open Riff menu' }).click();
+  assert.equal(await frame.getByText('First account work').count(), 0,
+    'the old account recent never returns in the replacement account drawer');
+  await frame.getByRole('button', { name: 'Close Riff menu' }).last().click();
   await input.fill(source);
   await submit.click(); await frame.getByText(/Use a public TikTok video or creator-profile link/i).waitFor();
   const starts = await frame.evaluate(() => window.starts);

@@ -1,6 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../../packages/contracts/creator-pipeline.ts';
 import type { CreatorDnaView } from '../../../packages/contracts/creator-operations.ts';
 import type { RiffVideoCatalogPage } from '../creator-pipeline-validation.ts';
+import { mountRiffMenu, type RiffMenuAccount, type RiffMenuRecent } from '../riff-shell/menu.ts';
 import { riffSymbol } from '../riff-ui/brand.ts';
 import { safeHttpUrl, type RiffActionResult, type RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
@@ -33,6 +34,17 @@ export type CreatorPipelineOptions = {
   }) => Promise<RiffActionResult>;
   onDiscoveryOpen?: (scope:{projectId?:string}) => void;
   embeddedChrome?:boolean;
+  menu?: {
+    account?: RiffMenuAccount;
+    recents?: RiffMenuRecent[];
+    onHome?: () => void;
+    onOpenRecent?: (recent:RiffMenuRecent) => void;
+    onCreate?: () => void;
+    onAccountSettings?: () => void | RiffActionResult | Promise<void | RiffActionResult>;
+    onSupport?: () => void | RiffActionResult | Promise<void | RiffActionResult>;
+    onFeedback?: () => void | RiffActionResult | Promise<void | RiffActionResult>;
+    onRequestTheme?: () => void | RiffActionResult | Promise<void | RiffActionResult>;
+  };
 };
 export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string};
 
@@ -136,15 +148,12 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   const tiktokIcon = () => path(svg(12, 12, '0 0 24 24'), 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z', { fill: '#FFFFFF' });
 
   const style = el('style'); style.textContent = riffBaseStyles + creatorPipelineStyles;
-  const wrapper = el('div', undefined, 'riff-app riff-pipeline');
+  const wrapper = el('div', undefined, 'riff-app riff-pipeline riff-menu-scope');
   wrapper.dataset.embedded=String(options.embeddedChrome===false);
   const chrome=el('header',undefined,'riff-pipeline__chrome');const trail=el('div',undefined,'riff-pipeline__chrome-trail');
-  const rail=el('span',undefined,'riff-pipeline__rail-symbol');rail.setAttribute('aria-hidden','true');
-  const railSvg=svg(18,18,'0 0 24 24');const railRect=doc.createElementNS('http://www.w3.org/2000/svg','rect');
-  for(const [name,value] of Object.entries({x:'3',y:'4',width:'18',height:'16',rx:'3',fill:'none',stroke:'#697180','stroke-width':'1.6'}))railRect.setAttribute(name,value);
-  railSvg.append(railRect);path(railSvg,'M9 4v16',{fill:'none',stroke:'#697180','stroke-width':'1.6'});rail.append(railSvg);
+  const menuHost=el('span');
   const brand=el('span',undefined,'riff-pipeline__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,el('span','Riff'));
-  const separator=el('span','/','riff-pipeline__separator');const location=el('span','Analysis','riff-pipeline__location');trail.append(rail,brand,separator,location);chrome.append(trail);
+  const separator=el('span','/','riff-pipeline__separator');const location=el('span','Analysis','riff-pipeline__location');trail.append(menuHost,brand,separator,location);chrome.append(trail);
   chrome.hidden=options.embeddedChrome===false;
   const surface = el('section', undefined, 'riff-pipeline__surface');
   surface.setAttribute('aria-label', 'Riff creator workflow');
@@ -180,6 +189,27 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     }
     if(scopeChanged||explicit)options.onDiscoveryOpen?.(projectId?{projectId}:{});
   };
+  const menu=options.embeddedChrome===false?undefined:mountRiffMenu(menuHost,{
+    account:options.menu?.account,recents:options.menu?.recents??[],activeRoute:'analysis',
+    onNavigate(route){
+      if(route==='discover'){
+        discoveryLibrary='videos';discoveryFilter='For you';catalogIndex=0;
+        enterDiscovery(true,current?.project_id,true);renderCatalogDiscovery();return;
+      }
+      if(options.menu?.onHome)options.menu.onHome();
+      else void sendPrompt('Open Riff Home in this app so I can start or resume work.');
+    },
+    onOpenRecent(recent){options.menu?.onOpenRecent?.(recent);},
+    onCreate(){
+      if(options.menu?.onCreate)options.menu.onCreate();
+      else void sendPrompt('Start a fresh Riff video from Home without changing the saved work currently open.');
+    },
+    onClose(){ /* Closing the local drawer preserves the open workflow. */ },
+    onAccountSettings:options.menu?.onAccountSettings??(()=>sendPrompt('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.')),
+    onSupport:options.menu?.onSupport??(()=>sendPrompt('I need support with Riff. Show the available support handoff.')),
+    onFeedback:options.menu?.onFeedback??(()=>sendPrompt('I want to give feedback about Riff through the available ChatGPT handoff.')),
+    onRequestTheme:options.menu?.onRequestTheme??(()=>sendPrompt('Open ChatGPT appearance settings. Riff follows the host theme and cannot change ChatGPT’s theme itself.')),
+  });
 
   const setStatus = (text: string) => { if (status.textContent !== text) status.textContent = text; };
   const title = (text: string, className = '') => {
@@ -612,7 +642,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
 
   function renderCatalogDiscovery(){
     if(disposed||mode!=='fullscreen')return;
-    location.textContent='Discover videos';showingCatalog=true;content.replaceChildren();screen('discovery');
+    location.textContent='Discover videos';menu?.render({activeRoute:'discover'});showingCatalog=true;content.replaceChildren();screen('discovery');
     const views={videos:{title:'Find your next breakout idea.',copy:'Explore viral formats picked for you. Find your angle. Make it yours.',filters:['For you','Quick demos','Before / after','How-to','Reactions','Challenges']},
       hooks:{title:'Stop the scroll.',copy:'Find a hook that grabs attention. Make it sound like you.',filters:['For you','Questions','Bold claims','Visual hooks','Problems','Storytelling']},
       showcases:{title:'Make your product stand out.',copy:'Turn your product’s best benefit into a video worth watching.',filters:['Quick demos','Before / after','Unboxing','Tutorials','Screen recordings']},
@@ -783,6 +813,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     let heading: HTMLElement;
     const observedState=presentation.status?.state??job.state;
     location.textContent=job.kind==='recommendations'?'Discover videos':job.kind==='scripts'?'Studio':'Analysis';
+    menu?.render({activeRoute:job.kind==='recommendations'?'discover':job.kind==='scripts'?'studio':'analysis'});
     if (job.state === 'queued' || job.state === 'running') {
       screenKind='pending';heading = renderPending(job,presentation.status);
       if(observedState==='failed'||observedState==='needs_reconciliation')appendFailure(observedState,presentation.status?.progress.limitations??job.progress.limitations);
@@ -802,6 +833,6 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       const projectId=scope.accountWide?undefined:scope.projectId??current?.project_id;enterDiscovery(library==='videos',projectId,true);renderCatalogDiscovery();},
     setNotice(message){if(!disposed)setStatus(message);},
     setDisplayMode(nextMode) { if (disposed || mode === nextMode) return; mode = nextMode;if(showingCatalog)renderCatalogDiscovery();else if (current) render(current,{...(currentStatus?{status:currentStatus}:{}),...(sourceUrl?{sourceUrl}:{})}); },
-    dispose() { if (disposed) return; disposed = true; current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;root.replaceChildren(); },
+    dispose() { if (disposed) return; disposed = true;menu?.dispose(); current = undefined;currentStatus=undefined;catalog=undefined;sourceUrl=undefined;catalogScopeKey=undefined;root.replaceChildren(); },
   };
 }

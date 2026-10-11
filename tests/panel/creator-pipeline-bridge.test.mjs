@@ -89,7 +89,8 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
   frame=await launch();
   await t.test('handshake renders without reread, applies theme/locale and sends sizes', async()=>{
     assert.equal(await page.evaluate(()=>window.calls.length),0);
-    assert.equal(await frame.locator('button').count(),1, 'only the Paper inline action is rendered; there is no bridge Refresh button');
+    assert.equal(await frame.locator('.riff-pipeline__content button').count(),1,
+      'only the Paper inline action is rendered in the workflow; there is no bridge Refresh button');
     assert.equal(await frame.getByText('Refresh job',{exact:true}).count(),0);
     assert.equal(await frame.evaluate(()=>document.documentElement.lang),'lt');
     assert.equal(await frame.evaluate(()=>document.documentElement.dataset.theme),'dark');

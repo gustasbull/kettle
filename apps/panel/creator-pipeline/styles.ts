@@ -4,7 +4,6 @@ html, body { margin: 0; background: transparent; }
 .riff-pipeline__chrome { display:flex;width:100%;flex:0 0 auto;align-items:center;justify-content:space-between;padding:16px 24px 8px;border-radius:24px 24px 0 0; }
 .riff-pipeline__chrome[hidden] { display:none; }
 .riff-pipeline__chrome-trail { display:flex;width:fit-content;height:44px;flex:0 0 auto;align-items:center;gap:14px;white-space:nowrap; }
-.riff-pipeline__rail-symbol { display:flex;width:36px;height:36px;flex:0 0 auto;align-items:center;justify-content:center;border:1px solid #E3E7EE;border-radius:10px;background:#FFF;box-shadow:0 1px 3px #18243A08; }
 .riff-pipeline__brand { display:flex;flex:0 0 auto;align-items:center;gap:8px;color:#242426;font-size:14px;font-weight:600;line-height:20px;overflow-wrap:normal;white-space:nowrap; }
 .riff-pipeline__brand svg, .riff-pipeline__brand > span { flex:0 0 auto; }
 .riff-app .riff-pipeline__brand .riff-logo { width:22px;height:22px; }

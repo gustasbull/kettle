@@ -295,6 +295,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return { status: 'sent', message: 'Analysis started. Riff will update this saved job here.' };
     },
     send,
+    accountSettings: () => send('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.'),
+    support: () => send('I need support with Riff. Help me describe the issue and show the available support handoff.'),
+    feedback: () => send('I want to give feedback about Riff. Help me send it through the available ChatGPT handoff.'),
+    requestTheme: () => send('Open ChatGPT appearance settings. Riff follows the host theme and cannot change ChatGPT’s theme itself.'),
     async upload() {
       actionEpoch++;
       const host = window.openai;
