@@ -214,6 +214,46 @@ export type CreatorProgressVideoCard=z.infer<typeof CreatorProgressVideoCard>;
 export type CreatorProgressReferenceIdentity=z.infer<typeof CreatorProgressReferenceIdentity>;
 export type PipelineReference=z.infer<typeof PipelineReference>;
 
+export const AttemptFailureCode=z.enum(['http_4xx','http_5xx','http_other','malformed_response',
+  'schema_invalid','oversized_response','permission','unavailable','timeout','network',
+  'receipt_persistence_failed','unknown_after_dispatch']);
+export const CreatorAttemptOutcomeInput=z.strictObject({
+  terminal_state:z.enum(['failed','needs_reconciliation']),failure_code:AttemptFailureCode,
+  http_status:z.number().int().min(100).max(599).nullable(),
+}).superRefine((value,context)=>{
+  const definite=new Set(['http_4xx','http_5xx','http_other','malformed_response','schema_invalid',
+    'oversized_response','permission','unavailable']);
+  if((value.terminal_state==='failed')!==definite.has(value.failure_code))
+    context.addIssue({code:'custom',message:'Attempt state and failure code must agree'});
+  if(value.failure_code==='http_4xx'&&(value.http_status===null||value.http_status<400||value.http_status>499))
+    context.addIssue({code:'custom',message:'http_4xx requires a 4xx status'});
+  if(value.failure_code==='http_5xx'&&(value.http_status===null||value.http_status<500||value.http_status>599))
+    context.addIssue({code:'custom',message:'http_5xx requires a 5xx status'});
+  if(value.failure_code==='http_other'&&(value.http_status===null||value.http_status<100||value.http_status>399||value.http_status>=200&&value.http_status<=299))
+    context.addIssue({code:'custom',message:'http_other requires a non-2xx status below 400'});
+});
+export const CreatorAttemptOutcome=CreatorAttemptOutcomeInput.extend({
+  provider:z.enum(['scrapecreators','lightreel','openai']),
+  operation:z.enum(['profile','feed','research','poll','video','generate']),
+  observed_at:Timestamp,recorded_at:Timestamp,
+});
+export type AttemptFailureCode=z.infer<typeof AttemptFailureCode>;
+export type CreatorAttemptOutcomeInput=z.infer<typeof CreatorAttemptOutcomeInput>;
+export type CreatorAttemptOutcome=z.infer<typeof CreatorAttemptOutcome>;
+/** Structured internal signal. Its message is fixed and never contains provider content. */
+export class CreatorAttemptError extends Error {
+  readonly outcome:CreatorAttemptOutcomeInput;
+  constructor(raw:CreatorAttemptOutcomeInput){
+    const outcome=CreatorAttemptOutcomeInput.parse(raw);
+    const message=outcome.failure_code==='timeout'||outcome.failure_code==='network'?`creator_provider_transport_${outcome.failure_code}`:
+      outcome.failure_code==='oversized_response'?`creator_provider_transport_oversized${outcome.http_status===null?'':`_${outcome.http_status}`}`:
+      outcome.failure_code.startsWith('http_')?`creator_provider_transport_http${outcome.http_status===null?'':`_${outcome.http_status}`}`:
+      outcome.failure_code==='malformed_response'||outcome.failure_code==='schema_invalid'?'creator_provider_malformed':
+      `creator_provider_${outcome.failure_code}`;
+    super(message);this.outcome=outcome;
+  }
+}
+
 /** Trusted provider seam. Values are persisted by the lead runner, never public input. */
 export interface CreatorProviderContext {
   now():string;
@@ -222,6 +262,8 @@ export interface CreatorProviderContext {
    * key is stable within the job. The guard reserves configured ceilings before I/O,
    * replays recorded successes and blocks ambiguous attempts. No provider retries. */
   call(key:string,provider:'scrapecreators'|'lightreel'|'openai',operation:'profile'|'feed'|'research'|'poll'|'video'|'generate',execute:()=>Promise<unknown>):Promise<unknown>;
+  /** Record a sanitized terminal result for an already-reserved stable attempt key. */
+  recordOutcome(key:string,outcome:CreatorAttemptOutcomeInput):Promise<never>;
   /** Persist a validated public display snapshot. This never reserves provider allowance. */
   checkpoint(key:string,stage:CreatorJobStage,progress:CreatorJobProgress):Promise<void>;
   /** Publish only the original validated safe observation after its matching checkpoint is durable. */

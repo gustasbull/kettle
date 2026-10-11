@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReference,
-  CreatorJobProgress, CreatorJobStatusView, CreatorJobStage } from '../packages/contracts/creator-pipeline.ts';
+  CreatorJobProgress, CreatorJobStatusView, CreatorJobStage, CreatorAttemptOutcomeInput, pipelineContracts } from '../packages/contracts/creator-pipeline.ts';
 import { recommendationBatchFixture, creatorScriptsFixture, creatorJobFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 test('pipeline contracts retain reference lineage and fictional origin without padding',()=>{
  const batch=recommendationBatchFixture(); assert.equal(batch.ideas.length,1);
@@ -14,6 +15,17 @@ test('pipeline contracts retain reference lineage and fictional origin without p
  assert.ok(!CreatorScriptSet.safeParse({...scripts,variants:[scripts.variants[0]]}).success);
  assert.ok(!CreatorScriptSet.safeParse({...scripts,variants:[scripts.variants[0],scripts.variants[0]]}).success);
  for(const kind of ['scan','recommendations','scripts'] as const)assert.equal(creatorJobFixture(kind).result!.kind,kind);
+});
+test('attempt outcomes use a strict internal taxonomy and never become public pipeline operations',()=>{
+ assert.deepEqual(CreatorAttemptOutcomeInput.parse({terminal_state:'failed',failure_code:'http_4xx',http_status:429}),
+  {terminal_state:'failed',failure_code:'http_4xx',http_status:429});
+ for(const value of [{terminal_state:'failed',failure_code:'timeout',http_status:null},
+  {terminal_state:'needs_reconciliation',failure_code:'http_5xx',http_status:503},
+  {terminal_state:'failed',failure_code:'http_4xx',http_status:null},
+  {terminal_state:'failed',failure_code:'http_4xx',http_status:429,body:'secret'}])
+  assert.equal(CreatorAttemptOutcomeInput.safeParse(value).success,false);
+ assert.ok(!Object.keys(pipelineContracts).some(name=>/outcome|reconcil|usage|attempt/.test(name)));
+ assert.doesNotMatch(JSON.stringify(Object.values(pipelineContracts).map(contract=>({input:z.toJSONSchema(contract.input),output:z.toJSONSchema(contract.output)}))),/failure_code|http_status|terminal_state/);
 });
 test('Paper discovery and Studio facts are optional for saved legacy results but strictly validated when present', () => {
  const legacyBatch=recommendationBatchFixture();

@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { Id, Timestamp, result } from '../contracts/index.ts';
 import { CreatorJobView, CreatorJobOutput, CreatorJobStatusView, CreatorJobStatusOutput, CreatorJobProgress,
   CreatorJobStage, pipelineContracts, RecommendationBatch, CreatorScriptSet, emptyCreatorJobProgress,
-  FilmingVariant, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider } from '../contracts/creator-pipeline.ts';
+  FilmingVariant, CreatorAttemptOutcomeInput, CreatorAttemptOutcome, CreatorAttemptError,
+  type AttemptFailureCode, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider } from '../contracts/creator-pipeline.ts';
 import { CreatorAnalysis, CreatorUrl, ProfileScanRequest } from '../contracts/creator-profile.ts';
 import { StoredCreatorAnalysis } from '../contracts/creator-operations.ts';
 import { failure, type IdentityVerifier } from './operations.ts';
@@ -11,7 +12,8 @@ import { observed, type CreatorLatencyObserver } from './creator-observability.t
 import { parseRiffVideoIngestReceipt, riffVideoCatalogInput, type RiffVideoRepository } from './riff-videos.ts';
 
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
-  | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'checkpoint_creator_job' | 'list_creator_dispatches';
+  | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'record_creator_attempt_outcome'
+  | 'checkpoint_creator_job' | 'list_creator_dispatches' | 'reconcile_creator_job';
 export interface PipelineRepository { call(operation: PipelineRepositoryOperation, accountId: string, input: unknown,
   telemetry?: CreatorLatencyObserver): Promise<unknown> }
 export const StoredCreatorJob = z.object({
@@ -93,23 +95,26 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
     }catch{return failure('UNAVAILABLE');}
   }};
 }
-// These codes contain only adapter enums and an HTTP status, never raw response text.
-const providerDiagnosticPattern = 'creator_provider_(?:transport|malformed|permission|unavailable)(?:_(?:timeout|network|oversized|malformed|http))?(?:_[1-5][0-9]{2})?';
-const providerDiagnosticExact = new RegExp(`^${providerDiagnosticPattern}$(?![\\s\\S])`);
-const wrappedProviderDiagnostic = new RegExp(`(?:^|[\\s:(])creator_attempt_needs_reconciliation:(${providerDiagnosticPattern})(?=$|[\\s)'\",])`);
-function safeProviderDiagnostic(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  if (providerDiagnosticExact.test(error.message)) return error.message;
-  // Workflow step failures may wrap our sanitized error and erase its class/properties.
-  // Extract only the exact enum code following our own reconciliation marker.
-  return wrappedProviderDiagnostic.exec(error.message)?.[1];
+const outcomeSignal='creator_attempt_terminal:(failed|needs_reconciliation):([a-z_]+):(null|[1-5][0-9]{2})';
+const wrappedOutcomeMarker=new RegExp(`^Workflow step failed: Error: (${outcomeSignal})(?:\\n[^\\r\\n]{0,1000})?$`);
+function safeSerializedOutcome(error:unknown){
+  if(!(error instanceof Error))return undefined;
+  const match=wrappedOutcomeMarker.exec(error.message);if(!match)return undefined;
+  const parsed=CreatorAttemptOutcomeInput.safeParse({terminal_state:match[2],failure_code:match[3],
+    http_status:match[4]==='null'?null:Number(match[4])});
+  return parsed.success?parsed.data:undefined;
 }
 export class PipelineRunError extends Error {
   readonly diagnostic: string | undefined;
-  constructor(readonly state:'failed'|'needs_reconciliation', diagnostic?:string){
-    const safe=typeof diagnostic==='string'&&providerDiagnosticExact.test(diagnostic)?diagnostic:undefined;
-    super((state==='failed'?'creator_job_blocked':'creator_attempt_needs_reconciliation')+(safe?`:${safe}`:''));
-    this.diagnostic=safe;
+  readonly failureCode:AttemptFailureCode|undefined;
+  readonly httpStatus:number|null|undefined;
+  constructor(readonly state:'failed'|'needs_reconciliation', outcome?:CreatorAttemptOutcomeInput|string){
+    const candidate=outcome&&typeof outcome==='object'?{terminal_state:outcome.terminal_state,failure_code:outcome.failure_code,http_status:outcome.http_status}:undefined;
+    const safe=candidate&&CreatorAttemptOutcomeInput.safeParse(candidate).success?CreatorAttemptOutcomeInput.parse(candidate):undefined;
+    super(safe?`creator_attempt_terminal:${safe.terminal_state}:${safe.failure_code}:${safe.http_status??'null'}`:
+      state==='failed'?'creator_job_blocked':'creator_attempt_needs_reconciliation');
+    this.failureCode=safe?.failure_code;this.httpStatus=safe?.http_status;
+    this.diagnostic=safe?`${safe.failure_code}${safe.http_status===null?'':`_${safe.http_status}`}`:undefined;
   }
 }
 export type AttemptCeilings = Record<'scrapecreators'|'lightreel'|'openai',number>;
@@ -118,7 +123,24 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
   ceilings:AttemptCeilings, durableStep:DurableStep, telemetry?:CreatorLatencyObserver,
   catalogRepository?:RiffVideoRepository):CreatorProviderContext {
   let revision=job.revision;
+  const persistOutcome=async(key:string,raw:unknown):Promise<never>=>{
+    const outcome=CreatorAttemptOutcomeInput.parse(raw);
+    let saved:unknown;
+    try{saved=await durableStep(`attempt:outcome:${key}`,()=>observed(telemetry,
+      {stage:'attempt_outcome_persistence',clock:'monotonic',operation:'persist'},
+      ()=>repository.call('record_creator_attempt_outcome',job.account_id,{job_id:job.id,key,...outcome})));}
+    catch{throw new PipelineRunError('needs_reconciliation');}
+    const parsed=z.strictObject({ok:z.literal(true),data:z.strictObject({status:z.enum(['recorded','replay']),outcome:CreatorAttemptOutcome})}).safeParse(saved);
+    if(!parsed.success||parsed.data.data.outcome.terminal_state!==outcome.terminal_state||
+      parsed.data.data.outcome.failure_code!==outcome.failure_code||parsed.data.data.outcome.http_status!==outcome.http_status)
+      throw new PipelineRunError('needs_reconciliation');
+    throw new PipelineRunError(outcome.terminal_state,outcome);
+  };
   return {now:()=>new Date().toISOString(),newId:()=>crypto.randomUUID(),
+    recordOutcome(key,outcome){
+      if(!/^[\w:-]{1,200}$/.test(key))throw new PipelineRunError('failed');
+      return persistOutcome(key,outcome);
+    },
     async ingestCatalog(checkpointKey,role,observations){
       if(!catalogRepository)throw new PipelineRunError('failed');
       const input=riffVideoCatalogInput(job,checkpointKey,role,observations);
@@ -151,22 +173,38 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
       if(!/^[\w:-]{1,200}$/.test(key)||!Number.isSafeInteger(ceilings[provider])||ceilings[provider]<0)throw new PipelineRunError('failed');
       // One provider request per step. Database reservation is authoritative even if
       // Workflow persistence fails, retries overlap, or the process dies after dispatch.
-      return durableStep(`provider:${key}`,async()=>{
-        const reservation=z.object({ok:z.literal(true),data:z.object({status:z.enum(['acquired','replay','ambiguous']),receipt:z.unknown().optional()})})
+      const envelope=await durableStep(`provider:${key}`,async()=>{
+        const reservation=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
+          z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
+          z.object({status:z.literal('ambiguous')}),z.object({status:z.literal('definite_failure'),outcome:CreatorAttemptOutcome}),
+          z.object({status:z.literal('needs_reconciliation'),outcome:CreatorAttemptOutcome}),
+        ])})
           .safeParse(await observed(telemetry,{stage:'provider_reservation',clock:'monotonic',provider,operation:'reserve'},
             ()=>repository.call('reserve_creator_attempt',job.account_id,{job_id:job.id,key,provider,operation,ceiling_microusd:ceilings[provider]})));
-        if(!reservation.success)throw new PipelineRunError('failed');
-        if(reservation.data.data.status==='replay')return reservation.data.data.receipt;
-        if(reservation.data.data.status==='ambiguous')throw new PipelineRunError('needs_reconciliation');
+        if(!reservation.success)return {kind:'local_failure'} as const;
+        if(reservation.data.data.status==='replay')return {kind:'receipt',receipt:reservation.data.data.receipt} as const;
+        if(reservation.data.data.status==='ambiguous')return {kind:'unresolved'} as const;
+        if(reservation.data.data.status==='definite_failure'||reservation.data.data.status==='needs_reconciliation')
+          return {kind:'stored_outcome',outcome:reservation.data.data.outcome} as const;
         try {
           const receipt=await execute();
-          if(new TextEncoder().encode(JSON.stringify(receipt)).length>300_000)throw new Error('receipt bound');
+          let bytes:number;try{bytes=new TextEncoder().encode(JSON.stringify(receipt)).length;}catch{
+            return {kind:'outcome',outcome:{terminal_state:'failed',failure_code:'schema_invalid',http_status:null}} as const;
+          }
+          if(bytes>300_000)return {kind:'outcome',outcome:{terminal_state:'failed',failure_code:'oversized_response',http_status:null}} as const;
           const saved=z.object({ok:z.literal(true),data:z.object({status:z.literal('completed'),receipt:z.unknown()})})
-            .parse(await observed(telemetry,{stage:'receipt_persistence',clock:'monotonic',provider,operation:'persist',response_bytes:new TextEncoder().encode(JSON.stringify(receipt)).length},
-              ()=>repository.call('complete_creator_attempt',job.account_id,{job_id:job.id,key,receipt})));
-          return saved.data.receipt;
-        }catch(error){throw new PipelineRunError('needs_reconciliation',safeProviderDiagnostic(error));}
+            .safeParse(await observed(telemetry,{stage:'receipt_persistence',clock:'monotonic',provider,operation:'persist',response_bytes:bytes},
+              ()=>repository.call('complete_creator_attempt',job.account_id,{job_id:job.id,key,receipt})).catch(()=>undefined));
+          return saved.success?{kind:'receipt',receipt:saved.data.data.receipt} as const:
+            {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'receipt_persistence_failed',http_status:null}} as const;
+        }catch(error){return {kind:'outcome',outcome:error instanceof CreatorAttemptError?error.outcome:
+          {terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;}
       });
+      if(envelope.kind==='receipt')return envelope.receipt;
+      if(envelope.kind==='stored_outcome')throw new PipelineRunError(envelope.outcome.terminal_state,envelope.outcome);
+      if(envelope.kind==='unresolved')throw new PipelineRunError('needs_reconciliation');
+      if(envelope.kind==='local_failure')throw new PipelineRunError('failed');
+      return persistOutcome(key,envelope.outcome);
     }};
 }
 /** Verify the exact captured view against retained evidence before any external processing. */
@@ -237,9 +275,10 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
       ()=>repository.call('finish_creator_job',accountId,{job_id:jobId,state:'succeeded',result:output,message:null}))));
     if(!finished.ok)throw new PipelineRunError('failed');
   }catch(error){
-    const state=error instanceof PipelineRunError?error.state:
-      error instanceof Error&&error.message.includes('creator_attempt_needs_reconciliation')?'needs_reconciliation':'failed';
-    const diagnostic=error instanceof PipelineRunError?error.diagnostic:safeProviderDiagnostic(error);
+    const serialized=safeSerializedOutcome(error);
+    const state=error instanceof PipelineRunError?error.state:serialized?.terminal_state??'failed';
+    const diagnostic=error instanceof PipelineRunError?error.diagnostic:serialized?
+      `${serialized.failure_code}${serialized.http_status===null?'':`_${serialized.http_status}`}`:undefined;
     await durableStep('record-failure',()=>observed(telemetry,
       {stage:'terminal_save',clock:'monotonic',operation:'persist'},
       ()=>repository.call('finish_creator_job',accountId,{job_id:jobId,state,result:null,message:diagnostic?`${state}:${diagnostic}`:state})));

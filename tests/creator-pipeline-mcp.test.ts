@@ -65,6 +65,8 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   await db.query("insert into public.creator_pipeline_allowances(account_id,profile_url,enabled,expires_at) values($1,$2,true,now()+interval '1 day')",[accountA,f.input.request.supplied_url]);
   await db.exec("insert into public.creator_provider_trials(provider,remaining_units,enabled,expires_at) values('scrapecreators',10,true,now()+interval '1 hour'),('lightreel',3,true,now()+interval '1 hour')");
   const listing=await (await rpc('tools/list',{})).json() as {result:{tools:any[]}};
+  assert.ok(!listing.result.tools.some(tool=>/outcome|reconcil|usage|attempt/i.test(tool.name)),
+    'attempt outcome writes and operator reconciliation stay outside public MCP');
   const catalogBytes=Buffer.byteLength(JSON.stringify(listing.result),'utf8');
   assert.ok(catalogBytes<64*1024,`model-facing MCP catalog is ${catalogBytes} bytes; keep launch discovery below 64 KB`);
   for(const name of ['start_creator_scan','start_creator_recommendations','save_creator_scripts','get_creator_job','render_creator_job']){

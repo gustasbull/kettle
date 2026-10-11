@@ -9,6 +9,8 @@ test('provider steps remain zero-retry while checkpoint persistence uses durable
   {retries:{limit:2,delay:'1 second',backoff:'exponential'},timeout:'10 minutes'});
  assert.deepEqual(creatorWorkflowStepOptions('catalog:scan:feed:0:own_profile'),
   {retries:{limit:2,delay:'1 second',backoff:'exponential'},timeout:'10 minutes'});
+ assert.deepEqual(creatorWorkflowStepOptions('attempt:outcome:video:901'),
+  {retries:{limit:2,delay:'1 second',backoff:'exponential'},timeout:'10 minutes'});
  assert.deepEqual(creatorWorkflowStepOptions('save-result'),
   {retries:{limit:2,delay:'1 second',backoff:'exponential'},timeout:'10 minutes'});
  for(const unsafe of ['checkpoint:','provider:../secret','unknown-step','checkpoint:contains space'])

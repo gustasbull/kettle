@@ -45,7 +45,7 @@ export async function reconcileCreatorDispatches(env:Env,rootTelemetry?:CreatorT
     const instance=await env.CREATOR_WORKFLOW.get(`creator-${job.id}`);
     const status=await instance.status();
     if(['errored','terminated','complete'].includes(status.status)){
-      await repository.call('finish_creator_job',job.account_id,{job_id:job.id,state:'needs_reconciliation',result:null,message:'Workflow stopped before a durable result was saved.'});
+      await repository.call('reconcile_creator_job',job.account_id,{job_id:job.id});
     }
   }catch{/* Unknown Workflow status never authorizes a new running job or a provider retry. */}
 }

@@ -4,6 +4,7 @@ import { CreatorDnaView } from '../../contracts/creator-operations.ts';
 import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview,
   type ProfileObservation, type VideoObservation } from '../../contracts/creator-profile.ts';
 import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment, CreatorJobProgress,
+  CreatorAttemptError,
   type CreatorProgressProfile, type CreatorProgressVideoCard,
   type CreatorPipelineProvider, type CreatorProviderContext } from '../../contracts/creator-pipeline.ts';
 import { buildGroundedCreatorDna } from '../creator-scan/dna.ts';
@@ -27,19 +28,26 @@ const receipt = z.object({ id: z.uuid(), status: z.number().int().min(200).max(2
   body: z.string().max(262144).refine(v => new TextEncoder().encode(v).length <= 262144), retrieved_at: z.iso.datetime(), latency_ms: z.number().int().nonnegative(),
   failure: z.null(), source_observed_at: z.iso.datetime().nullable() });
 /** Error text is safe to persist. Any dispatched failure may have incurred cost; never retry here. */
-export class CreatorProviderError extends Error {
-  constructor(readonly code: 'transport' | 'malformed' | 'permission' | 'unavailable',
+export class CreatorProviderError extends CreatorAttemptError {
+  constructor(readonly code: 'transport' | 'malformed' | 'schema_invalid' | 'permission' | 'unavailable',
     readonly status: number | null = null, readonly failure: HttpEvidence['failure'] = null) {
-    const safeCode = ['transport','malformed','permission','unavailable'].includes(code) ? code : 'malformed';
-    const safeFailure = failure && ['timeout','network','oversized','malformed','http'].includes(failure) ? `_${failure}` : '';
-    const safeStatus = status !== null && Number.isInteger(status) && status >= 100 && status <= 599 ? `_${status}` : '';
-    super(`creator_provider_${safeCode}${safeFailure}${safeStatus}`);
+    const httpStatus=status!==null&&Number.isInteger(status)&&status>=100&&status<=599?status:null;
+    const outcome=failure==='timeout'?{terminal_state:'needs_reconciliation' as const,failure_code:'timeout' as const,http_status:httpStatus}:
+      failure==='network'?{terminal_state:'needs_reconciliation' as const,failure_code:'network' as const,http_status:httpStatus}:
+      failure==='oversized'?{terminal_state:'failed' as const,failure_code:'oversized_response' as const,http_status:httpStatus}:
+      failure==='malformed'||code==='malformed'?{terminal_state:'failed' as const,failure_code:'malformed_response' as const,http_status:httpStatus}:
+      failure==='http'&&httpStatus!==null?{terminal_state:'failed' as const,
+        failure_code:(httpStatus>=500?'http_5xx':httpStatus>=400?'http_4xx':'http_other') as 'http_5xx'|'http_4xx'|'http_other',http_status:httpStatus}:
+      code==='permission'?{terminal_state:'failed' as const,failure_code:'permission' as const,http_status:httpStatus}:
+      code==='unavailable'?{terminal_state:'failed' as const,failure_code:'unavailable' as const,http_status:httpStatus}:
+      {terminal_state:'failed' as const,failure_code:'schema_invalid' as const,http_status:httpStatus};
+    super(outcome);
   }
 }
-const safeProviderDiagnosticPattern='creator_provider_(?:transport|malformed|permission|unavailable)(?:_(?:timeout|network|oversized|malformed|http))?(?:_[1-5]\\d\\d)?';
-const ambiguousAttemptPattern=new RegExp(`(?:^|[\\s:(])creator_attempt_needs_reconciliation(?::${safeProviderDiagnosticPattern})?(?=$|[\\s)'\",])`);
-const blockedAttemptPattern=new RegExp(`^creator_job_blocked(?::${safeProviderDiagnosticPattern})?$`);
-const isAmbiguousAttempt=(error:unknown)=>error instanceof Error&&ambiguousAttemptPattern.test(error.message);
+const ambiguousAttemptPattern=/^(?:creator_attempt_terminal:needs_reconciliation:(?:timeout|network|receipt_persistence_failed|unknown_after_dispatch):(?:null|[1-5]\d\d)|creator_attempt_needs_reconciliation|Workflow step failed: Error: creator_attempt_terminal:needs_reconciliation:(?:timeout|network|receipt_persistence_failed|unknown_after_dispatch):(null|[1-5]\d\d)(?:\n[^\r\n]{0,1000})?)$/;
+const blockedAttemptPattern=/^(?:creator_attempt_terminal:failed:(?:http_4xx|http_5xx|http_other|malformed_response|schema_invalid|oversized_response|permission|unavailable):(null|[1-5]\d\d)|creator_job_blocked)$/;
+const isAmbiguousAttempt=(error:unknown)=>error instanceof CreatorAttemptError?
+  error.outcome.terminal_state==='needs_reconciliation':error instanceof Error&&ambiguousAttemptPattern.test(error.message);
 export type CreatorPipelineAdapterOptions = {
   fetch: Fetch;
   credentials: { scrapeCreators: string; lightreel: string; openai?: string };
@@ -158,9 +166,9 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const sanitized = await observed(options.telemetry,
           { stage: 'sanitization', clock: 'monotonic', provider, operation }, async () => decode(r.body));
         return receipt.parse({ ...r, id: context.newId(), source_observed_at, body: sanitized });
-      } catch { throw new CreatorProviderError('malformed', r.status, 'malformed'); }
+      } catch(error) { if(error instanceof CreatorProviderError)throw error;throw new CreatorProviderError('schema_invalid', r.status); }
     });
-    try { return receipt.parse(raw); } catch { throw new CreatorProviderError('malformed'); }
+    try { return receipt.parse(raw); } catch { return context.recordOutcome(key,{terminal_state:'failed',failure_code:'schema_invalid',http_status:null}); }
   }
   return {
     async scan(raw, context) {
@@ -175,7 +183,10 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         seedReceipt = await call(context, 'seed-review', 'lightreel', 'research', new URL('https://api.lightreel.ai/v1/chat'),
           seedReviewBody(seedUrl), body => JSON.stringify(readLightreelSeedReview(body, seedUrl)), timeouts.seedReview);
         // Revalidate durable replay too. No callbacks/history reads or retry/resubmission path.
-        const review = readLightreelSeedReview(seedReceipt.body, seedUrl);
+        let review:ReturnType<typeof readLightreelSeedReview>;
+        try{review=readLightreelSeedReview(seedReceipt.body, seedUrl);}catch{
+          return context.recordOutcome('seed-review',{terminal_state:'failed',failure_code:'schema_invalid',http_status:seedReceipt.status});
+        }
         seedReview = LightreelSeedReview.parse({ url: seedUrl, provider: 'lightreel', conversation_id: review.conversationId,
           summary: review.answer.summary, access_basis: review.answer.access_basis,
           ...(review.answer.dimensions ? { dimensions: review.answer.dimensions } : {}),
@@ -194,7 +205,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         });
       const parsed = characterizeProfile(profile.body);
       if (parsed.kind !== 'available' || parsed.user.uniqueId.toLowerCase() !== parseTikTokUrl(request.supplied_url).handle.toLowerCase()) {
-        throw new CreatorProviderError('unavailable');
+        return context.recordOutcome('profile',{terminal_state:'failed',failure_code:'unavailable',http_status:profile.status});
       }
       const normalizedScan=async(feedAttempts:readonly (ScanReceipt&{requestedCursor:string|null})[])=>{
         const deterministicIds=await receiptIds(profile.id,300);
@@ -213,7 +224,8 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         pages.push({ ...r, requestedCursor: cursor });
         const replay = characterizeFeed({ profileBody: profile.body, attempts: pages,
           maxPages: request.max_pages, maxVideos: request.max_videos });
-        if (replay.pages.length !== pages.length) throw new CreatorProviderError('malformed');
+        if (replay.pages.length !== pages.length)return context.recordOutcome(`feed:${page}`,
+          {terminal_state:'failed',failure_code:'schema_invalid',http_status:r.status});
         const normalized=await normalizedScan(pages);
         const nextProgress=scanProgress(normalized);
         if(nextProgress.videos.length>progress.videos.length){progress=nextProgress;
@@ -256,22 +268,28 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         body => JSON.stringify(readLightreelSubmission(body)));
       let result = researchResult(research.body);
       let acceptedResearch = research;
+      let resultReceipt=research;
+      let resultKey='research';
       // No invented status protocol: inspect only documented assistant history for a known ID.
       for (let read = 0; result.urls === null && read < maxHistoryReads; read++) {
         const id = result.conversationId;
         const history = await call(context, `poll:${read}`, 'lightreel', 'poll', historyRequest(id), undefined,
           body => JSON.stringify(readLightreelHistory(body, id)));
         result = researchResult(history.body);
+        resultReceipt=history;
+        resultKey=`poll:${read}`;
         if(result.urls!==null)acceptedResearch=history;
       }
-      if (result.urls === null) throw new CreatorProviderError('unavailable');
+      if (result.urls === null)return context.recordOutcome(resultKey,
+        {terminal_state:'failed',failure_code:'unavailable',http_status:resultReceipt.status});
       let candidates:Array<{url:string;nativeId:string}>;
       try {
         candidates=result.urls.map(url=>{const parsed=parseTikTokUrl(url);if(!parsed.videoId)throw new Error('Missing video ID');
           return {url:parsed.canonicalUrl,nativeId:parsed.videoId};});
-      } catch { throw new CreatorProviderError('malformed'); }
+      } catch { return context.recordOutcome(resultKey,
+        {terminal_state:'failed',failure_code:'schema_invalid',http_status:acceptedResearch.status}); }
       if(candidates.length>3||new Set(candidates.map(candidate=>candidate.nativeId)).size!==candidates.length)
-        throw new CreatorProviderError('malformed');
+        return context.recordOutcome(resultKey,{terminal_state:'failed',failure_code:'schema_invalid',http_status:acceptedResearch.status});
       const identities=candidates.map(({url,nativeId})=>({platform:'tiktok' as const,
         native_id:nativeId,url,retrieved_at:acceptedResearch.retrieved_at,origin:'live' as const,
         permission_basis:permission.basis.slice(0,1000),limitations:[]}));
@@ -293,7 +311,9 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
               body: '', failure: null, latency_ms: 0, retrieved_at: context.now(), source_observed_at: null }, '/v2/tiktok/video', url));
             return clean;
           });
-        const { observation: o } = readTikTokDetail(r.body, url, r.id, provenance(r, '/v2/tiktok/video', url));
+        let o:ReturnType<typeof readTikTokDetail>['observation'];
+        try{o=readTikTokDetail(r.body, url, r.id, provenance(r, '/v2/tiktok/video', url)).observation;}
+        catch{return context.recordOutcome(`video:${nativeId}`,{terminal_state:'failed',failure_code:'schema_invalid',http_status:r.status});}
         const multiplier = medianViews !== undefined && o.metrics.views !== null
           ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
         const reference:RecommendationBatch['references'][number]={ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
@@ -359,9 +379,13 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
             output.variants.some(v => v.reference_ids.some(id => !idea.reference_ids.includes(id)))) throw new Error('Invalid grounding');
           return JSON.stringify({ ...response, output });
         });
-      const output = modelOutput.parse(JSON.parse(r.body).output);
+      let output:z.infer<typeof modelOutput>;
+      try{output=modelOutput.parse(JSON.parse(r.body).output);}catch{
+        return context.recordOutcome('generate',{terminal_state:'failed',failure_code:'schema_invalid',http_status:r.status});
+      }
       // Revalidate after durable replay too; recorded output remains untrusted.
-      if (output.variants.some(v => v.reference_ids.some(id => !idea.reference_ids.includes(id)))) throw new Error('Invalid grounding');
+      if (output.variants.some(v => v.reference_ids.some(id => !idea.reference_ids.includes(id))))
+        return context.recordOutcome('generate',{terminal_state:'failed',failure_code:'schema_invalid',http_status:r.status});
       const newId = await receiptIds(r.id, 4);
       return CreatorScriptSet.parse({ id: newId(), batch_id: batch.id, idea_id: idea.id,
         dna_id: dna.dna_id, dna_version: dna.version, version: 1, created_at: r.retrieved_at,

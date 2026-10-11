@@ -44,11 +44,11 @@ test('zero paid budget and no allowance are seeded; client roles cannot call or 
  assert.equal((await rpc('start_creator_scan',scanInput())).error?.code,'FORBIDDEN');
  assert.deepEqual((await db.query('select * from public.creator_provider_trials')).rows,[]);
  assert.deepEqual((await db.query('select limit_microusd,reserved_microusd from public.creator_pipeline_budget')).rows,[{limit_microusd:0,reserved_microusd:0}]);
- for(const role of ['anon','authenticated']) for(const sql of ['select * from public.creator_jobs','select * from public.creator_job_checkpoints','select * from public.creator_provider_trials',`select public.kettle_list_creator_dispatches('${accountA}','{}')`,`select public.kettle_start_creator_scan('${accountA}','{}')`,`select public.kettle_checkpoint_creator_job('${accountA}','{}')`,`select public.kettle_get_creator_job_status('${accountA}','{}')`]) {
+ for(const role of ['anon','authenticated']) for(const sql of ['select * from public.creator_jobs','select * from public.creator_job_checkpoints','select * from public.creator_attempt_outcomes','select * from public.creator_provider_trials',`select public.kettle_list_creator_dispatches('${accountA}','{}')`,`select public.kettle_start_creator_scan('${accountA}','{}')`,`select public.kettle_checkpoint_creator_job('${accountA}','{}')`,`select public.kettle_get_creator_job_status('${accountA}','{}')`,`select public.kettle_record_creator_attempt_outcome('${accountA}','{}')`]) {
   await assert.rejects(db.transaction(async tx=>{await tx.exec(`set local role ${role}`);await tx.exec(sql);}),/permission denied/);
  }
- const rows=await db.query<{relrowsecurity:boolean}>("select relrowsecurity from pg_class where relname in ('creator_jobs','creator_job_events','creator_job_checkpoints','creator_pipeline_budget','creator_pipeline_allowances','creator_provider_trials','creator_attempts','creator_attempt_receipts')");
- assert.equal(rows.rows.length,8); assert.ok(rows.rows.every(r=>r.relrowsecurity));
+ const rows=await db.query<{relrowsecurity:boolean}>("select relrowsecurity from pg_class where relname in ('creator_jobs','creator_job_events','creator_job_checkpoints','creator_pipeline_budget','creator_pipeline_allowances','creator_provider_trials','creator_attempts','creator_attempt_receipts','creator_attempt_outcomes')");
+ assert.equal(rows.rows.length,9); assert.ok(rows.rows.every(r=>r.relrowsecurity));
 });
 test('account ownership, immutable intent, global start request namespace, and replay after allowance withdrawal',async()=>{
  await allow(); const input=scanInput(); const first=await rpc('start_creator_scan',input); assert.equal(first.ok,true);
@@ -117,6 +117,46 @@ test('terminal states and append-only histories cannot be overwritten; exact ter
  assert.deepEqual(events.rows,[{revision:1,state:'queued'},{revision:2,state:'running'},{revision:3,state:'needs_reconciliation'}]);
  for(const sql of ["update public.creator_attempt_receipts set receipt='{}'",'delete from public.creator_attempts',"update public.creator_jobs set input='{}'",'delete from public.creator_job_events']) await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');await tx.exec(sql);}),/permission denied/);
  await assert.rejects(db.query("update public.creator_jobs set state='running',revision=revision+1 where id=$1",[job.id]),/immutable creator job/);
+});
+
+test('attempt outcomes are append-only, exact-replayable and take precedence over receipts',async()=>{
+ const job=await runningScan();await db.exec('update public.creator_pipeline_budget set limit_microusd=reserved_microusd+100');
+ assert.equal((await rpc('reserve_creator_attempt',attempt(job.id,'profile',10))).data.status,'acquired');
+ const input={job_id:job.id,key:'profile',terminal_state:'failed',failure_code:'http_4xx',http_status:429};
+ const first=await rpc('record_creator_attempt_outcome',input);assert.equal(first.data.status,'recorded');
+ const replay=await rpc('record_creator_attempt_outcome',input);assert.equal(replay.data.status,'replay');assert.deepEqual(replay.data.outcome,first.data.outcome);
+ assert.equal((await rpc('record_creator_attempt_outcome',{...input,http_status:404})).error?.code,'IDEMPOTENCY_CONFLICT');
+ const reserved=await rpc('reserve_creator_attempt',attempt(job.id,'profile',10));assert.equal(reserved.data.status,'definite_failure');
+ assert.equal((await rpc('complete_creator_attempt',{job_id:job.id,key:'profile',receipt:{ok:true}})).error?.code,'FORBIDDEN');
+ assert.equal((await rpc('finish_creator_job',{job_id:job.id,state:'succeeded',result:{kind:'scan',dna:{}},message:null})).error?.code,'FORBIDDEN');
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');await tx.query("update public.creator_attempt_outcomes set failure_code='unavailable' where job_id=$1",[job.id]);}),/permission denied/);
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');await tx.query('delete from public.creator_attempt_outcomes where job_id=$1',[job.id]);}),/permission denied/);
+});
+
+test('semantic definite outcome may follow a receipt while ambiguous outcome may not',async()=>{
+ await db.exec('update public.creator_pipeline_budget set limit_microusd=reserved_microusd+100');
+ const definite=await runningScan();await rpc('reserve_creator_attempt',attempt(definite.id,'profile',10));
+ await rpc('complete_creator_attempt',{job_id:definite.id,key:'profile',receipt:{ok:true}});
+ assert.equal((await rpc('record_creator_attempt_outcome',{job_id:definite.id,key:'profile',terminal_state:'failed',failure_code:'schema_invalid',http_status:200})).ok,true);
+ assert.equal((await rpc('reserve_creator_attempt',attempt(definite.id,'profile',10))).data.status,'definite_failure');
+ const ambiguous=await runningScan();await rpc('reserve_creator_attempt',attempt(ambiguous.id,'profile',10));
+ await rpc('complete_creator_attempt',{job_id:ambiguous.id,key:'profile',receipt:{ok:true}});
+ assert.equal((await rpc('record_creator_attempt_outcome',{job_id:ambiguous.id,key:'profile',terminal_state:'needs_reconciliation',failure_code:'timeout',http_status:null})).error?.code,'FORBIDDEN');
+ const impossible=await runningScan();await rpc('reserve_creator_attempt',attempt(impossible.id,'profile',10));
+ await rpc('complete_creator_attempt',{job_id:impossible.id,key:'profile',receipt:{ok:true}});
+ assert.equal((await rpc('record_creator_attempt_outcome',{job_id:impossible.id,key:'profile',terminal_state:'failed',failure_code:'http_5xx',http_status:503})).error?.code,'FORBIDDEN');
+});
+
+test('stopped workflow reconciliation classifies durable state atomically without redispatch',async()=>{
+ await db.exec('update public.creator_pipeline_budget set limit_microusd=reserved_microusd+100');
+ const unresolved=await runningScan();await rpc('reserve_creator_attempt',attempt(unresolved.id,'profile',10));
+ assert.equal((await rpc('reconcile_creator_job',{job_id:unresolved.id})).data.job.state,'needs_reconciliation');
+ const failed=await runningScan();await rpc('reserve_creator_attempt',attempt(failed.id,'profile',10));
+ await rpc('record_creator_attempt_outcome',{job_id:failed.id,key:'profile',terminal_state:'failed',failure_code:'http_5xx',http_status:503});
+ assert.equal((await rpc('reconcile_creator_job',{job_id:failed.id})).data.job.state,'failed');
+ const receipted=await runningScan();await rpc('reserve_creator_attempt',attempt(receipted.id,'profile',10));
+ await rpc('complete_creator_attempt',{job_id:receipted.id,key:'profile',receipt:{ok:true}});
+ assert.equal((await rpc('reconcile_creator_job',{job_id:receipted.id})).data.job.state,'failed');
 });
 test('per-job attempt ceiling, receipt size, expiry, and invalid provider pairs fail before new reservations',async()=>{
  const job=await runningScan();await db.exec('update public.creator_pipeline_budget set limit_microusd=1000');

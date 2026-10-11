@@ -31,6 +31,21 @@ async function setup() {
     project_id: '00000000-0000-4000-8000-000000000100', analysis });
   return { f, provider, guard, analysis, dna };
 }
+test('provider errors expose only the closed definite and ambiguous outcome taxonomy',()=>{
+  const cases=[
+    [new CreatorProviderError('transport',429,'http'),{terminal_state:'failed',failure_code:'http_4xx',http_status:429}],
+    [new CreatorProviderError('transport',503,'http'),{terminal_state:'failed',failure_code:'http_5xx',http_status:503}],
+    [new CreatorProviderError('transport',302,'http'),{terminal_state:'failed',failure_code:'http_other',http_status:302}],
+    [new CreatorProviderError('transport',200,'malformed'),{terminal_state:'failed',failure_code:'malformed_response',http_status:200}],
+    [new CreatorProviderError('schema_invalid',200),{terminal_state:'failed',failure_code:'schema_invalid',http_status:200}],
+    [new CreatorProviderError('transport',200,'oversized'),{terminal_state:'failed',failure_code:'oversized_response',http_status:200}],
+    [new CreatorProviderError('permission'),{terminal_state:'failed',failure_code:'permission',http_status:null}],
+    [new CreatorProviderError('unavailable'),{terminal_state:'failed',failure_code:'unavailable',http_status:null}],
+    [new CreatorProviderError('transport',null,'timeout'),{terminal_state:'needs_reconciliation',failure_code:'timeout',http_status:null}],
+    [new CreatorProviderError('transport',null,'network'),{terminal_state:'needs_reconciliation',failure_code:'network',http_status:null}],
+  ] as const;
+  for(const [error,expected] of cases)assert.deepEqual(error.outcome,expected);
+});
 test('offline full adapter chain uses guarded calls and validates shared envelopes and selection lineage', async () => {
   const { f, provider, guard, analysis, dna } = await setup();
   CreatorAnalysis.parse(analysis);
@@ -343,7 +358,7 @@ test('ambiguous fan-out dominates definite failures; otherwise first definite fa
   });
  }
 });
-test('wrapped ambiguous detail uses safe delimiters and dominates a definite failure',async()=>{
+test('legacy and lookalike ambiguous strings cannot dominate a structured definite failure',async()=>{
  const {dna}=await setup();
  for(const validDelimiter of [true,false]){
   const f=providerHttpFixture(),fallback=f.options.fetch,ids=['951','952','953'];
@@ -357,12 +372,12 @@ test('wrapped ambiguous detail uses safe delimiters and dominates a definite fai
    return base(key,provider,operation,execute);
   };
   await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>{
-   assert.equal((error as Error).message,validDelimiter?'creator_attempt_needs_reconciliation':'creator_provider_permission');
+   assert.equal((error as Error).message,'creator_provider_permission');
    assert.doesNotMatch((error as Error).message,/Workflow|private|secret/);return true;
   });
  }
 });
-test('bare and wrapped ambiguous prefix checkpoints dominate a definite detail failure',async()=>{
+test('strict internal ambiguous checkpoint markers dominate a definite detail failure',async()=>{
  const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch,ids=['941','942','943'];
  f.options.fetch=async(url,init)=>{
   const parsed=new URL(url);
@@ -379,8 +394,8 @@ test('bare and wrapped ambiguous prefix checkpoints dominate a definite detail f
    ?Promise.reject(new CreatorProviderError('permission')):baseCall(key,provider,operation,execute);
   guard.context.checkpoint=async(key,stage,progress)=>{
    if(key==='recommend:detail:941')throw wrapped
-    ?new Error('Workflow step failed: Error: creator_attempt_needs_reconciliation:creator_provider_transport_http_500\n    at private-secret')
-    :new PipelineRunError('needs_reconciliation','creator_provider_transport_http_500');
+    ?new Error('Workflow step failed: Error: creator_attempt_terminal:needs_reconciliation:network:null\nprivate runtime')
+    :new PipelineRunError('needs_reconciliation',{terminal_state:'needs_reconciliation',failure_code:'network',http_status:null});
    return baseCheckpoint(key,stage,progress);
   };
   await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>
@@ -557,7 +572,7 @@ test('provider failure retains only the truthful pre-call checkpoint',async()=>{
   calls++;if(new URL(url).pathname==='/v2/tiktok/video')throw new Error('detail transport failure');
   return setupResult.f.options.fetch(url,init);
  }});
- await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),/transport/);
+ await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),/reconciliation/);
  assert.deepEqual(recommendations.checkpoints.map(entry=>[entry.key,entry.stage]),[
   ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references']]);
  assert.deepEqual(recommendations.catalogs,[]);

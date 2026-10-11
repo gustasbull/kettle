@@ -1,5 +1,6 @@
 /** Offline only: fictional provider responses exercise live-adapter code paths, not real provider evidence. */
 import type { CreatorProviderContext } from '../../packages/contracts/creator-pipeline.ts';
+import { CreatorAttemptError } from '../../packages/contracts/creator-pipeline.ts';
 import type { CreatorPipelineAdapterOptions } from '../../packages/adapters/creator-pipeline/provider.ts';
 import { normalizedFixtureInput } from './normalized-fixture.ts';
 import { creatorScriptsFixture } from './pipeline-fixtures.ts';
@@ -13,10 +14,12 @@ export function fakeGuard() {
   const checkpointValues = new Map<string,string>();
   const checkpoints: {key:string;stage:string;progress:unknown}[]=[];
   const catalogs:{key:string;role:string;observations:unknown[]}[]=[];
+  const outcomes:{key:string;outcome:unknown}[]=[];
   const catalogValues=new Map<string,string>(),events:string[]=[];
   const context: CreatorProviderContext = {
     now: () => '2026-10-09T12:00:00.000Z',
     newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12,'0')}`,
+    async recordOutcome(key,outcome){outcomes.push({key,outcome:structuredClone(outcome)});throw new CreatorAttemptError(outcome);},
     async ingestCatalog(key,role,observations){const receiptKey=`${key}:${role}`,value=JSON.stringify(observations),existing=catalogValues.get(receiptKey);
       if(existing!==undefined){if(existing!==value)throw new Error('Synthetic catalog conflict');return;}
       catalogValues.set(receiptKey,value);catalogs.push({key,role,observations:structuredClone([...observations])});events.push(`catalog:${key}:${role}`);},
@@ -33,7 +36,7 @@ export function fakeGuard() {
       successes.set(key, structuredClone(result));events.push(`provider:${key}`); return result;
     },
   };
-  return { context, calls, successes, checkpoints, catalogs, events };
+  return { context, calls, successes, checkpoints, catalogs, outcomes, events };
 }
 export function providerHttpFixture() {
   const input = normalizedFixtureInput();

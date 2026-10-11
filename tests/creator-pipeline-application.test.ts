@@ -7,6 +7,7 @@ import { projectCreatorDna, type CreatorRepository } from '../packages/applicati
 import { creatorAnalysisFixture } from '../packages/contracts/fixtures/creator-profile.ts';
 import { creatorJobFixture, recommendationBatchFixture, creatorScriptsFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 import type { CreatorPipelineProvider, PipelineOperation } from '../packages/contracts/creator-pipeline.ts';
+import { CreatorAttemptError, type CreatorAttemptOutcomeInput } from '../packages/contracts/creator-pipeline.ts';
 import { TrustedCatalogObservation } from '../packages/contracts/riff-videos.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -181,10 +182,66 @@ test('repository failure and rejection are sanitized',async()=>{
 
 function guarded(reserve:unknown,complete:unknown={ok:true,data:{status:'completed',receipt:{allowed:'saved'}}},telemetry?:any) {
   const events:string[]=[],calls:{op:string;raw:any}[]=[];
-  const repository:PipelineRepository={async call(op,owner,raw){assert.equal(owner,account);calls.push({op,raw});events.push(op);if(op==='reserve_creator_attempt')return reserve;if(complete instanceof Error)throw complete;return complete;}};
+  const repository:PipelineRepository={async call(op,owner,raw){assert.equal(owner,account);calls.push({op,raw});events.push(op);if(op==='reserve_creator_attempt')return reserve;
+    if(op==='record_creator_attempt_outcome'){const value=raw as CreatorAttemptOutcomeInput;return {ok:true,data:{status:'recorded',outcome:{terminal_state:value.terminal_state,failure_code:value.failure_code,http_status:value.http_status,
+      provider:'scrapecreators',operation:'feed',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'}}};}
+    if(complete instanceof Error)throw complete;return complete;}};
   return {events,calls,context:createGuardedProviderContext(repository,stored(),ceilings,step,telemetry)};
 }
 const reservation=(status:string,receipt?:unknown)=>({ok:true,data:{status,...(receipt===undefined?{}:{receipt})}});
+const outcome=(terminal_state:'failed'|'needs_reconciliation',failure_code:CreatorAttemptOutcomeInput['failure_code'],http_status:number|null=null)=>
+  ({terminal_state,failure_code,http_status});
+
+test('guard persists structured definite and ambiguous outcomes outside the zero-retry provider step',async()=>{
+  for(const [descriptor,state] of [
+    [outcome('failed','http_4xx',404),'failed'],
+    [outcome('failed','schema_invalid',200),'failed'],
+    [outcome('needs_reconciliation','timeout'),'needs_reconciliation'],
+    [outcome('needs_reconciliation','network'),'needs_reconciliation'],
+  ] as const){
+    const calls:Array<{op:string;raw:any}>=[],steps:string[]=[];
+    const repository:PipelineRepository={async call(op,_owner,raw){calls.push({op,raw});
+      if(op==='reserve_creator_attempt')return reservation('acquired');
+      if(op==='record_creator_attempt_outcome')return {ok:true,data:{status:'recorded',outcome:{...descriptor,provider:'scrapecreators',operation:'profile',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'}}};
+      assert.fail(`unexpected ${op}`);
+    }};
+    const context=createGuardedProviderContext(repository,stored('scan','running'),ceilings,async(name,run)=>{steps.push(name);return run();});
+    await assert.rejects(context.call('profile','scrapecreators','profile',async()=>{throw new CreatorAttemptError(descriptor);}),
+      error=>error instanceof PipelineRunError&&error.state===state&&error.failureCode===descriptor.failure_code);
+    assert.deepEqual(steps,['provider:profile','attempt:outcome:profile']);
+    assert.equal(calls.filter(call=>call.op==='reserve_creator_attempt').length,1);
+    assert.equal(calls.filter(call=>call.op==='record_creator_attempt_outcome').length,1);
+    assert.equal(calls.filter(call=>call.op==='complete_creator_attempt').length,0);
+  }
+});
+
+test('guard replays durable outcomes without provider execution or a second outcome write',async()=>{
+  const storedOutcome={...outcome('failed','http_5xx',503),provider:'scrapecreators',operation:'profile',observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'};
+  const g=guarded({ok:true,data:{status:'definite_failure',outcome:storedOutcome}});
+  await assert.rejects(g.context.call('profile','scrapecreators','profile',async()=>assert.fail('execute')),
+    error=>error instanceof PipelineRunError&&error.state==='failed'&&error.failureCode==='http_5xx');
+  assert.deepEqual(g.calls.map(call=>call.op),['reserve_creator_attempt']);
+});
+
+test('arbitrary post-dispatch errors and unconfirmed receipt writes are conservatively classified',async()=>{
+  for(const [mode,code] of [['exception','unknown_after_dispatch'],['persistence','receipt_persistence_failed']] as const){
+    const calls:Array<{op:string;raw:any}>=[];
+    const repository:PipelineRepository={async call(op,_owner,raw){calls.push({op,raw});
+      if(op==='reserve_creator_attempt')return reservation('acquired');
+      if(op==='complete_creator_attempt')throw new Error('private storage detail');
+      if(op==='record_creator_attempt_outcome'){const value=raw as CreatorAttemptOutcomeInput;return {ok:true,data:{status:'recorded',outcome:{terminal_state:value.terminal_state,
+        failure_code:value.failure_code,http_status:value.http_status,provider:'openai',operation:'generate',
+        observed_at:'2026-10-11T00:00:00.000Z',recorded_at:'2026-10-11T00:00:00.000Z'}}};}
+      assert.fail(`unexpected ${op}`);
+    }};
+    const context=createGuardedProviderContext(repository,stored('scripts','running'),ceilings,step);
+    await assert.rejects(context.call('generate','openai','generate',async()=>{
+      if(mode==='exception')throw new Error('404 secret should not classify');
+      return {ok:true};
+    }),error=>error instanceof PipelineRunError&&error.state==='needs_reconciliation'&&error.failureCode===code);
+    assert.equal(calls.filter(call=>call.op==='record_creator_attempt_outcome').length,1);
+  }
+});
 
 test('guard reserves ceiling before I/O, saves allowlisted receipt and returns durable receipt',async()=>{
   const g=guarded(reservation('acquired'));
@@ -204,7 +261,9 @@ test('guard replays without I/O; ambiguous/denied reservations do not execute',a
 test('guard never retries execute exceptions, oversized receipts or completion failure',async()=>{
   for(const mode of ['execute','oversized','completion','invalid-completion']){
     const g=guarded(reservation('acquired'),mode==='completion'?Error('storage'):mode==='invalid-completion'?failure('UNAVAILABLE'):undefined);
-    let executions=0;await assert.rejects(g.context.call('generate','openai','generate',async()=>{executions++;if(mode==='execute')throw Error('provider secret');return mode==='oversized'?{text:'x'.repeat(300001)}:{allowed:'received'};}),e=>e instanceof PipelineRunError&&e.state==='needs_reconciliation');assert.equal(executions,1);
+    let executions=0;await assert.rejects(g.context.call('generate','openai','generate',async()=>{executions++;if(mode==='execute')throw Error('provider secret');return mode==='oversized'?{text:'x'.repeat(300001)}:{allowed:'received'};}),
+      e=>e instanceof PipelineRunError&&e.state===(mode==='oversized'?'failed':'needs_reconciliation')&&
+        e.failureCode===(mode==='oversized'?'oversized_response':mode==='execute'?'unknown_after_dispatch':'receipt_persistence_failed'));assert.equal(executions,1);
     assert.equal(g.calls.filter(c=>c.op==='reserve_creator_attempt').length,1);
     assert.equal(g.calls.filter(c=>c.op==='complete_creator_attempt').length,mode==='execute'||mode==='oversized'?0:1);
   }
@@ -373,19 +432,19 @@ test('saved ChatGPT variants enforce selected reference IDs and unique labels wi
   }
 });
 
-test('guard retains only enum-only provider diagnostics and redacts arbitrary exception text',async()=>{
+test('guard never classifies arbitrary provider-looking exception text as definite',async()=>{
   for(const diagnostic of ['creator_provider_transport_http_429','creator_provider_transport_oversized_200','creator_provider_malformed','creator_provider_permission','creator_provider_unavailable_404']){
     const g=guarded(reservation('acquired'));
     await assert.rejects(g.context.call('feed:0','scrapecreators','feed',async()=>{throw new Error(diagnostic);}),error=>{
-      assert.ok(error instanceof PipelineRunError);assert.equal(error.diagnostic,diagnostic);
-      assert.equal(error.message,`creator_attempt_needs_reconciliation:${diagnostic}`);return true;
+      assert.ok(error instanceof PipelineRunError);assert.equal(error.failureCode,'unknown_after_dispatch');
+      assert.equal(error.state,'needs_reconciliation');return true;
     });
   }
   for(const unsafe of ['secret API key','creator_provider_transport_http_429 secret','creator_provider_transport_http_600','creator_provider_transport_http_200_secret','creator_provider_newreason_500','creator_provider_transport_http_200\nsecret','creator_provider_transport_http_200\n','prefix creator_provider_transport_http_500']){
     const g=guarded(reservation('acquired'));
     await assert.rejects(g.context.call('feed:0','scrapecreators','feed',async()=>{throw new Error(unsafe);}),error=>{
-      assert.ok(error instanceof PipelineRunError);assert.equal(error.diagnostic,undefined);
-      assert.equal(error.message,'creator_attempt_needs_reconciliation');return true;
+      assert.ok(error instanceof PipelineRunError);assert.equal(error.failureCode,'unknown_after_dispatch');
+      assert.equal(error.state,'needs_reconciliation');return true;
     });
     assert.equal(new PipelineRunError('needs_reconciliation',unsafe).diagnostic,undefined);
   }
@@ -416,24 +475,21 @@ test('application, provider guard, queue wall time, and terminal save expose onl
   assert.doesNotMatch(JSON.stringify(events),/private_input|private_snapshot|provider diagnostics|account_id|source_url/i);
 });
 
-test('runner preserves sanitized diagnostic through Workflow error wrapping but public results remain generic',async()=>{
+test('runner preserves only a strictly wrapped serialized outcome and rejects marker lookalikes',async()=>{
   const r=runner('scan');
-  const oldCall=r.repository.call;
-  r.repository.call=async(op,owner,input)=>op==='reserve_creator_attempt'?reservation('acquired'):oldCall(op,owner,input);
-  r.provider.scan=async(_request,context)=>context.call('feed:0','scrapecreators','feed',async()=>{throw new Error('creator_provider_transport_oversized_200');}) as never;
-  const wrapped:DurableStep=async(name,run)=>{
-    try{return await run();}catch(error){
-      if(name.startsWith('provider:'))throw new Error(`Workflow step failed: Error: ${(error as Error).message}\nAdditional private runtime context`);
-      throw error;
-    }
-  };
-  await runCreatorPipelineJob(r.repository,r.creatorRepository,account,r.job.id,()=>r.provider,ceilings,wrapped);
+  r.provider.scan=async()=>{throw new Error('Workflow step failed: Error: creator_attempt_terminal:needs_reconciliation:timeout:null\nAdditional private runtime context');};
+  await r.run();
   assert.equal(r.finishes.length,1);
   assert.equal(r.finishes[0].state,'needs_reconciliation');
-  assert.equal(r.finishes[0].message,'needs_reconciliation:creator_provider_transport_oversized_200');
+  assert.equal(r.finishes[0].message,'needs_reconciliation:timeout');
   const view=publicCreatorJob({...r.job,...r.finishes[0]});
   assert.doesNotMatch(JSON.stringify(view),/creator_provider|private runtime/);
   assert.match(view.message!,/No automatic resubmission/);
+  for(const lookalike of ['prefix creator_attempt_terminal:failed:http_4xx:404','creator_attempt_terminal:failed:http_4xx:404 suffix',
+    'Workflow: Error: creator_attempt_terminal:failed:http_4xx:404']){
+    const next=runner();next.provider.recommend=async()=>{throw new Error(lookalike);};await next.run();
+    assert.equal(next.finishes[0].message,'failed');
+  }
 });
 
 test('runner does not persist raw provider or Workflow exception details',async()=>{
@@ -441,11 +497,11 @@ test('runner does not persist raw provider or Workflow exception details',async(
     'Workflow: creator_attempt_needs_reconciliation:creator_provider_transport_http_500_secret',
     'Workflow: creator_attempt_needs_reconciliation:creator_provider_unknown_http_500']){
     const r=runner();r.provider.recommend=async()=>{throw new Error(message);};await r.run();
-    assert.equal(r.finishes[0].message,message.includes('creator_attempt_needs_reconciliation')?'needs_reconciliation':'failed');
+    assert.equal(r.finishes[0].message,'failed');
     assert.ok(!r.finishes[0].message.includes('secret'));
   }
   const r=runner();r.provider.recommend=async()=>{throw new Error('creator_provider_permission');};await r.run();
-  assert.equal(r.finishes[0].message,'failed:creator_provider_permission');
+  assert.equal(r.finishes[0].message,'failed');
   assert.doesNotMatch(JSON.stringify(publicCreatorJob({...r.job,...r.finishes[0]})),/creator_provider/);
 });
 
