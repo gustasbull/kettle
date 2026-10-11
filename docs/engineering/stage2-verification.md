@@ -180,7 +180,7 @@ remain product inputs. Billing and public distribution remain separate later wor
 Task 9 added a strict, import-safe creator-latency benchmark. The final combined
 source revision passed these local commands:
 
-- `npm run check`: TypeScript, 516 Node tests, the dry-run Worker build, local
+- `npm run check`: TypeScript, 518 Node tests, the dry-run Worker build, local
   workerd smoke, and 77 real-browser tests.
 - `npm run test:db`: 13/13 tests against the actual migrations in PGlite.
 - `npm run benchmark:creator -- --fixture`: one validated fixture/local-process
@@ -220,6 +220,6 @@ separately authorized.
 | Hosted development deployment and served fingerprint | Not performed; a local or dry-run fingerprint is not hosted evidence. |
 | ChatGPT install/onboarding in both fresh and existing conversations | Unverified. |
 | Dedicated `_meta.ui.domain` for UI submission | Missing; remains a submission gate outside Task 9. |
-| Local manifest/MCP wire and schema validation | Complete: all-capability `tools/list` is 246,160 bytes; 22 output schemas compiled as JSON Schema 2020-12 and all 1,313 local `$ref` values resolved. |
+| Local manifest/MCP wire and schema validation | Complete: all-capability `tools/list` is 43,828 bytes against a 65,536-byte ceiling; all 22 tools advertise output schemas, with compact success/failure discovery envelopes for operation tools and complete tool-specific validation retained at runtime. |
 | Official hosted/submission validation | Unverified; the local compatibility audit is not a hosted ChatGPT submission result. |
 | Development canary or production promotion | Not authorized; O01, O05, and O06 remain open gates. |

@@ -90,7 +90,7 @@ made no provider or hosted-database call, and performed no deployment.
 
 The final combined local gate also passed on the same source revision:
 
-- `npm run check`: typecheck, 514 Node tests, dry-run Worker build, local
+- `npm run check`: typecheck, 518 Node tests, dry-run Worker build, local
   workerd smoke, and 77 real-browser tests.
 - `npm run test:db`: 13/13 migration and database tests in PGlite.
 - `git diff --check`: clean.
@@ -101,9 +101,12 @@ unavailable until a pre-provisioned development allocation, approved canonical
 inputs, and a trusted operator endpoint are separately authorized.
 
 The final local MCP wire audit serialized the all-capabilities `tools/list` at
-246,160 bytes. All 22 output schemas compiled as JSON Schema 2020-12 and all
-1,313 local `$ref` values resolved within their owning schema. This is local
-compatibility evidence, not a hosted ChatGPT submission result.
+43,828 bytes, below the enforced 65,536-byte refresh ceiling. All 22 tools keep
+an output schema: operation tools publish the stable success/failure result
+envelope, while the small diagnostic, welcome, and profile results remain exact.
+Complete tool-specific results continue to be validated by the runtime and
+application contracts. This is local compatibility evidence, not a hosted
+ChatGPT submission result.
 
 The authored fixture contains 57 observations. Ten exact timing groups have five
 successful observations each, so the nearest-rank implementation reports fixture
