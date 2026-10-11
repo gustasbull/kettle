@@ -1,12 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipeline/provider.ts';
+import { createCreatorPipelineProvider, CreatorProviderError } from '../packages/adapters/creator-pipeline/provider.ts';
 import { fakeGuard, providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
 import { projectCreatorDna } from '../packages/application/creator-operations.ts';
 import { CreatorAnalysis } from '../packages/contracts/creator-profile.ts';
 import { RecommendationBatch, CreatorScriptSet } from '../packages/contracts/creator-pipeline.ts';
 import { creatorScriptsFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 import { creatorDnaViewFixture } from '../evals/creator-loop/dna-view-fixtures.ts';
+import { PipelineRunError } from '../packages/application/creator-pipeline.ts';
+
+function deferred<T>() {
+  let resolve!:(value?:T)=>void,reject!:(reason?:unknown)=>void;
+  const promise=new Promise<T>((res,rej)=>{resolve=value=>res(value as T);reject=rej;});
+  return {promise,resolve,reject};
+}
+async function waitFor(check:()=>boolean,timeoutMs=500) {
+  const start=performance.now();
+  while(!check()){
+    if(performance.now()-start>timeoutMs)throw new Error('fixture wait timed out');
+    await new Promise<void>(resolve=>setTimeout(resolve,1));
+  }
+}
 
 async function setup() {
   const f = providerHttpFixture();
@@ -228,6 +242,128 @@ test('history-supplied identities use the accepting history receipt timestamp',a
  const identities=(guard.checkpoints.find(entry=>entry.key==='recommend:identities')!.progress as any).identities;
  assert.equal(identities[0].retrieved_at,history);
  assert.notEqual(identities[0].retrieved_at,submission);
+});
+
+test('recommendation detail fan-out starts three guarded calls before any resolves and preserves Lightreel order',async()=>{
+ const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch;
+ const ids=['901','902','903'],gates=Object.fromEntries(ids.map(id=>[id,deferred<void>()]));
+ const started:string[]=[],finished:string[]=[];let inFlight=0,maxInFlight=0;
+ f.options.fetch=async(url,init)=>{
+  const parsed=new URL(url);
+  if(parsed.hostname==='api.lightreel.ai')return Response.json({conversationId:'fanout',answer:{urls:ids.map(id=>`https://www.tiktok.com/@fictional_kettle_creator/video/${id}`)}});
+  if(parsed.pathname==='/v2/tiktok/video'){
+   const id=parsed.searchParams.get('url')!.split('/').at(-1)!;started.push(id);inFlight++;maxInFlight=Math.max(maxInFlight,inFlight);
+   await gates[id]!.promise;finished.push(id);inFlight--;
+   const response=await fallback(url,init),body=await response.json() as any;body.aweme_detail.aweme_id=id;body.aweme_detail.desc=`Fixture ${id}`;
+   return Response.json(body);
+  }
+  return fallback(url,init);
+ };
+ const guard=fakeGuard(),pending=createCreatorPipelineProvider(f.options).recommend(dna,guard.context);
+ try{
+  await waitFor(()=>started.length===3);assert.deepEqual(started,ids);assert.equal(inFlight,3);assert.equal(maxInFlight,3);
+  for(const id of ['903','901','902']){gates[id]!.resolve();await waitFor(()=>finished.includes(id));}
+  const batch=await pending;
+  assert.deepEqual(finished,['903','901','902']);assert.deepEqual(batch.references.map(reference=>reference.native_id),ids);
+  assert.deepEqual(batch.ideas.map(idea=>idea.reference_ids),batch.references.map(reference=>[reference.id]));
+  assert.deepEqual(guard.calls.map(call=>call.key),['research',...ids.map(id=>`video:${id}`)]);
+  assert.deepEqual(guard.checkpoints.filter(entry=>entry.key.startsWith('recommend:detail:')).map(entry=>[entry.key,(entry.progress as any).references.map((card:any)=>card.native_id)]),[
+   ['recommend:detail:901',['901']],['recommend:detail:902',['901','902']],['recommend:detail:903',ids],
+  ]);
+  await createCreatorPipelineProvider(f.options).recommend(dna,guard.context);
+  assert.deepEqual(started,ids,'durable replay performs no duplicate detail HTTP');
+ }finally{for(const gate of Object.values(gates))gate.resolve();await pending.catch(()=>undefined);}
+});
+
+test('recommendation candidates deduplicate native IDs before reserving detail attempts',async()=>{
+ const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch;
+ f.options.fetch=async(url,init)=>{
+  const parsed=new URL(url);
+  if(parsed.hostname==='api.lightreel.ai')return Response.json({conversationId:'native-dedupe',answer:{urls:[
+   'https://www.tiktok.com/@fictional_kettle_creator/video/931',
+   'https://www.tiktok.com/@alternate_handle/video/931',
+   'https://www.tiktok.com/@fictional_kettle_creator/video/932',
+  ]}});
+  if(parsed.pathname==='/v2/tiktok/video'){
+   const id=parsed.searchParams.get('url')!.split('/').at(-1)!;
+   const response=await fallback(url,init),body=await response.json() as any;body.aweme_detail.aweme_id=id;return Response.json(body);
+  }
+  return fallback(url,init);
+ };
+ const guard=fakeGuard(),batch=await createCreatorPipelineProvider(f.options).recommend(dna,guard.context);
+ assert.deepEqual(guard.calls.map(call=>call.key),['research','video:931','video:932']);
+ assert.deepEqual(batch.references.map(reference=>reference.native_id),['931','932']);
+});
+
+test('failed concurrent detail waits for siblings, never retries, and replays successful receipts',async()=>{
+ const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch;
+ const ids=['911','912','913'],gates=Object.fromEntries(ids.map(id=>[id,deferred<void>()])),counts:Record<string,number>={};
+ f.options.fetch=async(url,init)=>{
+  const parsed=new URL(url);
+  if(parsed.hostname==='api.lightreel.ai')return Response.json({conversationId:'fanout-failure',answer:{urls:ids.map(id=>`https://www.tiktok.com/@fictional_kettle_creator/video/${id}`)}});
+  if(parsed.pathname==='/v2/tiktok/video'){
+   const id=parsed.searchParams.get('url')!.split('/').at(-1)!;counts[id]=(counts[id]??0)+1;await gates[id]!.promise;
+   if(id==='912')throw new Error('private transport detail');
+   const response=await fallback(url,init),body=await response.json() as any;body.aweme_detail.aweme_id=id;return Response.json(body);
+  }
+  return fallback(url,init);
+ };
+ const guard=fakeGuard(),guarded=guard.context.call.bind(guard.context);
+ guard.context.call=async(key,provider,operation,execute)=>{try{return await guarded(key,provider,operation,execute);}
+  catch(error){if(key.startsWith('video:'))throw new PipelineRunError('needs_reconciliation');throw error;}};
+ const provider=createCreatorPipelineProvider(f.options),first=provider.recommend(dna,guard.context);
+ await waitFor(()=>Object.keys(counts).length===3);for(const gate of Object.values(gates))gate.resolve();
+ await assert.rejects(first,error=>error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
+ assert.deepEqual(counts,{911:1,912:1,913:1});assert.ok(guard.successes.has('video:911'));assert.ok(guard.successes.has('video:913'));
+ await assert.rejects(provider.recommend(dna,guard.context),/creator_attempt_needs_reconciliation/);
+ assert.deepEqual(counts,{911:1,912:1,913:1},'re-entry replays siblings and never repeats unresolved HTTP');
+ assert.deepEqual(guard.checkpoints.filter(entry=>entry.key.startsWith('recommend:detail:')).map(entry=>entry.key),['recommend:detail:911']);
+ assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
+});
+
+test('ambiguous fan-out dominates definite failures; otherwise first definite failure wins safely',async()=>{
+ const {dna}=await setup();
+ for(const ambiguous of [true,false]){
+  const f=providerHttpFixture(),fallback=f.options.fetch,ids=['921','922','923'];
+  f.options.fetch=async(url,init)=>new URL(url).hostname==='api.lightreel.ai'
+   ?Response.json({conversationId:'fanout-errors',answer:{urls:ids.map(id=>`https://www.tiktok.com/@fictional_kettle_creator/video/${id}`)}})
+   :fallback(url,init);
+  const guard=fakeGuard(),base=guard.context.call.bind(guard.context),started:string[]=[];
+  guard.context.call=async(key,provider,operation,execute)=>{
+   if(!key.startsWith('video:'))return base(key,provider,operation,execute);
+   started.push(key);
+   if(key==='video:921')throw new CreatorProviderError('permission');
+   if(key==='video:922')throw ambiguous?new PipelineRunError('needs_reconciliation','creator_provider_transport_http_500'):new CreatorProviderError('unavailable');
+   return base(key,provider,operation,execute);
+  };
+  await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>{
+   assert.deepEqual(started,ids.map(id=>`video:${id}`));
+   assert.equal((error as Error).message,ambiguous?'creator_attempt_needs_reconciliation':'creator_provider_permission');
+   assert.doesNotMatch((error as Error).message,/private|secret/);return true;
+  });
+ }
+});
+test('ambiguous prefix checkpoint dominates a definite detail failure',async()=>{
+ const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch,ids=['941','942','943'];
+ f.options.fetch=async(url,init)=>{
+  const parsed=new URL(url);
+  if(parsed.hostname==='api.lightreel.ai')return Response.json({conversationId:'checkpoint-ambiguity',answer:{urls:ids.map(id=>`https://www.tiktok.com/@fictional_kettle_creator/video/${id}`)}});
+  if(parsed.pathname==='/v2/tiktok/video'){
+   const id=parsed.searchParams.get('url')!.split('/').at(-1)!;
+   const response=await fallback(url,init),body=await response.json() as any;body.aweme_detail.aweme_id=id;return Response.json(body);
+  }
+  return fallback(url,init);
+ };
+ const guard=fakeGuard(),baseCall=guard.context.call.bind(guard.context),baseCheckpoint=guard.context.checkpoint.bind(guard.context);
+ guard.context.call=async(key,provider,operation,execute)=>key==='video:942'
+  ?Promise.reject(new CreatorProviderError('permission')):baseCall(key,provider,operation,execute);
+ guard.context.checkpoint=async(key,stage,progress)=>{
+  if(key==='recommend:detail:941')throw new PipelineRunError('needs_reconciliation','creator_provider_transport_http_500');
+  return baseCheckpoint(key,stage,progress);
+ };
+ await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>
+  error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
+ assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
 });
 test('missing research ID and HTTP failures stop after one call and keep raw diagnostics out of errors', async () => {
   const { dna } = await setup(); const f = providerHttpFixture();

@@ -9,6 +9,8 @@ import { creatorJobFixture, recommendationBatchFixture, creatorScriptsFixture } 
 import type { CreatorPipelineProvider, PipelineOperation } from '../packages/contracts/creator-pipeline.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}
+async function waitFor(check:()=>boolean){while(!check())await new Promise<void>(resolve=>setTimeout(resolve,1));}
 const account=id(800), request=id(801);
 const ceilings={scrapecreators:1000,lightreel:2000,openai:3000};
 const step:DurableStep=async(_name,run)=>run();
@@ -205,6 +207,32 @@ test('guard never retries execute exceptions, oversized receipts or completion f
     assert.equal(g.calls.filter(c=>c.op==='reserve_creator_attempt').length,1);
     assert.equal(g.calls.filter(c=>c.op==='complete_creator_attempt').length,mode==='execute'||mode==='oversized'?0:1);
   }
+});
+
+test('parallel stable video keys retain independent reservation and receipt boundaries',async()=>{
+ const job=stored('recommendations','running'),steps:string[]=[],calls:Array<{op:string;raw:any}>=[],gates=['901','902','903'].map(()=>deferred<void>());
+ let executing=0,maxExecuting=0;
+ const repository:PipelineRepository={async call(op,_owner,raw){calls.push({op,raw});return op==='reserve_creator_attempt'
+  ?reservation('acquired'):{ok:true,data:{status:'completed',receipt:{native_id:(raw as any).key.split(':')[1]}}};}};
+ const context=createGuardedProviderContext(repository,job,ceilings,async(name,run)=>{steps.push(name);return run();});
+ const pending=['901','902','903'].map((id,index)=>context.call(`video:${id}`,'scrapecreators','video',async()=>{
+  executing++;maxExecuting=Math.max(maxExecuting,executing);await gates[index]!.promise;executing--;return {native_id:id};
+ }));
+ await waitFor(()=>executing===3);assert.equal(maxExecuting,3);gates[2]!.resolve();gates[0]!.resolve();gates[1]!.resolve();
+ assert.deepEqual(await Promise.all(pending),[{native_id:'901'},{native_id:'902'},{native_id:'903'}]);
+ assert.deepEqual(steps,['provider:video:901','provider:video:902','provider:video:903']);
+ assert.deepEqual(calls.filter(call=>call.op==='reserve_creator_attempt').map(call=>call.raw),['901','902','903'].map(id=>({
+  job_id:job.id,key:`video:${id}`,provider:'scrapecreators',operation:'video',ceiling_microusd:ceilings.scrapecreators,
+ })));
+ assert.deepEqual(calls.filter(call=>call.op==='complete_creator_attempt').map(call=>call.raw.key),['video:903','video:901','video:902']);
+});
+
+test('concurrent reservation denials execute no provider work and create no receipts',async()=>{
+ let executions=0;const calls:string[]=[];
+ const context=createGuardedProviderContext({async call(op){calls.push(op);return failure('FORBIDDEN');}},stored('recommendations','running'),ceilings,step);
+ const results=await Promise.allSettled(['901','902','903'].map(id=>context.call(`video:${id}`,'scrapecreators','video',async()=>{executions++;return {};})));
+ assert.ok(results.every(result=>result.status==='rejected'&&result.reason instanceof PipelineRunError&&result.reason.state==='failed'));
+ assert.equal(executions,0);assert.deepEqual(calls,['reserve_creator_attempt','reserve_creator_attempt','reserve_creator_attempt']);
 });
 
 test('invalid guard keys and ceilings fail before reservation or execution',async()=>{

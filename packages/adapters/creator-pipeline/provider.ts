@@ -35,6 +35,10 @@ export class CreatorProviderError extends Error {
     super(`creator_provider_${safeCode}${safeFailure}${safeStatus}`);
   }
 }
+const safeProviderDiagnosticPattern='creator_provider_(?:transport|malformed|permission|unavailable)(?:_(?:timeout|network|oversized|malformed|http))?(?:_[1-5]\\d\\d)?';
+const ambiguousAttemptPattern=new RegExp(`^creator_attempt_needs_reconciliation(?::${safeProviderDiagnosticPattern})?$`);
+const blockedAttemptPattern=new RegExp(`^creator_job_blocked(?::${safeProviderDiagnosticPattern})?$`);
+const isAmbiguousAttempt=(error:unknown)=>error instanceof Error&&ambiguousAttemptPattern.test(error.message);
 export type CreatorPipelineAdapterOptions = {
   fetch: Fetch;
   credentials: { scrapeCreators: string; lightreel: string; openai?: string };
@@ -247,9 +251,16 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         if(result.urls!==null)acceptedResearch=history;
       }
       if (result.urls === null) throw new CreatorProviderError('unavailable');
-      const identities=result.urls.map(url=>{const parsed=parseTikTokUrl(url);return {platform:'tiktok' as const,
-        native_id:parsed.videoId!,url,retrieved_at:acceptedResearch.retrieved_at,origin:'live' as const,
-        permission_basis:permission.basis.slice(0,1000),limitations:[]};});
+      let candidates:Array<{url:string;nativeId:string}>;
+      try {
+        candidates=result.urls.map(url=>{const parsed=parseTikTokUrl(url);if(!parsed.videoId)throw new Error('Missing video ID');
+          return {url:parsed.canonicalUrl,nativeId:parsed.videoId};});
+      } catch { throw new CreatorProviderError('malformed'); }
+      if(candidates.length>3||new Set(candidates.map(candidate=>candidate.nativeId)).size!==candidates.length)
+        throw new CreatorProviderError('malformed');
+      const identities=candidates.map(({url,nativeId})=>({platform:'tiktok' as const,
+        native_id:nativeId,url,retrieved_at:acceptedResearch.retrieved_at,origin:'live' as const,
+        permission_basis:permission.basis.slice(0,1000),limitations:[]}));
       let recommendationProgress:z.infer<typeof CreatorJobProgress>={kind:'recommendations',identities,references:[],limitations:[]};
       await context.checkpoint('recommend:identities','enriching_references',recommendationProgress);
       const references: RecommendationBatch['references'] = [];
@@ -258,8 +269,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const medianViews = observedViews.length === 0 ? undefined : observedViews.length % 2 === 1
         ? observedViews[Math.floor(observedViews.length / 2)]!
         : (observedViews[observedViews.length / 2 - 1]! + observedViews[observedViews.length / 2]!) / 2;
-      for (const url of result.urls) {
-        const nativeId = parseTikTokUrl(url).videoId!;
+      const settled=await Promise.allSettled(candidates.map(async({url,nativeId})=>{
         const r = await call(context, `video:${nativeId}`, 'scrapecreators', 'video',
           detailRequest(url, options.region, cacheMaxAge.detail), undefined,
           body => {
@@ -272,7 +282,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const { observation: o } = readTikTokDetail(r.body, url, r.id, provenance(r, '/v2/tiktok/video', url));
         const multiplier = medianViews !== undefined && o.metrics.views !== null
           ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
-        references.push({ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
+        const reference:RecommendationBatch['references'][number]={ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
           retrieved_at: o.provenance.retrieved_at,
           source_observed_at: o.provenance.source_observed_at, published_at: o.published_at,
           caption: o.caption, views: o.metrics.views,
@@ -286,10 +296,29 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
           limitations: ['Caption and metadata only; no visual or pacing analysis.',
             'Views are an observation, not evidence of causal success or expected results.',
             ...(multiplier !== undefined ? [`View multiplier compares observed views with the median of ${observedViews.length} displayed profile observation${observedViews.length === 1 ? '' : 's'}; it is not a performance prediction.`] : []),
-            o.provenance.source_observed_at ? `Provider cache observation time: ${o.provenance.source_observed_at}.` : 'Source observation time is unknown; retrieval time does not establish metric freshness.'] });
-        recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(o)]};
-        await context.checkpoint(`recommend:detail:${nativeId}`,'enriching_references',recommendationProgress);
+            o.provenance.source_observed_at ? `Provider cache observation time: ${o.provenance.source_observed_at}.` : 'Source observation time is unknown; retrieval time does not establish metric freshness.'] };
+        return {observation:o,reference};
+      }));
+      const firstAmbiguous=settled.find(result=>result.status==='rejected'&&isAmbiguousAttempt(result.reason));
+      const firstDefinite=settled.find(result=>result.status==='rejected');
+      let checkpointFailure:unknown;
+      for(let index=0;index<settled.length;index++){
+        const result=settled[index]!;
+        if(result.status==='rejected')break;
+        references.push(result.value.reference);
+        recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(result.value.observation)]};
+        try {await context.checkpoint(`recommend:detail:${candidates[index]!.nativeId}`,'enriching_references',recommendationProgress);}
+        catch(error){checkpointFailure=error;break;}
       }
+      if(firstAmbiguous||isAmbiguousAttempt(checkpointFailure))throw new Error('creator_attempt_needs_reconciliation');
+      if(firstDefinite&&firstDefinite.status==='rejected'){
+        const error=firstDefinite.reason;
+        if(error instanceof CreatorProviderError)throw new CreatorProviderError(error.code,error.status,error.failure);
+        if(error instanceof Error&&blockedAttemptPattern.test(error.message))
+          throw new Error(error.message);
+        throw new CreatorProviderError('unavailable');
+      }
+      if(checkpointFailure)throw checkpointFailure;
       const batch=buildRecommendations(dna, references, { newId: await receiptIds(acceptedResearch.id, 5), now: () => acceptedResearch.retrieved_at });
       await context.checkpoint('recommend:save','saving',recommendationProgress);
       return batch;

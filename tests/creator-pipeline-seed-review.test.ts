@@ -47,6 +47,20 @@ test('exact supplied video is reviewed before SC calls, with allowlisted guarded
   assert.deepEqual(await provider.scan(f.input.request,guard.context),analysis);assert.equal(seedCalls,1);
  }
 });
+test('held supplied-video review releases before any ScrapeCreators work begins',async()=>{
+ const f=setup(),guard=fakeGuard(),fallback=f.options.fetch,release=deferred<void>(),started=deferred<void>();
+ let scrapeCalls=0;
+ const provider=createCreatorPipelineProvider({...f.options,seedUrl:f.seedUrl,fetch:async(url,init)=>{
+  if(new URL(url).hostname==='api.lightreel.ai'){started.resolve();await release.promise;return Response.json({conversationId:'held-seed',answer:f.answer});}
+  scrapeCalls++;return fallback(url,init);
+ }});
+ const pending=provider.scan(f.input.request,guard.context);await started.promise;
+ assert.equal(scrapeCalls,0);assert.deepEqual(guard.calls.map(call=>call.key),['seed-review']);
+ release.resolve();await pending;
+ assert.deepEqual(guard.calls.map(call=>call.key),['seed-review','profile','feed:0']);assert.equal(scrapeCalls,2);
+});
+
+function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}
 test('seed parser rejects wrong source, missing identity, invalid enums and bounds; strips arbitrary fields',()=>{
  const f=setup();
  assert.deepEqual(readLightreelSeedReview(JSON.stringify({conversationId:'valid',answer:{...f.answer,secret:'drop'}}),f.seedUrl),{conversationId:'valid',answer:f.answer});
