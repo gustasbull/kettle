@@ -144,7 +144,12 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     promise.then(value => finish({ status: 'resolved', value }), reason => finish({ status: 'rejected', reason }));
   });
 
-  const callToolUnmeasured = async (name: string, args: Record<string, unknown>, deadlineMs = toolTimeoutMs): Promise<ToolCallOutcome> => {
+  const callToolUnmeasured = async (
+    name: string,
+    args: Record<string, unknown>,
+    deadlineMs = toolTimeoutMs,
+    interpretApplicationErrors = true,
+  ): Promise<ToolCallOutcome> => {
     if (!connected) return { status: 'transport_error', diagnostic: 'transport_error' };
     try {
       let value: unknown;
@@ -154,6 +159,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         const outcome = await withDeadline(window.openai.callTool(name, args), deadlineMs);
         if (outcome.status === 'timeout') return { status: 'timeout', diagnostic: 'timeout' };
         if (outcome.status === 'rejected') {
+          if (!interpretApplicationErrors) return { status: 'transport_error', diagnostic: 'transport_error' };
           const failure = rejectedFailure(outcome.reason);
           return failure
             ? { status: 'application_error', failure, diagnostic: 'host_rejected_error' }
@@ -162,11 +168,14 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         value = outcome.value;
       }
       if (value === undefined) return { status: 'transport_error', diagnostic: 'transport_error' };
-      const failure = readFailure(value);
+      const failure = interpretApplicationErrors ? readFailure(value) : undefined;
       return failure
         ? { status: 'application_error', failure, diagnostic: 'returned_error' }
         : { status: 'response', value, diagnostic: 'success' };
     } catch (error) {
+      if (!interpretApplicationErrors) return object(error)?.code === MCP_REQUEST_TIMEOUT
+        ? { status: 'timeout', diagnostic: 'timeout' }
+        : { status: 'transport_error', diagnostic: 'transport_error' };
       const failure = rejectedFailure(error);
       if (failure) return { status: 'application_error', failure, diagnostic: 'host_rejected_error' };
       return object(error)?.code === MCP_REQUEST_TIMEOUT
@@ -174,12 +183,19 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         : { status: 'transport_error', diagnostic: 'transport_error' };
     }
   };
-  const callTool = async (name: string, args: Record<string, unknown>, deadlineMs = toolTimeoutMs): Promise<ToolCallOutcome> => {
+  const callTool = async (
+    name: string,
+    args: Record<string, unknown>,
+    deadlineMs = toolTimeoutMs,
+    interpretApplicationErrors = true,
+  ): Promise<ToolCallOutcome> => {
     const finish = localPerformance.start('tool_call');
-    const outcome = await callToolUnmeasured(name, args, deadlineMs);
+    const outcome = await callToolUnmeasured(name, args, deadlineMs, interpretApplicationErrors);
     finish(outcome.status === 'timeout' ? 'timeout' : outcome.status === 'response' ? 'ok' : 'error');
     return outcome;
   };
+  const callProductTool = (name: 'save_project' | 'get_project', args: Record<string, unknown>) =>
+    callTool(name, args, toolTimeoutMs, false);
 
   const send = async (prompt: string) => {
     if (!connected) return {
@@ -277,10 +293,11 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       }
       const pending = productSaveRequest;
       const epoch = ++actionEpoch;
-      const outcome = await callTool('save_project', pending.input);
+      const outcome = await callProductTool('save_project', pending.input);
       if (disposed || epoch !== actionEpoch || activeAccountId !== accountId) return {
         status: 'failed', message: 'A newer Riff account or action is already shown.',
       };
+      let failure: SafeFailure | undefined;
       if (outcome.status === 'response') {
         const parsed = parseProductSaveResult(outcome.value, pending.input);
         if (parsed.status === 'saved') {
@@ -289,22 +306,17 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
           return parsed;
         }
         if (parsed.status === 'failure') {
-          if (parsed.failure.code === 'IDEMPOTENCY_CONFLICT') {
-            if (productSaveRequest === pending) productSaveRequest = undefined;
-            blockedProductIntentKey = intentKey;
-          }
-          return { status: 'failed', message: productFailureMessage(parsed.failure.code) };
+          failure = parsed.failure;
+        } else {
+          return { status: 'failed', message: productFailureMessage('MALFORMED') };
         }
+      } else {
         return { status: 'failed', message: productFailureMessage('MALFORMED') };
       }
-      if (outcome.status !== 'application_error') {
-        return { status: 'failed', message: productFailureMessage('MALFORMED') };
-      }
-      const failure = outcome.failure;
       if ((failure.code === 'VERSION_CONFLICT' || failure.code === 'NOT_FOUND') && context.project) {
         if (productSaveRequest === pending) productSaveRequest = undefined;
         const trustedProjectId = context.project.id;
-        const reread = await callTool('get_project', { project_id: trustedProjectId });
+        const reread = await callProductTool('get_project', { project_id: trustedProjectId });
         if (disposed || epoch !== actionEpoch || activeAccountId !== accountId) return {
           status: 'failed', message: 'A newer Riff account or action is already shown.',
         };

@@ -944,12 +944,26 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
     const make=(args,version=args.expected_version+1)=>{const id=args.project_id??'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';return {id,name:args.name,project_type:'brand',current_version:version,
       created_at:'2026-10-11T10:00:00Z',updated_at:'2026-10-11T11:00:00Z',brief_version:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',project_id:id,version,name:args.name,
       brief:structuredClone(args.brief),created_at:'2026-10-11T11:00:00Z'}}};
+    const failure=code=>({ok:false,error:{code,message:'private',retryable:false,recovery:'reload'}});
+    const spoof=(mode)=>{const code=/notfound/i.test(mode)?'NOT_FOUND':'VERSION_CONFLICT';const inner=failure(code);
+      if(mode==='directConflict')return inner;
+      if(mode==='unknownNotFound')return {structuredContent:inner,extra:true};
+      if(mode==='accessorConflict')return Object.defineProperty({},'structuredContent',{get:()=>inner,enumerable:true});
+      if(mode==='symbolNotFound')return {structuredContent:inner,[Symbol('smuggled')]:true};
+      if(mode==='hiddenConflict')return Object.defineProperty({structuredContent:inner},'hidden',{value:true});
+      if(mode==='invalidIsErrorNotFound')return {structuredContent:inner,isError:'true'};
+      if(mode==='undefinedContentConflict')return {structuredContent:inner,content:undefined};
+      if(mode==='invalidContentNotFound')return {structuredContent:inner,content:{}};
+      if(mode==='innerSymbolConflict')return {structuredContent:{...inner,[Symbol('smuggled')]:true}};
+      if(mode==='innerHiddenNotFound')return {structuredContent:Object.defineProperty({...inner},'hidden',{value:true})};
+    };
     window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
-      if(name==='get_project')return {structuredContent:{ok:true,data:{project:window.latest}}};
+      if(name==='get_project')return {content:[{type:'text',text:'Project loaded.'}],structuredContent:{ok:true,data:{project:window.latest}},isError:false,_meta:{}};
       if(name==='save_project'){
-        if(window.mode==='conflict'){window.latest=make(args,2);return {structuredContent:{ok:false,error:{code:'VERSION_CONFLICT',message:'private',retryable:false,recovery:'reload'}}};}
-        if(window.mode==='notfound')return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'private',retryable:false,recovery:'reload'}}};
+        if(window.mode==='conflict'){window.latest=make(args,2);return {content:[{type:'text',text:'Conflict.'}],structuredContent:failure('VERSION_CONFLICT'),isError:true,_meta:{}};}
+        if(window.mode==='notfound')return {content:[],structuredContent:failure('NOT_FOUND'),isError:true};
+        if(window.mode!=='ok'&&window.mode!=='pending')return spoof(window.mode);
         if(window.mode==='pending')return new Promise(resolve=>window.pending.push({args,resolve}));
         window.latest=make(args);return {structuredContent:{ok:true,data:{project:window.latest,request_id:args.request_id}}};
       }}};
@@ -968,7 +982,20 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
   const enter=async()=>{const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');await input.fill('Product description');await input.press('Control+Enter');await frame.getByRole('button',{name:'Product description'}).click();await frame.getByRole('heading',{name:'Give your product viral potential.'}).waitFor();
     await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');};
   await enter();const confirm=frame.getByRole('button',{name:'Confirm context'});await confirm.click();await frame.getByText('Context saved',{exact:true}).waitFor();
-  await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');await frame.evaluate(()=>{window.mode='conflict';});await confirm.click();
+  await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');
+  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound'];
+  for(const mode of spoofModes){const expected=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length+1);
+    await frame.evaluate(value=>{window.mode=value},mode);await confirm.click();
+    await frame.waitForFunction(count=>window.calls.filter(call=>call.name==='save_project').length===count,expected);
+    await frame.waitForFunction(()=>document.querySelector('form[aria-label="Your product brief"]')?.getAttribute('aria-busy')==='false');
+    assert.match(await frame.getByRole('status').textContent(),/could not verify that product context was saved/i);
+  }
+  assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').length),0,
+    'malformed Product failures never authorize reconciliation reads');
+  const spoofIds=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').slice(1).map(call=>call.args.request_id));
+  assert.equal(new Set(spoofIds).size,1,'all malformed Product failures retain the exact ambiguous request ID');
+
+  await frame.evaluate(()=>{window.mode='conflict';});await confirm.click();
   await frame.getByText(/newer saved version is available/i).waitFor();
   assert.equal(await frame.getByLabel('Audience',{exact:true}).inputValue(),'Unsaved local audience');
   const getCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').map(call=>call.args));

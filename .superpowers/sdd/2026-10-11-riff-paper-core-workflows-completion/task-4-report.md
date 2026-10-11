@@ -183,3 +183,53 @@ Fix base: `d83e08088bb98f785e9d6122a4379c0e48f86b8c`.
 Fix commit: this commit (`fix: harden Paper product context flow`); its final hash is
 returned in the agent handoff. No remaining concern requires Task 5+, provider,
 database, migration, public-tool, or deployment scope.
+
+## Fix round 2/5 — strict Product CallToolResult authority
+
+Both remaining strictness findings were addressed without changing generic creator
+tool behavior:
+
+- Replaced `Object.keys`-only shape checks with `Reflect.ownKeys` discipline across
+  Product outer and nested object shapes. Every admitted property must be an own,
+  enumerable data property with an allowed string key; symbols, non-enumerable keys,
+  accessors, inherited prototypes, unknown keys, and present-but-undefined optional
+  values fail closed.
+- Added strict JSON record/array validation for `_meta`, including finite numbers,
+  dense arrays, no extra/symbol properties, and recursively plain JSON values.
+- Added dependency-light validation for realistic MCP content blocks: text, image,
+  audio, resource links, and embedded text/blob resources, plus annotations and icon
+  shapes. Malformed content arrays/blocks are rejected while representative host
+  text/resource-link envelopes remain valid.
+- Product Save/Get calls now use a raw Product-only path that preserves transport
+  timing/performance measurement but disables the bridge's generic application-error
+  interpretation. Only `parseProductSaveResult` / `parseProductGetResult` can
+  authorize a Product error code or recovery action.
+- Direct inner failures and failures hidden in envelopes with unknown, accessor,
+  symbol, non-enumerable, undefined, invalid-content, or invalid-`isError` properties
+  remain ambiguous. They keep the exact pending request ID, expose only the fixed
+  malformed-response message, and never authorize `get_project`.
+- Valid strict VERSION_CONFLICT and NOT_FOUND envelopes still reread only the trusted
+  session project ID. Valid strict auth, validation, retry, and idempotency failures
+  retain their established Product-specific behavior.
+
+### RED/GREEN evidence
+
+- RED — the strict CallToolResult regression passed 0/1: a malformed envelope with
+  smuggled own properties was still parsed as `saved` rather than `malformed`.
+- RED — the Product bridge regression passed 0/1: a direct spoofed
+  VERSION_CONFLICT bypassed Product parsing, displayed “A newer saved version,” and
+  triggered reconciliation instead of the fixed malformed-response path.
+- GREEN — focused contract/Product validation passed 12/12, Product component
+  browser coverage passed 4/4, and Product bridge coverage passed 3/3 (19/19 total).
+- `npm run typecheck && npm run build:panel` — PASS.
+- `npm run check` — PASS: TypeScript, 533/533 Node tests, Worker dry-run build at
+  4,020.02 KiB / 814.45 KiB gzip, local workerd smoke, and 90/90 real-browser tests.
+- Riff Home bundle: 202,566 bytes raw / 57,251 bytes gzip,
+  `sha256:e804362f258f69c00cb626291e1b61bfacd788a5b4b98479f71965cf6a99d127`.
+- `git diff --check` — PASS.
+
+Fix-round-2 base: `b9c652d285305bd24d711c35548d34f7f23549b3`.
+
+Fix-round-2 commit: this commit (`fix: enforce strict Product tool envelopes`); its
+final hash is returned in the agent handoff. No Task 5+, provider, database,
+migration, public-tool, or deployment scope was added.

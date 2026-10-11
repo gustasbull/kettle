@@ -99,7 +99,12 @@ const object = (value: unknown): JsonObject | undefined => {
 const shape = (value: unknown, required: readonly string[], optional: readonly string[] = []) => {
   const item = object(value); if (!item) return;
   const allowed = new Set([...required, ...optional]);
-  return required.every(key => Object.hasOwn(item, key)) && Object.keys(item).every(key => allowed.has(key)) ? item : undefined;
+  const keys = Reflect.ownKeys(item);
+  if (keys.some(key => typeof key !== 'string' || !allowed.has(key))) return;
+  if (keys.some(key => !Object.getOwnPropertyDescriptor(item, key)?.enumerable)) return;
+  if (!required.every(key => Object.hasOwn(item, key))) return;
+  if (optional.some(key => Object.hasOwn(item, key) && item[key] === undefined)) return;
+  return item;
 };
 const uuid = (value: unknown): value is string => typeof value === 'string'
   && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -159,14 +164,90 @@ function failure(value: unknown) {
     || typeof error.recovery !== 'string' || !recoveries.has(error.recovery)) return;
   return { code: error.code, recovery: error.recovery };
 }
+function strictArray(value: unknown): value is unknown[] {
+  if (!Array.isArray(value)) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.some(key => typeof key === 'symbol')) return false;
+  const indexes = keys.filter(key => key !== 'length');
+  if (indexes.length !== value.length) return false;
+  return indexes.every((key, index) => key === String(index)
+    && Object.getOwnPropertyDescriptor(value, key)?.enumerable === true);
+}
+function jsonValue(value: unknown): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (strictArray(value)) return value.every(jsonValue);
+  const item = object(value); if (!item) return false;
+  const keys = Reflect.ownKeys(item);
+  return keys.every(key => typeof key === 'string'
+    && Object.getOwnPropertyDescriptor(item, key)?.enumerable === true
+    && item[key] !== undefined && jsonValue(item[key]));
+}
+function annotations(value: unknown) {
+  const item = shape(value, [], ['audience', 'priority', 'lastModified']);
+  if (!item) return false;
+  if (item.audience !== undefined && (!strictArray(item.audience)
+    || !item.audience.every(role => role === 'user' || role === 'assistant'))) return false;
+  if (item.priority !== undefined && (typeof item.priority !== 'number' || !Number.isFinite(item.priority))) return false;
+  return item.lastModified === undefined || typeof item.lastModified === 'string';
+}
+function meta(value: unknown) {
+  return !!object(value) && jsonValue(value);
+}
+function icons(value: unknown) {
+  return strictArray(value) && value.every(icon => {
+    const item = shape(icon, ['src'], ['mimeType', 'sizes', 'theme']);
+    return !!item && typeof item.src === 'string'
+      && (item.mimeType === undefined || typeof item.mimeType === 'string')
+      && (item.sizes === undefined || (strictArray(item.sizes) && item.sizes.every(size => typeof size === 'string')))
+      && (item.theme === undefined || item.theme === 'light' || item.theme === 'dark');
+  });
+}
+function resourceContents(value: unknown) {
+  const item = object(value); if (!item) return false;
+  const blob = Object.hasOwn(item, 'blob');
+  const parsed = shape(item, blob ? ['uri', 'blob'] : ['uri', 'text'], ['mimeType', '_meta']);
+  return !!parsed && typeof parsed.uri === 'string'
+    && typeof (blob ? parsed.blob : parsed.text) === 'string'
+    && (parsed.mimeType === undefined || typeof parsed.mimeType === 'string')
+    && (parsed._meta === undefined || meta(parsed._meta));
+}
+function contentBlock(value: unknown) {
+  const source = object(value); if (!source || typeof source.type !== 'string') return false;
+  const shared = (item: Record<string, unknown>) =>
+    (item.annotations === undefined || annotations(item.annotations))
+    && (item._meta === undefined || meta(item._meta));
+  if (source.type === 'text') {
+    const item = shape(source, ['type', 'text'], ['annotations', '_meta']);
+    return !!item && typeof item.text === 'string' && shared(item);
+  }
+  if (source.type === 'image' || source.type === 'audio') {
+    const payload = source.type === 'image' ? 'data' : 'data';
+    const item = shape(source, ['type', payload, 'mimeType'], ['annotations', '_meta']);
+    return !!item && typeof item[payload] === 'string' && typeof item.mimeType === 'string' && shared(item);
+  }
+  if (source.type === 'resource_link') {
+    const item = shape(source, ['type', 'name', 'uri'],
+      ['title', 'description', 'mimeType', 'annotations', 'size', 'icons', '_meta']);
+    return !!item && typeof item.name === 'string' && typeof item.uri === 'string'
+      && (item.title === undefined || typeof item.title === 'string')
+      && (item.description === undefined || typeof item.description === 'string')
+      && (item.mimeType === undefined || typeof item.mimeType === 'string')
+      && (item.size === undefined || (Number.isInteger(item.size) && Number(item.size) >= 0))
+      && (item.icons === undefined || icons(item.icons)) && shared(item);
+  }
+  if (source.type === 'resource') {
+    const item = shape(source, ['type', 'resource'], ['annotations', '_meta']);
+    return !!item && resourceContents(item.resource) && shared(item);
+  }
+  return false;
+}
 function structured(raw: unknown) {
-  const outer = object(raw);
-  if (!outer || !Object.hasOwn(outer, 'structuredContent')) return;
-  const allowed = new Set(['content', 'structuredContent', 'isError', '_meta']);
-  if (Object.keys(outer).some(key => !allowed.has(key))
-    || (outer.content !== undefined && !Array.isArray(outer.content))
+  const outer = shape(raw, ['structuredContent'], ['content', 'isError', '_meta']);
+  if (!outer
+    || (outer.content !== undefined && (!strictArray(outer.content) || !outer.content.every(contentBlock)))
     || (outer.isError !== undefined && typeof outer.isError !== 'boolean')
-    || (outer._meta !== undefined && !object(outer._meta))) return;
+    || (outer._meta !== undefined && !meta(outer._meta))) return;
   const result = object(outer.structuredContent);
   if (!result) return;
   return { outer, result };

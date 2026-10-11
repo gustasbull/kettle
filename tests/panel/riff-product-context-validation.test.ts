@@ -158,34 +158,58 @@ test('save and get require a strict CallToolResult envelope', () => {
   const saveContent = { ok: true, data: { project: saved, request_id: requestId } };
   const getContent = { ok: true, data: { project: saved } };
   assert.equal(parseProductSaveResult({
-    content: [], structuredContent: saveContent, isError: false, _meta: {},
+    content: [{ type: 'text', text: 'Product context saved.', annotations: { audience: ['assistant'], priority: 1 } }],
+    structuredContent: saveContent, isError: false, _meta: { trace: { sampled: false } },
   }, input).status, 'saved');
   assert.equal(parseProductGetResult({
-    content: [], structuredContent: getContent, isError: false, _meta: {},
+    content: [{ type: 'resource_link', name: 'project', uri: 'ui://riff/project', mimeType: 'application/json' }],
+    structuredContent: getContent, isError: false, _meta: {},
   }, projectId).status, 'loaded');
 
   const accessor = Object.defineProperty({}, 'structuredContent', { get: () => saveContent, enumerable: true });
   const inherited = Object.assign(Object.create({ inherited: true }), { structuredContent: saveContent });
+  const hiddenOuter = Object.defineProperty({ structuredContent: saveContent }, 'hidden', { value: true });
+  const hiddenStructured = Object.defineProperty({}, 'structuredContent', { value: saveContent, enumerable: false });
+  const symbolOuter = { structuredContent: saveContent, [Symbol('smuggled')]: true };
+  const innerHidden = Object.defineProperty({ ...saveContent }, 'hidden', { value: true });
+  const innerSymbol = { ...saveContent, [Symbol('smuggled')]: true };
   const malformedSave = [
     saveContent,
     {},
     { content: [] },
     { structuredContent: saveContent, extra: true },
     { structuredContent: saveContent, isError: 'false' },
+    { structuredContent: saveContent, isError: undefined },
     { structuredContent: saveContent, content: {} },
+    { structuredContent: saveContent, content: undefined },
+    { structuredContent: saveContent, content: [{ type: 'text' }] },
+    { structuredContent: saveContent, content: [{ type: 'unknown', text: 'no' }] },
     { structuredContent: saveContent, _meta: [] },
+    { structuredContent: saveContent, _meta: undefined },
+    { structuredContent: saveContent, _meta: Object.create({ inherited: true }) },
     accessor,
     inherited,
+    hiddenOuter,
+    hiddenStructured,
+    symbolOuter,
+    { structuredContent: innerHidden },
+    { structuredContent: innerSymbol },
   ];
   for (const raw of malformedSave) assert.equal(parseProductSaveResult(raw, input).status, 'malformed');
 
   const getAccessor = Object.defineProperty({}, 'structuredContent', { get: () => getContent, enumerable: true });
+  const getSymbol = { structuredContent: getContent, [Symbol('smuggled')]: true };
+  const getHidden = Object.defineProperty({ structuredContent: getContent }, 'hidden', { value: true });
   const malformedGet = [
     getContent,
     {},
     { structuredContent: getContent, extra: true },
     { structuredContent: getContent, isError: 0 },
+    { structuredContent: getContent, isError: undefined },
+    { structuredContent: getContent, content: [Object.defineProperty({ type: 'text', text: 'read' }, 'hidden', { value: true })] },
     getAccessor,
+    getSymbol,
+    getHidden,
   ];
   for (const raw of malformedGet) assert.equal(parseProductGetResult(raw, projectId).status, 'malformed');
 });
