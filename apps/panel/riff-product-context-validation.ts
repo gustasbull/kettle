@@ -131,14 +131,22 @@ function brief(value: unknown) {
   const item = shape(value,
     ['product', 'audience', 'goal', 'tone', 'language', 'duration_seconds', 'filming_constraints', 'facts'],
     ['description']);
-  if (!item || !boundedText(item.product, 4_000) || !boundedText(item.audience, 1_000)
+  if (!item) return false;
+  const filmingConstraints = strictArrayValues(item.filming_constraints);
+  const facts = strictArrayValues(item.facts);
+  if (!boundedText(item.product, 4_000) || !boundedText(item.audience, 1_000)
     || !boundedText(item.goal, 1_000) || !boundedText(item.tone, 200) || !boundedText(item.language, 35)
     || (item.description !== undefined && !boundedText(item.description, 4_000))
     || !Number.isInteger(item.duration_seconds) || Number(item.duration_seconds) < 5 || Number(item.duration_seconds) > 180
-    || !Array.isArray(item.filming_constraints) || item.filming_constraints.length > 20
-    || !item.filming_constraints.every(value => boundedText(value, 500))
-    || !Array.isArray(item.facts) || item.facts.length > 50 || !item.facts.every(fact)) return false;
-  return new Set(item.facts.map(value => object(value)?.id)).size === item.facts.length;
+    || !filmingConstraints || filmingConstraints.length > 20
+    || !facts || facts.length > 50) return false;
+  for (const constraint of filmingConstraints) if (!boundedText(constraint, 500)) return false;
+  const factIds = new Set<unknown>();
+  for (const entry of facts) {
+    if (!fact(entry)) return false;
+    factIds.add(object(entry)?.id);
+  }
+  return factIds.size === facts.length;
 }
 
 function projectSnapshot(value: unknown): Project | undefined {
@@ -164,19 +172,39 @@ function failure(value: unknown) {
     || typeof error.recovery !== 'string' || !recoveries.has(error.recovery)) return;
   return { code: error.code, recovery: error.recovery };
 }
-function strictArray(value: unknown): value is unknown[] {
-  if (!Array.isArray(value)) return false;
+function strictArrayValues(value: unknown): unknown[] | undefined {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return;
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  if (!lengthDescriptor || !('value' in lengthDescriptor) || lengthDescriptor.enumerable
+    || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0) return;
+  const length = lengthDescriptor.value;
   const keys = Reflect.ownKeys(value);
-  if (keys.some(key => typeof key === 'symbol')) return false;
-  const indexes = keys.filter(key => key !== 'length');
-  if (indexes.length !== value.length) return false;
-  return indexes.every((key, index) => key === String(index)
-    && Object.getOwnPropertyDescriptor(value, key)?.enumerable === true);
+  if (keys.length !== length + 1) return;
+  const result = new Array<unknown>(length);
+  let sawLength = false;
+  for (const key of keys) {
+    if (key === 'length') {
+      sawLength = true;
+      continue;
+    }
+    if (typeof key !== 'string') return;
+    const index = Number(key);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= length || String(index) !== key) return;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) return;
+    result[index] = descriptor.value;
+  }
+  return sawLength ? result : undefined;
 }
 function jsonValue(value: unknown): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
-  if (strictArray(value)) return value.every(jsonValue);
+  if (Array.isArray(value)) {
+    const values = strictArrayValues(value);
+    if (!values) return false;
+    for (const entry of values) if (!jsonValue(entry)) return false;
+    return true;
+  }
   const item = object(value); if (!item) return false;
   const keys = Reflect.ownKeys(item);
   return keys.every(key => typeof key === 'string'
@@ -186,8 +214,11 @@ function jsonValue(value: unknown): boolean {
 function annotations(value: unknown) {
   const item = shape(value, [], ['audience', 'priority', 'lastModified']);
   if (!item) return false;
-  if (item.audience !== undefined && (!strictArray(item.audience)
-    || !item.audience.every(role => role === 'user' || role === 'assistant'))) return false;
+  if (item.audience !== undefined) {
+    const audience = strictArrayValues(item.audience);
+    if (!audience) return false;
+    for (const role of audience) if (role !== 'user' && role !== 'assistant') return false;
+  }
   if (item.priority !== undefined && (typeof item.priority !== 'number' || !Number.isFinite(item.priority))) return false;
   return item.lastModified === undefined || typeof item.lastModified === 'string';
 }
@@ -195,13 +226,20 @@ function meta(value: unknown) {
   return !!object(value) && jsonValue(value);
 }
 function icons(value: unknown) {
-  return strictArray(value) && value.every(icon => {
+  const values = strictArrayValues(value);
+  if (!values) return false;
+  for (const icon of values) {
     const item = shape(icon, ['src'], ['mimeType', 'sizes', 'theme']);
-    return !!item && typeof item.src === 'string'
-      && (item.mimeType === undefined || typeof item.mimeType === 'string')
-      && (item.sizes === undefined || (strictArray(item.sizes) && item.sizes.every(size => typeof size === 'string')))
-      && (item.theme === undefined || item.theme === 'light' || item.theme === 'dark');
-  });
+    if (!item || typeof item.src !== 'string') return false;
+    if (item.mimeType !== undefined && typeof item.mimeType !== 'string') return false;
+    if (item.theme !== undefined && item.theme !== 'light' && item.theme !== 'dark') return false;
+    if (item.sizes !== undefined) {
+      const sizes = strictArrayValues(item.sizes);
+      if (!sizes) return false;
+      for (const size of sizes) if (typeof size !== 'string') return false;
+    }
+  }
+  return true;
 }
 function resourceContents(value: unknown) {
   const item = object(value); if (!item) return false;
@@ -244,16 +282,25 @@ function contentBlock(value: unknown) {
 }
 function structured(raw: unknown) {
   const outer = shape(raw, ['structuredContent'], ['content', 'isError', '_meta']);
-  if (!outer
-    || (outer.content !== undefined && (!strictArray(outer.content) || !outer.content.every(contentBlock)))
-    || (outer.isError !== undefined && typeof outer.isError !== 'boolean')
+  if (!outer || (outer.isError !== undefined && typeof outer.isError !== 'boolean')
     || (outer._meta !== undefined && !meta(outer._meta))) return;
+  if (outer.content !== undefined) {
+    const content = strictArrayValues(outer.content);
+    if (!content) return;
+    for (const block of content) if (!contentBlock(block)) return;
+  }
   const result = object(outer.structuredContent);
   if (!result) return;
   return { outer, result };
 }
 function canonicalJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (Array.isArray(value)) {
+    const values = strictArrayValues(value);
+    if (!values) return;
+    const result = new Array<unknown>(values.length);
+    for (let index = 0; index < values.length; index += 1) result[index] = canonicalJson(values[index]);
+    return result;
+  }
   const item = object(value);
   if (!item) return value;
   return Object.fromEntries(Object.keys(item).sort().map(key => [key, canonicalJson(item[key])]));

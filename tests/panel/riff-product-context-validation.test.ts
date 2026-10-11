@@ -55,6 +55,22 @@ function successfulInput() {
   return parsed.input;
 }
 
+function accessorArray(...values: unknown[]) {
+  const result: unknown[] = [];
+  values.forEach((value, index) => Object.defineProperty(result, String(index), {
+    configurable: true,
+    enumerable: true,
+    get: () => value,
+  }));
+  return result;
+}
+
+function customPrototypeArray(...values: unknown[]) {
+  const result = [...values];
+  Object.setPrototypeOf(result, Object.create(Array.prototype));
+  return result;
+}
+
 test('validation builds the exact create and update contracts without inferred facts', () => {
   const create = validateProductDraft(completeDraft(), null, requestId);
   assert.equal(create.ok, true);
@@ -212,6 +228,53 @@ test('save and get require a strict CallToolResult envelope', () => {
     getHidden,
   ];
   for (const raw of malformedGet) assert.equal(parseProductGetResult(raw, projectId).status, 'malformed');
+});
+
+test('Product parsing rejects accessor-backed and custom-prototype arrays at every external boundary', () => {
+  const input = successfulInput();
+  const saved = project(input);
+  const conflict = { ok: false, error: {
+    code: 'VERSION_CONFLICT', message: 'private', retryable: false, recovery: 'reload',
+  } };
+  const notFound = { ok: false, error: {
+    code: 'NOT_FOUND', message: 'private', retryable: false, recovery: 'reload',
+  } };
+  const block = { type: 'text', text: 'Product conflict.' };
+
+  for (const [label, raw] of [
+    ['content accessor element', { structuredContent: conflict, content: accessorArray(block) }],
+    ['content custom prototype', { structuredContent: notFound, content: customPrototypeArray(block) }],
+    ['metadata accessor element', { structuredContent: conflict, _meta: { trace: accessorArray('sampled') } }],
+    ['metadata custom prototype', { structuredContent: notFound, _meta: { trace: customPrototypeArray('sampled') } }],
+  ] as const) {
+    assert.equal(parseProductSaveResult(raw, input).status, 'malformed', label);
+  }
+
+  const fact = {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    statement: 'User supplied fact',
+    source: { kind: 'user' as const, captured_at: createdAt },
+    user_confirmed: true,
+  };
+  input.brief.facts = [fact];
+  const savedWithFact = project(input);
+  const brief = savedWithFact.brief_version.brief;
+  const exoticBriefs = [
+    ['constraints accessor element', { ...brief, filming_constraints: accessorArray(...brief.filming_constraints) }],
+    ['constraints custom prototype', { ...brief, filming_constraints: customPrototypeArray(...brief.filming_constraints) }],
+    ['facts accessor element', { ...brief, facts: accessorArray(...brief.facts) }],
+    ['facts custom prototype', { ...brief, facts: customPrototypeArray(...brief.facts) }],
+  ] as const;
+  for (const [label, exoticBrief] of exoticBriefs) {
+    const exoticProject = {
+      ...savedWithFact,
+      brief_version: { ...savedWithFact.brief_version, brief: exoticBrief },
+    };
+    assert.equal(parseProductSaveResult({ structuredContent: {
+      ok: true,
+      data: { project: exoticProject, request_id: requestId },
+    } }, input).status, 'malformed', label);
+  }
 });
 
 test('strict get parsing accepts historical snapshots but only for the trusted project ID', () => {

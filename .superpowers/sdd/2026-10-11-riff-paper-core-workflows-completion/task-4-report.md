@@ -233,3 +233,46 @@ Fix-round-2 base: `b9c652d285305bd24d711c35548d34f7f23549b3`.
 Fix-round-2 commit: this commit (`fix: enforce strict Product tool envelopes`); its
 final hash is returned in the agent handoff. No Task 5+, provider, database,
 migration, public-tool, or deployment scope was added.
+
+## Fix round 3/5 — reject exotic Product tool arrays
+
+The remaining array-validation findings were addressed inside the Product result
+boundary without changing generic creator-tool behavior:
+
+- Replaced the boolean array check with a descriptor-copying primitive that requires
+  the exact `Array.prototype`, an ordinary own non-enumerable `length`, no symbol or
+  extra keys, and one own enumerable data descriptor for every dense numeric index.
+  Accessor elements, sparse arrays, hidden indexes, custom prototypes, and extra
+  properties fail closed.
+- External arrays are never validated through instance methods. Values are copied
+  from admitted descriptors into a new local array and only that safe copy is
+  traversed.
+- Applied the same primitive to every externally parsed Product array: MCP `content`,
+  recursive `_meta`, annotation audiences, resource icons and sizes, saved brief
+  `filming_constraints` and `facts`, and canonical receipt comparison.
+- Malformed VERSION_CONFLICT / NOT_FOUND envelopes with exotic content or metadata,
+  and malformed success snapshots with exotic constraint/fact arrays, retain the
+  exact ambiguous save request. They show only the fixed verification failure and
+  never authorize `get_project`. Ordinary strict envelopes and generic creator flows
+  are unchanged.
+
+### RED/GREEN evidence
+
+- RED — the new focused Product validation regression passed 0/1: an accessor-backed
+  `content` array parsed as a trusted `failure` instead of `malformed`.
+- RED — the Product bridge regression passed 0/1: an exotic-array failure displayed
+  the trusted version-conflict message instead of the fixed malformed-response copy.
+- GREEN — focused contract/Product validation passed 13/13, Product component browser
+  coverage passed 4/4, and Product bridge coverage passed 3/3 (20/20 total).
+- `npm run typecheck && npm run build:panel` — PASS.
+- `npm run check` — PASS: TypeScript, 534/534 Node tests, Worker dry-run build at
+  4,020.58 KiB / 814.62 KiB gzip, local workerd smoke, and 90/90 real-browser tests.
+- Riff Home bundle: 203,139 bytes raw / 57,427 bytes gzip,
+  `sha256:8e61650df2bc5c01e2f3bdf75ed0b5997f88ca132f647968bfcf227c1368306c`.
+- `git diff --check` — PASS.
+
+Fix-round-3 base: `a750f264dff5eb73f8f7687c0dbd1084ab3cba67`.
+
+Fix-round-3 commit: this commit (`fix: reject exotic Product tool arrays`); its final
+hash is returned in the agent handoff. No Task 5+, provider, database, migration,
+public-tool, or deployment scope was added.

@@ -945,7 +945,9 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
       created_at:'2026-10-11T10:00:00Z',updated_at:'2026-10-11T11:00:00Z',brief_version:{id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',project_id:id,version,name:args.name,
       brief:structuredClone(args.brief),created_at:'2026-10-11T11:00:00Z'}}};
     const failure=code=>({ok:false,error:{code,message:'private',retryable:false,recovery:'reload'}});
-    const spoof=(mode)=>{const code=/notfound/i.test(mode)?'NOT_FOUND':'VERSION_CONFLICT';const inner=failure(code);
+    const accessorArray=(...values)=>{const result=[];values.forEach((value,index)=>Object.defineProperty(result,String(index),{configurable:true,enumerable:true,get:()=>value}));return result;};
+    const customPrototypeArray=(...values)=>{const result=[...values];Object.setPrototypeOf(result,Object.create(Array.prototype));return result;};
+    const spoof=(mode,args)=>{const code=/notfound/i.test(mode)?'NOT_FOUND':'VERSION_CONFLICT';const inner=failure(code);
       if(mode==='directConflict')return inner;
       if(mode==='unknownNotFound')return {structuredContent:inner,extra:true};
       if(mode==='accessorConflict')return Object.defineProperty({},'structuredContent',{get:()=>inner,enumerable:true});
@@ -956,6 +958,11 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
       if(mode==='invalidContentNotFound')return {structuredContent:inner,content:{}};
       if(mode==='innerSymbolConflict')return {structuredContent:{...inner,[Symbol('smuggled')]:true}};
       if(mode==='innerHiddenNotFound')return {structuredContent:Object.defineProperty({...inner},'hidden',{value:true})};
+      if(mode==='metaAccessorConflict')return {structuredContent:inner,_meta:{trace:accessorArray('sampled')}};
+      if(mode==='contentPrototypeNotFound')return {structuredContent:inner,content:customPrototypeArray({type:'text',text:'Missing.'})};
+      if(mode==='constraintsAccessorSuccess'){const project=make(args);project.brief_version.brief.filming_constraints=accessorArray(...args.brief.filming_constraints);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
+      if(mode==='constraintsPrototypeSuccess'){const project=make(args);project.brief_version.brief.filming_constraints=customPrototypeArray(...args.brief.filming_constraints);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
+      if(mode==='factsPrototypeSuccess'){const project=make(args);project.brief_version.brief.facts=customPrototypeArray(...args.brief.facts);return {structuredContent:{ok:true,data:{project,request_id:args.request_id}}};}
     };
     window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
@@ -963,7 +970,7 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
       if(name==='save_project'){
         if(window.mode==='conflict'){window.latest=make(args,2);return {content:[{type:'text',text:'Conflict.'}],structuredContent:failure('VERSION_CONFLICT'),isError:true,_meta:{}};}
         if(window.mode==='notfound')return {content:[],structuredContent:failure('NOT_FOUND'),isError:true};
-        if(window.mode!=='ok'&&window.mode!=='pending')return spoof(window.mode);
+        if(window.mode!=='ok'&&window.mode!=='pending')return spoof(window.mode,args);
         if(window.mode==='pending')return new Promise(resolve=>window.pending.push({args,resolve}));
         window.latest=make(args);return {structuredContent:{ok:true,data:{project:window.latest,request_id:args.request_id}}};
       }}};
@@ -980,15 +987,15 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(4_000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);const frame=page.frames().find(item=>item.url().endsWith('/frame'));
   const enter=async()=>{const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');await input.fill('Product description');await input.press('Control+Enter');await frame.getByRole('button',{name:'Product description'}).click();await frame.getByRole('heading',{name:'Give your product viral potential.'}).waitFor();
-    await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');};
+    await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');await frame.getByRole('button',{name:'Add filming constraint'}).click();await frame.getByLabel('Filming constraint 1').fill('Home desk');};
   await enter();const confirm=frame.getByRole('button',{name:'Confirm context'});await confirm.click();await frame.getByText('Context saved',{exact:true}).waitFor();
   await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');
-  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound'];
+  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound','metaAccessorConflict','contentPrototypeNotFound','constraintsAccessorSuccess','constraintsPrototypeSuccess','factsPrototypeSuccess'];
   for(const mode of spoofModes){const expected=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length+1);
     await frame.evaluate(value=>{window.mode=value},mode);await confirm.click();
     await frame.waitForFunction(count=>window.calls.filter(call=>call.name==='save_project').length===count,expected);
     await frame.waitForFunction(()=>document.querySelector('form[aria-label="Your product brief"]')?.getAttribute('aria-busy')==='false');
-    assert.match(await frame.getByRole('status').textContent(),/could not verify that product context was saved/i);
+    assert.match(await frame.getByRole('status').textContent(),/could not verify that product context was saved/i,mode);
   }
   assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').length),0,
     'malformed Product failures never authorize reconciliation reads');
