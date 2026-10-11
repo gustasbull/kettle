@@ -245,6 +245,31 @@ test('arbitrary post-dispatch errors and unconfirmed receipt writes are conserva
   }
 });
 
+test('receipt persistence response loss replays the authoritative committed receipt',async()=>{
+  for(const mode of ['lost','malformed'] as const){
+    let committed:unknown,executions=0,reservations=0,completions=0;
+    const repository:PipelineRepository={async call(op,_owner,raw){
+      if(op==='reserve_creator_attempt'){
+        reservations++;
+        return committed===undefined?reservation('acquired'):reservation('replay',committed);
+      }
+      if(op==='complete_creator_attempt'){
+        completions++;committed=(raw as {receipt:unknown}).receipt;
+        if(mode==='lost')throw new Error('synthetic committed response loss');
+        return {ok:true,data:{status:'unexpected',receipt:committed}};
+      }
+      if(op==='record_creator_attempt_outcome')assert.fail('a committed receipt must remain authoritative');
+      assert.fail(`unexpected ${op}`);
+    }};
+    const context=createGuardedProviderContext(repository,stored('scan','running'),ceilings,step);
+
+    assert.deepEqual(await context.call('profile','scrapecreators','profile',async()=>{
+      executions++;return {allowed:'receipt'};
+    }),{allowed:'receipt'});
+    assert.equal(executions,1);assert.equal(reservations,2);assert.equal(completions,1);
+  }
+});
+
 test('guard reserves ceiling before I/O, saves allowlisted receipt and returns durable receipt',async()=>{
   const g=guarded(reservation('acquired'));
   const value=await g.context.call('profile','scrapecreators','profile',async()=>{g.events.push('execute');return {allowed:'received'};});
@@ -266,7 +291,7 @@ test('guard never retries execute exceptions, oversized receipts or completion f
     let executions=0;await assert.rejects(g.context.call('generate','openai','generate',async()=>{executions++;if(mode==='execute')throw Error('provider secret');return mode==='oversized'?{text:'x'.repeat(300001)}:{allowed:'received'};}),
       e=>e instanceof PipelineRunError&&e.state===(mode==='oversized'?'failed':'needs_reconciliation')&&
         e.failureCode===(mode==='oversized'?'oversized_response':mode==='execute'?'unknown_after_dispatch':'receipt_persistence_failed'));assert.equal(executions,1);
-    assert.equal(g.calls.filter(c=>c.op==='reserve_creator_attempt').length,1);
+    assert.equal(g.calls.filter(c=>c.op==='reserve_creator_attempt').length,mode==='completion'||mode==='invalid-completion'?2:1);
     assert.equal(g.calls.filter(c=>c.op==='complete_creator_attempt').length,mode==='execute'||mode==='oversized'?0:1);
   }
 });
@@ -389,11 +414,14 @@ test('runner preserves ambiguous outcome, does not retry providers or failed sta
 test('runner preserves an outer durable provider-step loss after dispatch and never resubmits',async()=>{
   const r=runner('recommendations'),baseCall=r.repository.call.bind(r.repository);
   let executions=0,reservations=0,completions=0,outcomeWrites=0,loseProviderStep=true;
-  let storedOutcome:any;
+  let storedOutcome:any,reserved=false;
   r.repository.call=async(op,owner,raw)=>{
     if(op==='reserve_creator_attempt'){
       reservations++;
-      return storedOutcome?{ok:true,data:{status:'needs_reconciliation',outcome:storedOutcome}}:reservation('acquired');
+      if(storedOutcome)return {ok:true,data:{status:'needs_reconciliation',outcome:storedOutcome}};
+      if(reserved)return reservation('ambiguous');
+      reserved=true;
+      return reservation('acquired');
     }
     if(op==='complete_creator_attempt'){completions++;throw new Error('synthetic receipt persistence loss');}
     if(op==='record_creator_attempt_outcome'){
@@ -423,7 +451,33 @@ test('runner preserves an outer durable provider-step loss after dispatch and ne
     ['needs_reconciliation','needs_reconciliation:unknown_after_dispatch'],
     ['needs_reconciliation','needs_reconciliation:unknown_after_dispatch'],
   ]);
-  assert.equal(executions,1);assert.equal(reservations,2);assert.equal(completions,1);assert.equal(outcomeWrites,1);
+  assert.equal(executions,1);assert.equal(reservations,4);assert.equal(completions,1);assert.equal(outcomeWrites,1);
+});
+
+test('outer provider-step loss replays a committed receipt without resubmitting',async()=>{
+  const job=stored('scan','running');let receipt:unknown,executions=0,reservations=0,completions=0;
+  const repository:PipelineRepository={async call(op,_owner,raw){
+    if(op==='reserve_creator_attempt'){
+      reservations++;return receipt===undefined?reservation('acquired'):reservation('replay',receipt);
+    }
+    if(op==='complete_creator_attempt'){
+      completions++;receipt=(raw as {receipt:unknown}).receipt;
+      return {ok:true,data:{status:'completed',receipt}};
+    }
+    if(op==='record_creator_attempt_outcome')assert.fail('a committed receipt must remain authoritative');
+    assert.fail(`unexpected ${op}`);
+  }};
+  let loseProviderStep=true;
+  const durable:DurableStep=async(name,run)=>{
+    if(name==='provider:profile'&&loseProviderStep){loseProviderStep=false;await run();throw new Error('synthetic outer durable-step loss');}
+    return run();
+  };
+  const context=createGuardedProviderContext(repository,job,ceilings,durable);
+
+  assert.deepEqual(await context.call('profile','scrapecreators','profile',async()=>{
+    executions++;return {allowed:'receipt'};
+  }),{allowed:'receipt'});
+  assert.equal(executions,1);assert.equal(reservations,2);assert.equal(completions,1);
 });
 
 test('runner keeps timeout and network recommendation fan-out outcomes typed and never resubmits',async()=>{

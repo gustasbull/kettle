@@ -51,6 +51,21 @@ test('usage adapter accepts documented top-level records and maps only Kettle en
   ]});
 });
 
+test('usage adapter rejects the undocumented legacy envelope',async()=>{
+  const value=await createScrapeCreatorsUsageReader('key',async()=>Response.json({complete:true,data:[
+    {operation:'profile',observed_at:'2026-10-11T00:05:10.000Z',http_status:200},
+  ]})).read(1);
+  assert.deepEqual(value,{complete:false,candidates:[]});
+});
+
+test('usage adapter requires the documented GET method on history records',async()=>{
+  const record=usageRecord('/v1/tiktok/profile?handle=one');
+  for(const value of [{...record,http_method:'POST'},(({http_method:_method,...rest})=>rest)(record)]){
+    assert.deepEqual(await createScrapeCreatorsUsageReader('key',async()=>Response.json([value])).read(1),
+      {complete:false,candidates:[]});
+  }
+});
+
 test('zero, duplicate, incomplete and malformed usage evidence are inconclusive and redacted',async()=>{
   for(const payload of [[],[
     usageRecord('/v1/tiktok/profile?handle=one','2026-10-11T00:05:10.000+00:00',200,'00000000-0000-0000-0000-000000000001'),

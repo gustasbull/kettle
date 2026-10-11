@@ -2,11 +2,9 @@ import { z } from 'zod';
 import type { UsageHistoryReader } from '../../application/creator-attempt-reconciliation.ts';
 
 const documentedRecord=z.object({endpoint:z.string().min(1).max(2048),status_code:z.number().int().min(100).max(599),
-  request_time:z.iso.datetime({offset:true}),response_time:z.iso.datetime({offset:true})})
+  request_time:z.iso.datetime({offset:true}),response_time:z.iso.datetime({offset:true}),http_method:z.literal('GET')})
   .refine(value=>Date.parse(value.response_time)>=Date.parse(value.request_time));
 const documentedHistory=z.array(documentedRecord).max(100);
-const legacyHistory=z.strictObject({complete:z.literal(true),data:z.array(z.strictObject({operation:z.enum(['profile','feed','video']),
-  observed_at:z.iso.datetime(),http_status:z.number().int().min(100).max(599)})).max(100)});
 const operationsByPath=new Map<string,'profile'|'feed'|'video'>([
   ['/v1/tiktok/profile','profile'],['/v3/tiktok/profile/videos','feed'],['/v2/tiktok/video','video'],
 ]);
@@ -44,7 +42,6 @@ export function createScrapeCreatorsUsageReader(apiKey:string,fetcher:typeof fet
       const operation=operationForEndpoint(record.endpoint);return operation?[{operation,
         observed_at:new Date(record.request_time).toISOString(),http_status:record.status_code}]:[];
     })};
-    const legacy=legacyHistory.safeParse(raw);
-    return legacy.success?{complete:true,candidates:legacy.data.data}:{complete:false,candidates:[]};
+    return {complete:false,candidates:[]};
   }};
 }

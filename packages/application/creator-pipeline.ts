@@ -173,15 +173,27 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
       if(!/^[\w:-]{1,200}$/.test(key)||!Number.isSafeInteger(ceilings[provider])||ceilings[provider]<0)throw new PipelineRunError('failed');
       // One provider request per step. Database reservation is authoritative even if
       // Workflow persistence fails, retries overlap, or the process dies after dispatch.
+      const reservationRequest={job_id:job.id,key,provider,operation,ceiling_microusd:ceilings[provider]};
+      const reservationSchema=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
+        z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
+        z.object({status:z.literal('ambiguous')}),z.object({status:z.literal('definite_failure'),outcome:CreatorAttemptOutcome}),
+        z.object({status:z.literal('needs_reconciliation'),outcome:CreatorAttemptOutcome}),
+      ])});
+      const reserveAttempt=()=>observed(telemetry,{stage:'provider_reservation',clock:'monotonic',provider,operation:'reserve'},
+        ()=>repository.call('reserve_creator_attempt',job.account_id,reservationRequest));
+      const inspectAuthoritativeAttempt=async()=>{
+        try {
+          const authoritative=reservationSchema.safeParse(await reserveAttempt());
+          if(authoritative.success){
+            if(authoritative.data.data.status==='replay')return {kind:'receipt',receipt:authoritative.data.data.receipt} as const;
+            if(authoritative.data.data.status==='definite_failure'||authoritative.data.data.status==='needs_reconciliation')
+              return {kind:'stored_outcome',outcome:authoritative.data.data.outcome} as const;
+          }
+        }catch{/* The caller retains the conservative post-dispatch fallback. */}
+      };
       let dispatched=false;
       const envelope=await durableStep(`provider:${key}`,async()=>{
-        const reservation=z.object({ok:z.literal(true),data:z.discriminatedUnion('status',[
-          z.object({status:z.literal('acquired')}),z.object({status:z.literal('replay'),receipt:z.unknown()}),
-          z.object({status:z.literal('ambiguous')}),z.object({status:z.literal('definite_failure'),outcome:CreatorAttemptOutcome}),
-          z.object({status:z.literal('needs_reconciliation'),outcome:CreatorAttemptOutcome}),
-        ])})
-          .safeParse(await observed(telemetry,{stage:'provider_reservation',clock:'monotonic',provider,operation:'reserve'},
-            ()=>repository.call('reserve_creator_attempt',job.account_id,{job_id:job.id,key,provider,operation,ceiling_microusd:ceilings[provider]})));
+        const reservation=reservationSchema.safeParse(await reserveAttempt());
         if(!reservation.success)return {kind:'local_failure'} as const;
         if(reservation.data.data.status==='replay')return {kind:'receipt',receipt:reservation.data.data.receipt} as const;
         if(reservation.data.data.status==='ambiguous')return {kind:'unresolved'} as const;
@@ -197,12 +209,15 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
           const saved=z.object({ok:z.literal(true),data:z.object({status:z.literal('completed'),receipt:z.unknown()})})
             .safeParse(await observed(telemetry,{stage:'receipt_persistence',clock:'monotonic',provider,operation:'persist',response_bytes:bytes},
               ()=>repository.call('complete_creator_attempt',job.account_id,{job_id:job.id,key,receipt})).catch(()=>undefined));
-          return saved.success?{kind:'receipt',receipt:saved.data.data.receipt} as const:
+          if(saved.success)return {kind:'receipt',receipt:saved.data.data.receipt} as const;
+          return await inspectAuthoritativeAttempt()??
             {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'receipt_persistence_failed',http_status:null}} as const;
         }catch(error){return {kind:'outcome',outcome:error instanceof CreatorAttemptError?error.outcome:
           {terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;}
-      }).catch(error=>{
+      }).catch(async error=>{
         if(!dispatched)throw error;
+        const authoritative=await inspectAuthoritativeAttempt();
+        if(authoritative)return authoritative;
         // The durable wrapper lost a result after external I/O began. Persist the
         // uncertainty outside the zero-retry provider step before ending the job.
         return {kind:'outcome',outcome:{terminal_state:'needs_reconciliation',failure_code:'unknown_after_dispatch',http_status:null}} as const;
