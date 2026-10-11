@@ -42,6 +42,18 @@ test('Riff Home follows the canonical shell and starts work inside the app', asy
     for (const name of ['Trending videos', 'Hooks', 'Product showcases', 'Calls to action']) {
       assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1);
     }
+    const messageCount = await page.evaluate(() => window.events.filter(event => event.kind === 'message').length);
+    const trending = page.getByRole('button', { name: 'Trending videos', exact: true });
+    await trending.click();
+    assert.equal(await trending.getAttribute('aria-pressed'), 'true');
+    assert.match(await page.getByRole('status').textContent(), /add a public TikTok profile or video link/i);
+    const hooks = page.getByRole('button', { name: 'Hooks', exact: true });
+    await hooks.click();
+    assert.equal(await trending.getAttribute('aria-pressed'), 'false');
+    assert.equal(await hooks.getAttribute('aria-pressed'), 'true');
+    assert.match(await page.getByRole('status').textContent(), /hook analysis.*link/i);
+    assert.equal(await page.evaluate(() => window.events.filter(event => event.kind === 'message').length), messageCount,
+      'library navigation stays inside Riff instead of starting a slow model turn');
     assert.equal(await page.getByText('Pick up where you left off').count(), 1);
     assert.equal(await page.getByText('Loading recent work…').count(), 1);
     assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 1);

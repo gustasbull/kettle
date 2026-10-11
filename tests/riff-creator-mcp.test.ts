@@ -25,14 +25,17 @@ test('Riff creator entry and recents are authenticated MCP tools usable by Home'
   for (const name of ['start_riff_creator', 'list_riff_work'] as const) {
     const tool = listing.result.tools.find(candidate => candidate.name === name); assert.ok(tool, name);
     assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].input), type: 'object' });
-    assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].output), type: 'object' });
+    if (name === 'start_riff_creator') assert.equal(tool.outputSchema, undefined,
+      'the large job result stays out of launch discovery while runtime validation remains authoritative');
+    else assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(riffCreatorContracts[name].output), type: 'object' });
     assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: [...oauthScopes] }]);
     assert.equal(tool.annotations.readOnlyHint, name === 'list_riff_work');
     assert.equal(tool.annotations.openWorldHint, name === 'start_riff_creator');
+    assert.deepEqual(tool._meta.ui?.visibility, ['model', 'app'], `${name} must be callable from Riff Home`);
     if (name === 'start_riff_creator') {
       assert.equal(tool._meta.ui.resourceUri, 'ui://kettle/creator-pipeline-v2.html',
         'a direct @Riff chat start must attach the live creator workflow');
-    } else assert.equal(tool._meta.ui, undefined);
+    } else assert.equal(tool._meta.ui?.resourceUri, undefined);
   }
   const response = await (await rpc('tools/call', { name: 'list_riff_work', arguments: { limit: 4 } })).json() as {
     result: { structuredContent: unknown; isError?: boolean };

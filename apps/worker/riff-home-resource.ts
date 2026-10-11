@@ -2,7 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OpenAIUiResourceMetadata } from '@openai/mcp-extensions/server';
 import { riffHomeScript } from '../panel/generated/riff-home-bundle.ts';
 
-export const RIFF_HOME_URI = 'ui://riff/home-v1.html';
+export const RIFF_HOME_URI = 'ui://riff/home-v2.html';
+export const RIFF_HOME_LEGACY_URI = 'ui://riff/home-v1.html';
 export const RIFF_HOME_MIME = 'text/html;profile=mcp-app';
 const openaiUi = {
   availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen',
@@ -22,11 +23,14 @@ export function riffHomeHtml(script: string): string {
 }
 
 export function registerRiffHomeResource(server: McpServer): void {
-  server.registerResource('riff-home', RIFF_HOME_URI, {
+  const register = (name: string, uri: string) => server.registerResource(name, uri, {
     description: 'Riff Home for creator input, discovery shortcuts, and honest saved-work handoffs.',
     mimeType: RIFF_HOME_MIME, _meta: RIFF_HOME_META,
   }, async () => ({ contents: [{
-    uri: RIFF_HOME_URI, mimeType: RIFF_HOME_MIME,
-    text: riffHomeHtml(riffHomeScript), _meta: RIFF_HOME_META,
+    uri, mimeType: RIFF_HOME_MIME, text: riffHomeHtml(riffHomeScript), _meta: RIFF_HOME_META,
   }] }));
+  register('riff-home', RIFF_HOME_URI);
+  // Existing ChatGPT turns keep the resource URI from their original tool
+  // result. Preserve one compatibility alias while v2 becomes the cache key.
+  register('riff-home-v1-compat', RIFF_HOME_LEGACY_URI);
 }

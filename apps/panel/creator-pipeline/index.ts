@@ -120,6 +120,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   let current: CreatorJobView | undefined;
   let identity: string | undefined;
   let ideaIndex = 0;
+  let discoveryLibrary: 'videos' | 'hooks' | 'showcases' | 'ctas' = 'videos';
   let variantIndex = 0;
   let studioTab = 0;
 
@@ -296,16 +297,17 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const libraries = el('nav', undefined, 'riff-libraries'); libraries.setAttribute('aria-label', 'Discovery libraries');
     libraries.setAttribute('role', 'tablist');
     const libraryData = [
-      ['videos', 'Videos', false], ['hooks', 'Hooks · ChatGPT', true],
-      ['showcases', 'Product showcases · ChatGPT', true], ['ctas', 'CTAs · ChatGPT', true],
+      ['videos', 'Videos'], ['hooks', 'Hooks'],
+      ['showcases', 'Product showcases'], ['ctas', 'CTAs'],
     ] as const;
     const libraryControls: HTMLButtonElement[] = [];
-    for (const [kind, label, handoff] of libraryData) {
-      const control = button(label, `riff-library${kind === 'videos' ? ' riff-library--active' : ''}`, () => {
-        if (handoff) void run(() => sendPrompt(`Use Riff to explore ${kind === 'showcases' ? 'product showcases' : kind} for recommendation batch ${batch.id}. This category continues in ChatGPT because the saved batch has no category-specific results.`));
+    for (const [kind, label] of libraryData) {
+      const selected = kind === discoveryLibrary;
+      const control = button(label, `riff-library${selected ? ' riff-library--active' : ''}`, () => {
+        discoveryLibrary = kind; render(job);
       }, `library-${kind}`);
       control.dataset.library = kind; control.setAttribute('role', 'tab');
-      control.setAttribute('aria-selected', String(!handoff)); control.tabIndex = handoff ? -1 : 0;
+      control.setAttribute('aria-selected', String(selected)); control.tabIndex = selected ? 0 : -1;
       libraryControls.push(control); libraries.append(control);
     }
     libraryControls.forEach((control, index) => control.addEventListener('keydown', event => {
@@ -316,7 +318,20 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       libraryControls[target]!.focus();
     }));
     content.append(libraries);
-    if (!valid.length) {
+    if (discoveryLibrary !== 'videos') {
+      const labels = {
+        hooks: ['Hooks', 'Timestamped hook clips are not available in this saved batch yet. Browse the saved reference captions below without waiting for ChatGPT.'],
+        showcases: ['Product showcases', 'Timestamped showcase clips are not available in this saved batch yet. Browse the saved reference captions below without waiting for ChatGPT.'],
+        ctas: ['Calls to action', 'Timestamped CTA clips are not available in this saved batch yet. Browse the saved reference captions below without waiting for ChatGPT.'],
+      } as const;
+      const [label, copy] = labels[discoveryLibrary];
+      const panel = el('section', undefined, 'riff-discovery-card'); panel.setAttribute('role', 'tabpanel');
+      panel.append(el('h2', label), el('p', copy, 'riff-notice'));
+      const sources = el('section', undefined, 'riff-reference-grid'); sources.append(el('h3', 'Saved reference captions'));
+      if (batch.references.length) batch.references.forEach(reference => sources.append(safeReference(reference, fictional)));
+      else sources.append(el('p', 'No saved references are available for this batch.', 'riff-muted'));
+      panel.append(sources); content.append(panel);
+    } else if (!valid.length) {
       content.append(el('p', 'No evidence-backed ideas returned. Review the saved limitations in ChatGPT or choose another direction.', 'riff-notice'));
     } else {
       ideaIndex = Math.min(ideaIndex, valid.length - 1);
@@ -360,7 +375,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     }
     if (batch.ideas.length !== valid.length) content.append(el('p', `${batch.ideas.length - valid.length} idea was withheld because its supporting reference was unavailable.`, 'riff-notice'));
     content.append(list('Batch limitations', batch.limitations), lineage(batch.dna_version, batch.dna_id, batch.created_at));
-    setStatus(`${valid.length} ${valid.length === 1 ? 'idea' : 'ideas'} shown. Captured DNA version ${batch.dna_version}.`); return heading;
+    setStatus(discoveryLibrary === 'videos'
+      ? `${valid.length} ${valid.length === 1 ? 'idea' : 'ideas'} shown. Captured DNA version ${batch.dna_version}.`
+      : `${libraryData.find(([kind]) => kind === discoveryLibrary)![1]} opened instantly from the saved batch.`);
+    return heading;
   }
 
   function renderStudio(job: CreatorJobView & { result: { kind: 'scripts' } }) {
@@ -436,7 +454,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const active = doc.activeElement as HTMLElement | null;
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active?.dataset.focus : undefined;
-    if (!same) { ideaIndex = 0; variantIndex = 0; studioTab = 0; }
+    if (!same) { ideaIndex = 0; discoveryLibrary = 'videos'; variantIndex = 0; studioTab = 0; }
     identity = nextIdentity; current = job; wrapper.dataset.mode = mode; content.replaceChildren();
     let heading: HTMLElement;
     if (job.state === 'queued' || job.state === 'running') heading = renderPending(job);

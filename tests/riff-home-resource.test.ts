@@ -11,7 +11,7 @@ import {
   riffHomeHtml,
 } from '../apps/worker/riff-home-resource.ts';
 
-test('Riff Home is one static, fullscreen-only, empty-network MCP App', async (t) => {
+test('Riff Home keeps the prior URI readable while publishing the current fullscreen, empty-network MCP App', async (t) => {
   const server = new McpServer({ name: 'riff-home-fixture', version: '1' });
   registerRiffHomeResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -23,8 +23,15 @@ test('Riff Home is one static, fullscreen-only, empty-network MCP App', async (t
   const listed = await client.listResources();
   assert.deepEqual(listed.resources.map(({ name, uri, mimeType }) => ({ name, uri, mimeType })), [{
     name: 'riff-home', uri: RIFF_HOME_URI, mimeType: RIFF_HOME_MIME,
+  }, {
+    name: 'riff-home-v1-compat', uri: 'ui://riff/home-v1.html', mimeType: RIFF_HOME_MIME,
   }]);
   const content = (await client.readResource({ uri: RIFF_HOME_URI })).contents[0]!;
+  const legacy = (await client.readResource({ uri: 'ui://riff/home-v1.html' })).contents[0]!;
+  assert.ok('text' in content);
+  assert.ok('text' in legacy);
+  assert.equal(legacy.text, content.text,
+    'existing ChatGPT threads can reload their cached v1 resource with the current safe bundle');
   assert.deepEqual(content._meta, RIFF_HOME_META);
   assert.deepEqual(RIFF_HOME_META['openai/ui'], {
     availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen',
@@ -32,7 +39,6 @@ test('Riff Home is one static, fullscreen-only, empty-network MCP App', async (t
   assert.deepEqual(RIFF_HOME_META.ui.csp, {
     connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [],
   });
-  assert.ok('text' in content);
   const html = content.text as string;
   assert.match(html, /Riff Home/);
   assert.equal((html.match(/<script>/g) ?? []).length, 1);

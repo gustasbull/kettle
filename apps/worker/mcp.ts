@@ -29,14 +29,22 @@ export interface McpAuth {
   creatorOperations?: ReturnType<typeof createCreatorOperations>;
   riffCreatorOperations?: ReturnType<typeof createRiffCreatorOperations>;
 }
+const MCP_INSTRUCTIONS = [
+  'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
+  'Do not call the diagnostic, profile, or account-state tools before `open_riff`.',
+  'When the user explicitly asks to analyze a public TikTok profile or video URL, call `start_riff_creator` directly.',
+  'Use `show_riff_welcome` only for first-use onboarding or when the user asks to replay it.',
+].join(' ');
+
 export async function handleMcp(request: Request, auth?: McpAuth): Promise<Response> {
   const token = bearer(request);
-  if (auth && request.headers.has('authorization') && (!token || !await auth.verifier.verify(token))) {
-    return new Response('Authentication required', { status: 401, headers: {
-      'WWW-Authenticate': challenge(auth.config), 'Cache-Control': 'no-store',
-    } });
-  }
-  const server = new McpServer({ name: 'kettle-foundation', version: '0.1.0' });
+  // MCP discovery and UI resources contain no account data. Authentication is
+  // enforced inside every protected tool invocation, which avoids resolving a
+  // Supabase identity for initialize, tools/list, and resources/read requests.
+  const server = new McpServer(
+    { name: 'kettle-foundation', version: '0.1.0' },
+    { instructions: MCP_INSTRUCTIONS },
+  );
   server.registerTool('kettle_diagnostic', {
     title: 'Check Riff connection',
     description: 'Check Riff connectivity. Returns no account data and performs no writes.',
@@ -132,7 +140,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
     const securitySchemes=[{type:'oauth2',scopes:[...oauthScopes]}];
     return {...tool,contract,securitySchemes,description:tool.name==='render_creator_job'?'Show an existing creator job and its saved DNA, ideas or scripts as an inline card. Read-only: refresh never starts research or generation. Use the explicit job_id.':pipelineDescriptions[tool.operation],
       annotations:{readOnlyHint:contract.readOnly,destructiveHint:false,idempotentHint:true,openWorldHint:!contract.readOnly&&tool.operation!=='save_creator_scripts'},
-      _meta:{securitySchemes,...(tool.ui?{ui:tool.ui}:{})}};
+      _meta:{securitySchemes,ui:{...(tool.ui??{}),visibility:['model','app'] as const}}};
   });
   const riffCreatorTools = [
     {
@@ -151,7 +159,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
     return { ...tool, contract, securitySchemes,
       annotations: { readOnlyHint: contract.readOnly, destructiveHint: false, idempotentHint: true,
         openWorldHint: tool.operation === 'start_riff_creator' },
-      _meta: { securitySchemes, ...(tool.ui ? { ui: tool.ui } : {}) },
+      _meta: { securitySchemes, ui: { ...(tool.ui ?? {}), visibility: ['model', 'app'] as const } },
     };
   });
   const accountContract = toolContracts.get_account_state;
@@ -162,7 +170,10 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
   } satisfies OpenAIUiToolMetadata;
   const profileMeta = { securitySchemes: riffSecurity, 'openai/profile': true };
   const homeMeta = {
-    securitySchemes: riffSecurity, ui: { resourceUri: RIFF_HOME_URI }, 'openai/ui': openaiHomeUi,
+    securitySchemes: riffSecurity,
+    ui: { resourceUri: RIFF_HOME_URI, visibility: ['model', 'app'] as const },
+    'openai/ui': openaiHomeUi,
+    'openai/widgetAccessible': true,
   };
   if (auth?.pipelineOperations || auth?.riffCreatorOperations) registerCreatorPipelineResource(server);
   if(auth?.pipelineOperations){
@@ -290,6 +301,13 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
   // SDK 1.32's high-level registration only serializes _meta. Publish the
   // standard top-level securitySchemes as well, using its public list handler API.
   type AuthTool = Tool & { securitySchemes: ({ type: string; scopes?: string[] })[] };
+  const publishedOutputSchema = (schema: z.ZodType) => {
+    const output = ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
+    // Large nested output schemas are repeated once per tool and are injected
+    // into the model's launch context. Runtime contracts still validate the
+    // complete result; discovery keeps only compact schemas to stay interactive.
+    return JSON.stringify(output).length <= 5_000 ? output : undefined;
+  };
   const diagnostic: AuthTool = {
     name: 'kettle_diagnostic', title: 'Check Riff connection', description: 'Check Riff connectivity. Returns no account data and performs no writes.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -308,29 +326,33 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
   const descriptors: AuthTool[] = [diagnostic];
   if (auth) descriptors.push(welcomeDescriptor);
   if (auth) for (const tool of productTools) {
+    const outputSchema = publishedOutputSchema(tool.contract.output);
     descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      ...(outputSchema ? { outputSchema } : {}),
       annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
     });
   }
   if (auth?.creatorOperations) for (const tool of creatorTools) {
+    const outputSchema = publishedOutputSchema(tool.contract.output);
     descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      ...(outputSchema ? { outputSchema } : {}),
       annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
     });
   }
   if(auth?.pipelineOperations)for(const tool of pipelineTools){
+    const outputSchema=publishedOutputSchema(tool.contract.output);
     descriptors.push({name:tool.name,title:tool.title,description:tool.description,
       inputSchema:ToolSchema.shape.inputSchema.parse({...z.toJSONSchema(tool.contract.input),type:'object'}),
-      outputSchema:ToolSchema.shape.outputSchema.parse({...z.toJSONSchema(tool.contract.output),type:'object'}),
+      ...(outputSchema?{outputSchema}:{}),
       annotations:tool.annotations,securitySchemes:tool.securitySchemes,_meta:tool._meta});
   }
   if (auth?.riffCreatorOperations) for (const tool of riffCreatorTools) {
+    const outputSchema = publishedOutputSchema(tool.contract.output);
     descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      ...(outputSchema ? { outputSchema } : {}),
       annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
     });
   }

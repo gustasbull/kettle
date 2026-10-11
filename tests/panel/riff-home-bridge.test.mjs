@@ -99,6 +99,142 @@ test('Riff Home keeps onboarding in chat and runs the creator happy path in the 
   await frame.waitForFunction(() => document.querySelector('#mount').textContent === '');
 });
 
+test('Riff Home uses the ChatGPT compatibility tool bridge when MCP Apps serverTools is absent', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.compatCalls=[];
+    const scan=pipelineFixture('video-analysis');
+    window.openai={callTool:async(name,args)=>{
+      window.compatCalls.push({name,args});
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='start_riff_creator')return {structuredContent:{ok:true,data:{job:scan}}};
+      return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'chatgpt-compat',version:'1'},hostCapabilities:{message:{text:{}}},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const source = 'https://vm.tiktok.com/ZN8kT9uhV/';
+  await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').fill(source);
+  await frame.getByRole('button', { name: 'Find my next idea' }).click();
+  await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).waitFor();
+  const start = await frame.evaluate(() => window.compatCalls.find(call => call.name === 'start_riff_creator'));
+  assert.equal(start.args.source_url, source);
+  assert.match(start.args.request_id, /^[0-9a-f-]{36}$/i);
+  assert.ok(await frame.evaluate(() => window.compatCalls.some(call => call.name === 'list_riff_work')));
+});
+
+test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT handoffs honestly', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.openai={
+      callTool:async(name)=>name==='list_riff_work'
+        ? {structuredContent:{ok:true,data:{work:[]}}}
+        : new Promise(()=>{}),
+      sendFollowUpMessage:async()=>{throw new Error('fixture rejection')},
+    };
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:60,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'compat-timeout',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const submit = frame.getByRole('button', { name: 'Find my next idea' });
+
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000001'); await submit.click();
+  await frame.getByText(/could not confirm whether this analysis started/i).waitFor();
+  assert.equal(await submit.isEnabled(), true, 'a stalled compatibility tool cannot leave the action locked');
+
+  await input.fill('A quick desk makeover'); await submit.click();
+  await frame.getByText(/handoff failed/i).waitFor();
+  assert.equal(await submit.isEnabled(), true);
+});
+
+test('Riff Home ignores an older start response after a newer creator intent wins', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.video=pipelineFixture('video-analysis'); window.profile=pipelineFixture('scan'); window.pendingStarts=[];
+    window.openai={callTool:async(name,args)=>{
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='start_riff_creator')return new Promise(resolve=>window.pendingStarts.push({args,resolve}));
+      return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'compat-ordering',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000001');
+  await frame.locator('form').evaluate(form => form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true })));
+  await frame.waitForFunction(() => window.pendingStarts.length === 1);
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000002');
+  await frame.locator('form').evaluate(form => form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true })));
+  await frame.waitForFunction(() => window.pendingStarts.length === 2);
+
+  await frame.evaluate(() => window.pendingStarts[1].resolve({structuredContent:{ok:true,data:{job:window.profile}}}));
+  await frame.getByRole('heading', { name: 'Turn what’s working into your next breakout.' }).waitFor();
+  await frame.evaluate(() => window.pendingStarts[0].resolve({structuredContent:{ok:true,data:{job:window.video}}}));
+  await frame.waitForTimeout(100);
+  assert.equal(await frame.getByRole('heading', { name: 'Turn what’s working into your next breakout.' }).count(), 1,
+    'the older response cannot replace the newer selected workflow');
+  assert.equal(await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).count(), 0);
+});
+
 test('Riff Home reuses a logical request ID for ambiguous and retry-same-request outcomes', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';

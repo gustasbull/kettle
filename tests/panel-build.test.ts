@@ -7,6 +7,14 @@ import { runInNewContext } from 'node:vm';
 // @ts-expect-error Build tooling is a Node ESM module, not part of the Worker.
 import { buildPanel } from '../scripts/build-panel.mjs';
 
+test('Riff Home keeps its first-paint browser bundle below 500 KB', async () => {
+  const source = await readFile('apps/panel/generated/riff-home-bundle.ts', 'utf8');
+  const literal = source.split('export const riffHomeScript: string = ')[1]!.trim().slice(0, -1);
+  const script = JSON.parse(literal) as string;
+  const bytes = Buffer.byteLength(script, 'utf8');
+  assert.ok(bytes < 500_000, `Riff Home browser bundle is ${bytes} bytes; keep launch-critical code below 500 KB`);
+});
+
 for (const kind of ['project', 'creator', 'riff-onboarding', 'riff-home']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'kettle-panel-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));

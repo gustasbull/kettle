@@ -62,11 +62,13 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   await db.query("insert into public.creator_pipeline_allowances(account_id,profile_url,enabled,expires_at) values($1,$2,true,now()+interval '1 day')",[accountA,f.input.request.supplied_url]);
   await db.exec("insert into public.creator_provider_trials(provider,remaining_units,enabled,expires_at) values('scrapecreators',10,true,now()+interval '1 hour'),('lightreel',3,true,now()+interval '1 hour')");
   const listing=await (await rpc('tools/list',{})).json() as {result:{tools:any[]}};
+  const catalogBytes=Buffer.byteLength(JSON.stringify(listing.result),'utf8');
+  assert.ok(catalogBytes<64*1024,`model-facing MCP catalog is ${catalogBytes} bytes; keep launch discovery below 64 KB`);
   for(const name of ['start_creator_scan','start_creator_recommendations','save_creator_scripts','get_creator_job','render_creator_job']){
     const tool=listing.result.tools.find(t=>t.name===name);assert.ok(tool,name);
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output),type:'object'});
+    assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');
@@ -108,5 +110,7 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v2.html'})).json() as any;
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));
   assert.deepEqual(content._meta.ui.csp,{connectDomains:[],resourceDomains:[],frameDomains:[],baseUriDomains:[]});
-  identity.block();assert.equal((await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}},token)).status,401);
+  identity.block();
+  const blocked=await (await rpc('tools/call',{name:'get_creator_job',arguments:{job_id:saved.id}},token)).json() as any;
+  assert.equal(blocked.result.isError,true);assert.match(blocked.result._meta['mcp/www_authenticate'][0],/invalid_token/);
 });

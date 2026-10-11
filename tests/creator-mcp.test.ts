@@ -40,7 +40,7 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
     const tool = listing.result.tools.find(t => t.name === name)!; assert.ok(tool);
     const contract = creatorContracts[name === 'correct_creator_dna' ? name : 'get_creator_dna'];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output),type:'object'});
+    assert.equal(tool.outputSchema,undefined,'large runtime-validated results stay out of launch discovery');
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t => /ingest|scan|generate/.test(String(t.name))));
@@ -79,5 +79,6 @@ test('Creator MCP reads, render and corrections use signed identity, real SQL an
   const unavailable = await (await rpc('tools/list',{},undefined,false)).json() as {result:{tools:{name:string}[]}};
   assert.deepEqual(unavailable.result.tools.map(t=>t.name),['kettle_diagnostic']);
   identity.block();
-  assert.equal((await rpc('tools/call',{name:'correct_creator_dna',arguments:correction},token)).status,401);
+  const blocked=await (await rpc('tools/call',{name:'correct_creator_dna',arguments:correction},token)).json() as any;
+  assert.equal(blocked.result.isError,true);assert.match(blocked.result._meta['mcp/www_authenticate'][0],/invalid_token/);
 });

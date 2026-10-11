@@ -9,7 +9,7 @@ import { handleMcp, type McpAuth } from '../apps/worker/mcp.ts';
 import { oauthScopes } from '../packages/auth/index.ts';
 import { PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME, PROJECT_REVIEW_META, projectReviewHtml } from '../apps/worker/project-review-resource.ts';
 import { RIFF_ONBOARDING_MIME, RIFF_ONBOARDING_URI } from '../apps/worker/riff-onboarding-resource.ts';
-import { RIFF_HOME_MIME, RIFF_HOME_URI } from '../apps/worker/riff-home-resource.ts';
+import { RIFF_HOME_LEGACY_URI, RIFF_HOME_MIME, RIFF_HOME_URI } from '../apps/worker/riff-home-resource.ts';
 import { config, fixtureAuth } from './auth-fixtures.ts';
 import { createInput } from './fixtures.ts';
 
@@ -47,7 +47,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   const tool = list.result.tools.find((item) => item.name === 'show_project_brief')!;
   assert.ok(tool);
   assert.deepEqual(tool.inputSchema, { ...z.toJSONSchema(GetProjectInput), type: 'object' });
-  assert.deepEqual(tool.outputSchema, { ...z.toJSONSchema(GetProjectOutput), type: 'object' });
+  assert.equal(tool.outputSchema, undefined, 'large runtime-validated results stay out of launch discovery');
   const securitySchemes = [{ type: 'oauth2', scopes: [...oauthScopes] }];
   assert.deepEqual(tool.securitySchemes, securitySchemes);
   assert.deepEqual(tool._meta, { securitySchemes, ui: { resourceUri: PROJECT_REVIEW_URI } });
@@ -78,8 +78,10 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.equal(calls, count, 'anonymous, scope-denied and malformed requests cannot touch storage');
   const expired = await rpc('tools/call', { name: 'show_project_brief', arguments: args }, auth,
     await identity.token({ exp: Math.floor(Date.now() / 1000) - 1 }));
-  assert.equal(expired.status, 401);
-  assert.match(expired.headers.get('www-authenticate')!, /invalid_token/);
+  assert.equal(expired.status, 200);
+  const expiredResult = (await expired.json() as { result: { isError?: boolean; _meta?: Record<string, string[]> } }).result;
+  assert.equal(expiredResult.isError, true);
+  assert.match(expiredResult._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
   const otherToken = await identity.token({ sub: 'user-b' });
   const other = (await call('show_project_brief', args, otherToken)).result;
   const absent = (await call('show_project_brief', { project_id: crypto.randomUUID() }, otherToken)).result;
@@ -103,7 +105,8 @@ test('project-review render tool uses signed identity, exact read contract and r
   assert.deepEqual(resources.result.resources.map((r) => [r.name, r.uri, r.mimeType]),
     [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
       ['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME],
-      ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME]]);
+      ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME],
+      ['riff-home-v1-compat', RIFF_HOME_LEGACY_URI, RIFF_HOME_MIME]]);
   assert.equal(resources.result.resources.find((r) => r.uri === PROJECT_REVIEW_URI)!.title, 'Riff project brief');
   const read = await (await rpc('resources/read', { uri: PROJECT_REVIEW_URI }, auth)).json() as {
     result: { contents: { uri: string; mimeType: string; text: string; _meta: unknown }[] };

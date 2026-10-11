@@ -165,10 +165,10 @@ body { min-height: 100vh; }
 `;
 
 const libraries = [
-  ['videos', 'Trending videos', 'evidence-backed trending videos'],
-  ['hooks', 'Hooks', 'opening hooks'],
-  ['showcases', 'Product showcases', 'product showcases'],
-  ['ctas', 'Calls to action', 'calls to action'],
+  ['videos', 'Trending videos', 'Add a public TikTok profile or video link below. Riff will analyze it, then find evidence-backed video directions here.'],
+  ['hooks', 'Hooks', 'Hook analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
+  ['showcases', 'Product showcases', 'Showcase analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
+  ['ctas', 'Calls to action', 'CTA analysis starts from a public TikTok profile or video link. Add one below to keep the workflow inside Riff.'],
 ] as const;
 
 function formatRelativeDate(value: string) {
@@ -193,6 +193,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   dispose(): void;
 } {
   const doc = root.ownerDocument;
+  let invocationEpoch = 0;
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className = '') => {
     const item = doc.createElement(tag); item.className = className;
     if (text !== undefined) item.textContent = text;
@@ -239,12 +240,18 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const input = node('textarea'); input.id = 'riff-home-input'; label.htmlFor = input.id;
   input.placeholder = 'Share a video or profile link, or tell me what you want to make…';
   const chips = node('div', undefined, 'riff-home__chips');
-  for (const [kind, title, request] of libraries) {
+  const libraryControls: HTMLButtonElement[] = [];
+  for (const [kind, title, guidance] of libraries) {
     const chip = node('button', title, 'riff-home__chip'); chip.type = 'button'; chip.dataset.library = kind;
-    chip.addEventListener('click', () => void invoke(() => actions.send(
-      `Use Riff to explore ${request} for my next creator video. Ground suggestions in my saved creator context and current evidence.`,
-    ), `Opening ${title.toLowerCase()} in ChatGPT…`));
-    chips.append(chip);
+    chip.setAttribute('aria-pressed', 'false');
+    chip.addEventListener('click', () => {
+      if (disposed) return;
+      invocationEpoch++;
+      for (const control of libraryControls) control.setAttribute('aria-pressed', String(control === chip));
+      status.textContent = guidance;
+      input.focus({ preventScroll: true });
+    });
+    libraryControls.push(chip); chips.append(chip);
   }
   const inputShell = node('div', undefined, 'riff-home__input-shell');
   const footer = node('div', undefined, 'riff-home__composer-footer');
@@ -280,22 +287,22 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     }
     breadcrumb.textContent = label === 'Home' ? 'Riff / Home' : `Riff / ${label}`;
   };
-  const disableControls = (disabled: boolean) => {
-    const controls = new Set<HTMLButtonElement | HTMLTextAreaElement>([
-      ...app.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button, textarea'),
-      ...home.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button, textarea'),
-    ]);
-    for (const control of controls) control.disabled = disabled;
-  };
-  const invoke = async (action: () => Promise<RiffActionResult>, pending: string) => {
+  const invoke = async (action: () => Promise<RiffActionResult>, pending: string, control?: HTMLButtonElement) => {
     if (disposed) return;
-    status.textContent = pending; disableControls(true);
-    try { status.textContent = (await action()).message; }
-    catch { status.textContent = 'Riff could not complete that action. Continue in the ChatGPT conversation.'; }
-    finally { disableControls(false); }
+    const epoch = ++invocationEpoch;
+    status.textContent = pending;
+    if (control) control.disabled = true;
+    try {
+      const result = await action();
+      if (!disposed && epoch === invocationEpoch) status.textContent = result.message;
+    } catch {
+      if (!disposed && epoch === invocationEpoch) status.textContent = 'Riff could not complete that action. Continue in the ChatGPT conversation.';
+    }
+    finally { if (control) control.disabled = false; }
   };
   const showHome = () => {
     if (disposed) return;
+    invocationEpoch++;
     if (!home.isConnected) body.insertBefore(home, workflow);
     home.hidden = false; workflow.hidden = true; setCurrentNav('Home');
   };
@@ -326,7 +333,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   form.addEventListener('submit', event => {
     event.preventDefault(); const value = input.value.trim();
     if (!value) { status.textContent = 'Add a video link, profile link, or idea first.'; input.focus(); return; }
-    void invoke(() => actions.start(value), 'Starting your Riff analysis…');
+    void invoke(() => actions.start(value), 'Starting your Riff analysis…', submit);
   });
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) form.requestSubmit();
@@ -334,6 +341,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   upload.addEventListener('click', () => void invoke(
     actions.upload ?? (() => actions.send('I want to analyze a video with Riff. Help me attach it through ChatGPT, and do not claim it was uploaded until the host confirms the file.')),
     'Opening the ChatGPT file picker…',
+    upload,
   ));
 
   function renderRecentsState(state: RiffRecentsState) {
@@ -351,6 +359,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       retry.addEventListener('click', () => void invoke(
         actions.refreshRecents ?? (async () => ({ status: 'unsupported', message: 'Reopen Riff Home to retry recent work.' })),
         'Refreshing recent work…',
+        retry,
       ));
       error.append(copy, retry); recents.append(error); return;
     }
@@ -370,6 +379,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       card.addEventListener('click', () => void invoke(
         actions.openRecent ? () => actions.openRecent!(item.job_id) : () => actions.send(`Open my saved Riff creator job ${item.job_id}.`),
         `Opening ${item.title}…`,
+        card,
       ));
       recents.append(card);
     }
@@ -385,10 +395,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
       refresh.setAttribute('aria-label', `Refresh saved job ${job.id}`);
       refresh.addEventListener('click', async () => {
         if (disposed) return;
-        workflowStatus.textContent = 'Refreshing saved job…'; disableControls(true);
+        workflowStatus.textContent = 'Refreshing saved job…'; refresh.disabled = true;
         try { workflowStatus.textContent = (await actions.refreshJob!(job)).message; }
         catch { workflowStatus.textContent = 'Riff could not refresh this saved job. Try again.'; }
-        finally { disableControls(false); }
+        finally { if (refresh.isConnected) refresh.disabled = false; }
       });
       workflowMeta.append(refresh);
     }
@@ -409,6 +419,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setBusy(message) { if (!disposed) status.textContent = message; },
     showJob(job) {
       if (disposed) return;
+      invocationEpoch++;
       currentJob = job; home.remove(); workflow.hidden = false;
       renderWorkflowMeta(job);
       const stage = job.result?.kind === 'recommendations' ? 'Discover' : job.result?.kind === 'scripts' ? 'Studio' : 'Home';

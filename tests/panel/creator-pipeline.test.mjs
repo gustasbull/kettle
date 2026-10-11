@@ -107,7 +107,15 @@ test('Riff Analysis, Discovery, and Studio render only persisted creator-job fac
     assert.equal(await libraries.count(), 1);
     assert.equal(await libraries.getByRole('tab').count(), 4);
     assert.equal(await libraries.getByRole('tab', { name: 'Videos', exact: true }).getAttribute('aria-selected'), 'true');
-    assert.match(await root.locator('[data-library="hooks"]').textContent(), /ChatGPT/);
+    const promptCount = await page.evaluate(() => window.actions.length);
+    const hooks = libraries.getByRole('tab', { name: 'Hooks', exact: true });
+    assert.equal(await hooks.count(), 1);
+    await hooks.click();
+    assert.equal(await hooks.getAttribute('aria-selected'), 'true');
+    assert.match(await root.textContent(), /timestamped hook clips are not available/i);
+    assert.equal(await page.evaluate(() => window.actions.length), promptCount,
+      'library tabs switch immediately inside Riff instead of waiting for ChatGPT');
+    await libraries.getByRole('tab', { name: 'Videos', exact: true }).click();
     assert.doesNotMatch(await root.textContent(), /7 ideas|lift|likes/i);
     const region = root.locator('[data-discovery-carousel]');
     const stage = root.locator('[data-discovery-stage]');

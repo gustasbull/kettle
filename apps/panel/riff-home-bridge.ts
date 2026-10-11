@@ -3,13 +3,14 @@ import {
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps/app-with-deps';
 import type { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
-import { Failure } from '../../packages/contracts/index.ts';
 import { mountRiffHome, riffHomeStructuredOutput, type RiffHomeState } from './riff-home/index.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
   selectFiles?: () => Promise<OpenAIFile[]>;
   uploadFile?: (file: File, options?: { library?: boolean }) => Promise<{ fileId: string }>;
+  callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  sendFollowUpMessage?: (input: { prompt: string; scrollToBottom?: boolean }) => Promise<unknown>;
 };
 
 declare global { interface Window { openai?: OpenAIHost } }
@@ -45,10 +46,23 @@ function readJob(raw: unknown): CreatorJobView | undefined {
   return job as CreatorJobView;
 }
 
+const failureCodes = new Set([
+  'UNAUTHENTICATED', 'FORBIDDEN', 'VALIDATION_ERROR', 'NOT_FOUND',
+  'VERSION_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'UNAVAILABLE',
+]);
+const recoveryKinds = new Set(['reauthorize', 'contact_support', 'correct_input', 'reload', 'retry_same_request']);
+function readFailure(raw: unknown): { code: string; recovery: string } | undefined {
+  const result = envelope(raw); const error = object(result?.error);
+  if (result?.ok !== false || !error || typeof error.code !== 'string' || !failureCodes.has(error.code)
+    || typeof error.recovery !== 'string' || !recoveryKinds.has(error.recovery)
+    || typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return undefined;
+  return { code: error.code, recovery: error.recovery };
+}
+
 function failureMessage(raw: unknown, fallback: string) {
-  const parsed = Failure.safeParse(envelope(raw));
-  if (!parsed.success) return fallback;
-  const code = parsed.data.error.code;
+  const failure = readFailure(raw);
+  if (!failure) return fallback;
+  const code = failure.code;
   if (code === 'UNAUTHENTICATED') return 'Reconnect Riff in ChatGPT, then try again.';
   if (code === 'FORBIDDEN') return 'Riff’s development access or trial allowance is not available for this account.';
   if (code === 'VALIDATION_ERROR') return 'Use a public TikTok video or creator-profile link.';
@@ -58,8 +72,8 @@ function failureMessage(raw: unknown, fallback: string) {
 
 /** Unknown/malformed responses are ambiguous too: retaining the key is safer than duplicating work. */
 function retainRequestId(raw: unknown) {
-  const parsed = Failure.safeParse(envelope(raw));
-  return !parsed.success || parsed.data.error.recovery === 'retry_same_request';
+  const failure = readFailure(raw);
+  return !failure || failure.recovery === 'retry_same_request';
 }
 
 function pickLocalVideo(doc: Document): Promise<File | undefined> {
@@ -76,10 +90,11 @@ function pickLocalVideo(doc: Document): Promise<File | undefined> {
 export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const toolTimeoutMs = options.toolTimeoutMs ?? 45_000;
-  const pollIntervalMs = options.pollIntervalMs ?? 2_000;
-  const maxPollIntervalMs = options.maxPollIntervalMs ?? 15_000;
-  // With the defaults, bounded polling spans more than the provider's 540-second SLA.
-  const maxPolls = options.maxPolls ?? 42;
+  const pollIntervalMs = options.pollIntervalMs ?? 1_500;
+  const maxPollIntervalMs = options.maxPollIntervalMs ?? 5_000;
+  // The faster cap surfaces 30–60 second provider completions promptly while
+  // retaining a bounded observation window beyond the provider's 540s SLA.
+  const maxPolls = options.maxPolls ?? 120;
   const app = new App({ name: 'riff-home', version: '1.1.0' }, { availableDisplayModes: ['fullscreen'] }, { autoResize: true });
   let connected = false;
   let disposed = false;
@@ -90,32 +105,68 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let creatorRequest: { key: string; requestId: string } | undefined;
   let recommendationRequest: { key: string; requestId: string } | undefined;
+  let actionEpoch = 0;
   const terminalWorkRefreshes = new Set<string>();
 
+  type DeadlineResult<T> = { status: 'resolved'; value: T } | { status: 'rejected' } | { status: 'timeout' };
+  const withDeadline = <T>(promise: Promise<T>, deadlineMs: number): Promise<DeadlineResult<T>> => new Promise(resolve => {
+    let settled = false;
+    const finish = (result: DeadlineResult<T>) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); resolve(result);
+    };
+    const timer = setTimeout(() => finish({ status: 'timeout' }), deadlineMs);
+    promise.then(value => finish({ status: 'resolved', value }), () => finish({ status: 'rejected' }));
+  });
+
   const callTool = async (name: string, args: Record<string, unknown>): Promise<ToolCallOutcome> => {
-    if (!connected || !app.getHostCapabilities()?.serverTools) return { status: 'ambiguous' };
+    if (!connected) return { status: 'ambiguous' };
     try {
-      const value = await app.callServerTool({ name, arguments: args }, {
-        timeout: toolTimeoutMs, maxTotalTimeout: toolTimeoutMs,
-      });
+      let value: unknown;
+      if (app.getHostCapabilities()?.serverTools) {
+        value = await app.callServerTool({ name, arguments: args }, { timeout: toolTimeoutMs, maxTotalTimeout: toolTimeoutMs });
+      } else if (window.openai?.callTool) {
+        const outcome = await withDeadline(window.openai.callTool(name, args), toolTimeoutMs);
+        if (outcome.status !== 'resolved') return { status: 'ambiguous' };
+        value = outcome.value;
+      }
+      if (value === undefined) return { status: 'ambiguous' };
       return { status: 'response', value };
     } catch { return { status: 'ambiguous' }; }
   };
 
   const send = async (prompt: string) => {
-    if (!connected || !app.getHostCapabilities()?.message?.text) return {
+    if (!connected) return {
       status: 'unsupported' as const,
       message: 'Continue in the ChatGPT composer with this request.',
     };
     try {
-      const params = {
-        role: 'user' as const, content: [{ type: 'text' as const, text: prompt }],
-        _meta: { 'openai/message': { target: 'active', send: true } },
+      let request: Promise<unknown>;
+      if (!app.getHostCapabilities()?.message?.text && window.openai?.sendFollowUpMessage) {
+        request = window.openai.sendFollowUpMessage({ prompt, scrollToBottom: false });
+      } else if (!app.getHostCapabilities()?.message?.text) return {
+        status: 'unsupported' as const, message: 'Continue in the ChatGPT composer with this request.',
+      }; else {
+        const params = {
+          role: 'user' as const, content: [{ type: 'text' as const, text: prompt }],
+          _meta: { 'openai/message': { target: 'active', send: true } },
+        };
+        request = app.sendMessage(params);
+      }
+      // A host can keep ui/message open for the full model turn. Wait briefly
+      // for acceptance/rejection, then report a truthful pending state.
+      const outcome = await withDeadline(request, Math.min(toolTimeoutMs, 750));
+      if (outcome.status === 'rejected') return {
+        status: 'failed' as const, message: 'The ChatGPT handoff failed. Continue in the composer.',
       };
-      const result = await app.sendMessage(params);
-      return result.isError
-        ? { status: 'failed' as const, message: 'ChatGPT did not accept that request. Continue in the composer.' }
-        : { status: 'sent' as const, message: 'Sent to this ChatGPT conversation.' };
+      if (outcome.status === 'timeout') return {
+        status: 'pending' as const,
+        message: 'Sending this request to ChatGPT. If it does not appear, continue in the composer.',
+      };
+      if (object(outcome.value)?.isError === true) return {
+        status: 'failed' as const, message: 'ChatGPT did not accept that request. Continue in the composer.',
+      };
+      return { status: 'sent' as const, message: 'Sent to this ChatGPT conversation.' };
     } catch {
       return { status: 'failed' as const, message: 'The ChatGPT handoff failed. Continue in the composer.' };
     }
@@ -123,6 +174,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
 
   const view = mountRiffHome(root, {
     async start(rawSource) {
+      const epoch = ++actionEpoch;
       const trimmed = rawSource.trim();
       const sourceUrl = /^@[\w.]{1,100}$/.test(trimmed) ? `https://www.tiktok.com/${trimmed}` : trimmed;
       let parsed: URL | undefined;
@@ -141,21 +193,23 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       }
       const pendingRequest = creatorRequest;
       const outcome = await callTool('start_riff_creator', { request_id: pendingRequest.requestId, source_url: sourceUrl });
+      if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
       if (outcome.status === 'ambiguous') return {
         status: 'failed',
         message: 'Riff could not confirm whether this analysis started. Try the same link again safely.',
       };
       const job = readJob(outcome.value);
       if (!job) {
-        if (!retainRequestId(outcome.value)) creatorRequest = undefined;
+        if (!retainRequestId(outcome.value) && creatorRequest === pendingRequest) creatorRequest = undefined;
         return { status: 'failed', message: failureMessage(outcome.value, 'Riff could not confirm a valid saved job. Try this same link again safely.') };
       }
-      creatorRequest = undefined;
+      if (creatorRequest === pendingRequest) creatorRequest = undefined;
       view.showJob(job); observe(job); if (active(job)) void loadWork();
       return { status: 'sent', message: 'Analysis started. Riff will update this saved job here.' };
     },
     send,
     async upload() {
+      actionEpoch++;
       const host = window.openai;
       try {
         let selected: OpenAIFile | undefined;
@@ -171,9 +225,11 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         return send(`I selected the ChatGPT video file “${label}” (file ID ${selected.fileId}) for Riff. Help me analyze it. If Riff cannot yet pass this file to its analysis tools, say so plainly and ask me for a public TikTok link; do not claim the file was processed.`);
       } catch { return { status: 'failed', message: 'The file picker could not complete. Attach the video in ChatGPT instead.' }; }
     },
-    showWelcome: () => send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'),
+    showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'); },
     async openRecent(jobId) {
+      const epoch = ++actionEpoch;
       const outcome = await callTool('get_creator_job', { job_id: jobId });
+      if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
       if (outcome.status === 'ambiguous') return { status: 'failed', message: 'Riff could not confirm the latest saved state. Try again.' };
       const job = readJob(outcome.value);
       if (!job) return { status: 'failed', message: failureMessage(outcome.value, 'That saved Riff job could not be opened.') };
@@ -181,7 +237,9 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     },
     refreshRecents: () => loadWork(),
     async refreshJob(savedJob) {
+      const epoch = ++actionEpoch;
       const outcome = await callTool('get_creator_job', { job_id: savedJob.id });
+      if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
       if (outcome.status === 'ambiguous') return { status: 'failed', message: 'The refresh could not be confirmed. Your saved job is unchanged; try again.' };
       const job = readJob(outcome.value);
       if (!job) return { status: 'failed', message: failureMessage(outcome.value, 'Riff could not refresh this saved job.') };
@@ -192,6 +250,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return { status: 'sent', message: active(job) ? 'Saved job refreshed. Work is still in progress.' : 'Saved job refreshed.' };
     },
     async startRecommendations({ dna }) {
+      const epoch = ++actionEpoch;
       const intentKey = `${dna.dna_id}:${dna.version}`;
       if (!recommendationRequest || recommendationRequest.key !== intentKey) {
         recommendationRequest = { key: intentKey, requestId: crypto.randomUUID() };
@@ -200,22 +259,24 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       const outcome = await callTool('start_creator_recommendations', {
         dna_id: dna.dna_id, expected_version: dna.version, request_id: pendingRequest.requestId,
       });
+      if (epoch !== actionEpoch) return { status: 'pending', message: 'A newer Riff action is already shown.' };
       if (outcome.status === 'ambiguous') return {
         status: 'failed',
         message: 'Riff could not confirm whether discovery started. Try this same analysis again safely.',
       };
       const job = readJob(outcome.value);
       if (!job) {
-        if (!retainRequestId(outcome.value)) recommendationRequest = undefined;
+        if (!retainRequestId(outcome.value) && recommendationRequest === pendingRequest) recommendationRequest = undefined;
         return { status: 'failed', message: failureMessage(outcome.value, 'Riff could not confirm a valid discovery job. Try this same analysis again safely.') };
       }
-      recommendationRequest = undefined;
+      if (recommendationRequest === pendingRequest) recommendationRequest = undefined;
       view.showJob(job); observe(job); if (active(job)) void loadWork();
       return { status: 'sent', message: 'Discovery started. Riff will update this saved job here.' };
     },
-    makeMine: ({ job, batch, idea }) => send(
-      `Continue this Riff workflow using creator job ${job.id}, recommendation batch ${batch.id}, and selected idea ${idea.id} (“${idea.title}”). Draft two or three evidence-grounded filming variants, then call save_creator_scripts with a fresh request ID and render the saved scripts in Studio. Do not invent references or claim anything was saved before the tool succeeds.`,
-    ),
+    makeMine: ({ job, batch, idea }) => {
+      actionEpoch++;
+      return send(`Continue this Riff workflow using creator job ${job.id}, recommendation batch ${batch.id}, and selected idea ${idea.id} (“${idea.title}”). Draft two or three evidence-grounded filming variants, then call save_creator_scripts with a fresh request ID and render the saved scripts in Studio. Do not invent references or claim anything was saved before the tool succeeds.`);
+    },
   });
   view.render(homeState);
 
