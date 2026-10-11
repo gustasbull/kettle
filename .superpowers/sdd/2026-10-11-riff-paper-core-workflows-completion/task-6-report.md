@@ -161,3 +161,37 @@ render, preserving the roving-tabindex contract.
 
 Fix commit: this commit (`fix: align Paper Studio details`); its final hash is
 returned in the agent handoff because a Git object cannot contain its own hash.
+
+## Fix round 2/5 — match Paper Studio tab rail
+
+Fix base: `39ee143760219a94ee9d9e730b5478c08ac55778`.
+
+Fresh review found that `.riff-studio-tabs` still inherited the shared Discovery
+rail colour `#F0F0F2`. Studio now has a narrow selector-scoped `#F0F3F7` override;
+the shared rule and Discovery rails are unchanged.
+
+### Regression-first TDD record
+
+- RED — `node --test tests/panel/creator-pipeline.test.mjs` passed 15/17. The
+  real computed Studio rail was `rgb(240, 240, 242)` instead of the independently
+  audited Paper value `rgb(240, 243, 247)`.
+- GREEN — the Studio browser suite passed 17/17 with the exact computed-style
+  assertion active.
+- GREEN — typecheck passed and the combined Studio/standalone-bridge suites passed
+  30/30.
+
+### Fix verification
+
+- `npm run check` — PASS:
+  - 537/537 Node tests;
+  - dry-run Worker build at 4,046.58 KiB / 821.74 KiB gzip;
+  - local workerd smoke test;
+  - 95/95 real-browser tests.
+- Creator-pipeline bundle: 154,084 bytes raw / 42,594 bytes gzip,
+  `sha256:c30b8c7f89210999afcdb46b566020a49355ed438f01584b315d2b8e2d95f153`.
+- Riff Home bundle: 215,910 bytes raw / 61,020 bytes gzip,
+  `sha256:d121ece85b51aa22ef3ea31fae16d879c733ce4f635403deb91dbc27fb96cb3e`.
+- `git diff --check` — PASS.
+
+Fix commit: this commit (`fix: match Paper Studio tab rail`); its final hash is
+returned in the agent handoff because a Git object cannot contain its own hash.

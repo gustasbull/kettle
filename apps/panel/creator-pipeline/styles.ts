@@ -213,7 +213,7 @@ html, body { margin: 0; background: transparent; }
 .riff-studio-variant[aria-checked="true"] { color:#6933a1;background:#fff;box-shadow:0 1px 3px #18243a14; }
 .riff-studio-shell { display: flex; align-self: flex-start; flex-direction: column; gap: 18px; width: 900px; max-width: 100%; padding: 18px; border-radius: 18px; background:linear-gradient(in oklab 150deg,oklab(93.2% -.012 -.016/.333) 0%,oklab(98.3% -.002 -.003/.4) 100%),#f0f6fa; box-shadow:inset 0 1px 0 #ffffffaa,0 8px 18px #396e9012; }
 .riff-studio-shell--part { gap:24px;padding:20px;background:radial-gradient(circle,rgba(101,86,122,.06) .6px,transparent .85px) center/16px 16px,radial-gradient(at 10% 70%,#DCEBFA 0%,transparent 60%),radial-gradient(at 70% 65%,#E6DDF6 0%,transparent 58%),radial-gradient(at 92% 30%,#F5E2EF 0%,transparent 55%),#FCFCFE;box-shadow:0 2px 4px #18243a0a,0 12px 24px #18243a14; }
-.riff-studio-tabs { width: 100%; height: 44px; gap: 8px; }
+.riff-studio-tabs { width: 100%; height: 44px; gap: 8px; background: #f0f3f7; }
 .riff-studio-tab { display: flex; flex: 1 0 auto; align-items: center; justify-content: center; height: 36px; min-height: 36px; padding: 8px; border-color: transparent; border-radius: 999px; color: #52617a; background: transparent; font-size: 15px; font-weight: 600; line-height: 18px; }
 .riff-studio-tab[aria-selected="true"] { color: #6933a1; background: #fff; box-shadow: 0 1px 3px #18243a14; }
 .riff-studio-body { display: flex; align-items: flex-start; gap: 24px; }

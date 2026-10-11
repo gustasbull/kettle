@@ -813,6 +813,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       const style = getComputedStyle(node); return { width: style.width, height: style.height, radius: style.borderRadius };
     }), { width: '240px', height: '427px', radius: '16px' });
     assert.equal(await root.locator('.riff-paper--studio').evaluate(node=>getComputedStyle(node).overflow),'clip');
+    assert.equal(await root.locator('.riff-studio-tabs').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 243, 247)');
     assert.equal(await root.locator('.riff-script-part').first().evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 243, 247)');
     assert.equal(await root.locator('.riff-studio-player__unavailable').textContent(),'Reference media unavailable');
     assert.equal(await root.locator('.riff-studio-references__unavailable').filter({hasText:'Reference details unavailable for this script.'}).count(),1);
