@@ -29,6 +29,24 @@ test('creator pipeline excludes server contract graphs and stays within launch b
   assert.deepEqual(PANEL_BUDGETS.pipeline, { raw_bytes: 250_000, gzip_bytes: 75_000 });
 });
 
+test('creator pipeline build rejects a synthetic server-runtime import and removes stale output', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'kettle-panel-boundary-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const panel = join(root, 'apps/panel');
+  const output = join(panel, 'generated/creator-pipeline-bundle.ts');
+  await mkdir(join(panel, 'creator-pipeline'), { recursive: true });
+  await mkdir(join(panel, 'generated'), { recursive: true });
+  await mkdir(join(root, 'packages/contracts'), { recursive: true });
+  await writeFile(join(panel, 'creator-pipeline/index.ts'), 'export const message = "real component";');
+  await writeFile(join(root, 'packages/contracts/synthetic.ts'), 'export const serverOnly = "forbidden";');
+  await writeFile(join(panel, 'creator-pipeline-bridge.ts'),
+    'import { message } from "./creator-pipeline/index"; import { serverOnly } from "../../packages/contracts/synthetic"; globalThis.rendered = message + serverOnly;');
+  await writeFile(output, 'stale');
+
+  await assert.rejects(buildPanel(root, 'pipeline'), /server runtime boundary.*packages\/contracts/);
+  await assert.rejects(readFile(output), 'a failed boundary build must not leave a stale artifact');
+});
+
 for (const kind of ['project', 'creator', 'riff-onboarding', 'riff-home']) test(`${kind} panel build bundles component code and removes stale output on missing/broken integration`, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'kettle-panel-build-'));
   t.after(() => rm(root, { recursive: true, force: true }));

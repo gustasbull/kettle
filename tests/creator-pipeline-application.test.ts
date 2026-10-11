@@ -97,6 +97,34 @@ test('queued start returns while deferred workflow create is unresolved', async 
   assert.equal((outcome as { ok: boolean }).ok, true);
 });
 
+test('deferred dispatch failure is observed once, contained, and cannot mutate durable intent', async () => {
+  const job=stored(),before=structuredClone(job),repositoryCalls:string[]=[];
+  const background:Promise<void>[]=[],events:Array<Record<string,unknown>>=[];
+  const observer:any={
+    scope(){return observer;},
+    record(fields:Record<string,unknown>){events.push(fields);},
+    async measure<T>(fields:Record<string,unknown>,run:()=>Promise<T>){
+      const started=performance.now();
+      try{const value=await run();events.push({...fields,status:'ok',duration_ms:performance.now()-started});return value;}
+      catch(error){events.push({...fields,status:'error',duration_ms:performance.now()-started});throw error;}
+    },
+  };
+  let dispatchAttempts=0;
+  const operations=createPipelineOperations(identity,{async call(operation){repositoryCalls.push(operation);return wrapped(job);}},
+    createCreatorDispatchScheduler(async()=>{dispatchAttempts++;throw new Error('workflow unavailable');},task=>background.push(task)),
+    ()=>true,observer);
+
+  const outcome=await operations.execute('start_creator_recommendations','token',input());
+  assert.equal(outcome.ok,true,'the committed queued intent remains accepted');
+  assert.deepEqual(repositoryCalls,['start_creator_recommendations']);
+  assert.equal(background.length,1,'one logical start registers one background task');
+  await assert.doesNotReject(background[0]!);
+  assert.equal(dispatchAttempts,1,'a failed workflow create is never retried in-process');
+  assert.deepEqual(job,before,'dispatch failure cannot mutate the stored job returned by the repository');
+  assert.deepEqual(events.filter(event=>event.stage==='application_operation'&&event.operation==='dispatch')
+    .map(event=>event.status),['error']);
+});
+
 test('start observations use the validated logical request then the returned durable job',async()=>{
   const correlations:Array<Record<string,string>>=[];
   const events:Array<{correlation?:Record<string,string>;stage:unknown;operation:unknown}>=[];

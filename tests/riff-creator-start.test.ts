@@ -21,6 +21,15 @@ const source = {
   video_url: 'https://www.tiktok.com/@creator.one/video/1234567890',
 };
 const input = { request_id: requestId, source_url: source.canonical_url };
+const profileSource = {
+  platform: 'tiktok' as const,
+  kind: 'profile' as const,
+  handle: source.handle,
+  canonical_url: source.profile_url,
+  profile_url: source.profile_url,
+  video_url: null,
+};
+const profileInput = { request_id: requestId, source_url: profileSource.canonical_url };
 const project = {
   id: projectId, name: '@creator.one creator work', project_type: 'brand' as const, current_version: 1,
   created_at: timestamp, updated_at: timestamp,
@@ -157,8 +166,33 @@ test('canonical creator start skips preflight and schedules one queued dispatch'
   assert.ok(!JSON.stringify(result).includes('account_id'));
 });
 
+test('canonical profile start preserves profile kind without a replay lookup', async () => {
+  let finds=0,resolutions=0,starts=0;
+  const dispatches:Array<[string,string]>=[];
+  const repository:RiffCreatorRepository={
+    async find(){finds++;throw new Error('canonical input must skip replay lookup');},
+    async start(accountId,value,canonical){
+      starts++;assert.equal(accountId,accountA);assert.deepEqual(value,profileInput);assert.deepEqual(canonical,profileSource);
+      return {ok:true,data:{project,job:storedJob,source:profileSource}};
+    },
+    async list(){throw new Error('must not list');},
+  };
+  const operations=createRiffCreatorOperations(
+    {async verify(){return {account_id:accountA,scopes:['projects:write']};}},repository,
+    async value=>{resolutions++;assert.equal(value,profileSource.canonical_url);return profileSource;},
+    (id,owner)=>{dispatches.push([id,owner]);},()=>true,undefined,()=> 'canonical',
+  );
+
+  const result=StartRiffCreatorOutput.parse(await operations.execute('start_riff_creator','token',profileInput));
+  assert.equal(result.ok,true);if(!result.ok)return;
+  assert.deepEqual(result.data.source,profileSource);
+  assert.equal(result.data.job.source_kind,undefined,'stored captured input remains the only source-kind authority');
+  assert.deepEqual({finds,resolutions,starts},{finds:0,resolutions:1,starts:1});
+  assert.deepEqual(dispatches,[[jobId,accountA]]);
+});
+
 test('short-link replay returns before redirect resolution and rejects untrusted identity or input', async () => {
-  let resolutions = 0; let starts = 0; let finds = 0;
+  let resolutions = 0; let starts = 0; let finds = 0; let dispatches = 0;
   const repository: RiffCreatorRepository = {
     async find() { finds++; return storedSuccess; },
     async start() { starts++; throw new Error('must not start'); },
@@ -168,16 +202,48 @@ test('short-link replay returns before redirect resolution and rejects untrusted
     { async verify(token) {
       if (token === 'expired') return null;
       return { account_id: accountA, scopes: token === 'read-only' ? ['projects:read'] : ['projects:write'] };
-    } }, repository, async () => { resolutions++; return source; }, async () => {}, () => true,
+    } }, repository, async () => { resolutions++; return source; }, async () => { dispatches++; }, () => true,
     undefined, () => 'short',
   );
   assert.equal((await operations.execute('start_riff_creator', 'valid', input) as {ok:boolean}).ok, true);
-  assert.equal(resolutions, 0); assert.equal(starts, 0); assert.equal(finds, 1);
+  assert.equal(resolutions, 0); assert.equal(starts, 0); assert.equal(finds, 1); assert.equal(dispatches,1);
   assert.deepEqual(await operations.execute('start_riff_creator', null, input), failure('UNAUTHENTICATED'));
   assert.deepEqual(await operations.execute('start_riff_creator', 'expired', input), failure('UNAUTHENTICATED'));
   assert.deepEqual(await operations.execute('start_riff_creator', 'read-only', input), failure('FORBIDDEN'));
   assert.deepEqual(await operations.execute('start_riff_creator', 'valid', { ...input, account_id: accountA }), failure('VALIDATION_ERROR'));
   assert.equal(finds, 1);
+});
+
+test('short-link miss resolves once, starts once, and schedules the returned queued job once', async () => {
+  const calls:string[]=[];
+  const repository:RiffCreatorRepository={
+    async find(){calls.push('find');return failure('NOT_FOUND');},
+    async start(_accountId,_value,canonical){calls.push('start');assert.deepEqual(canonical,source);return storedSuccess;},
+    async list(){throw new Error('must not list');},
+  };
+  const operations=createRiffCreatorOperations(
+    {async verify(){return {account_id:accountA,scopes:['projects:write']};}},repository,
+    async()=>{calls.push('resolve');return source;},()=>{calls.push('dispatch');},()=>true,undefined,()=> 'short',
+  );
+  assert.equal((await operations.execute('start_riff_creator','token',input)).ok,true);
+  assert.deepEqual(calls,['find','resolve','start','dispatch']);
+});
+
+test('short-link non-NOT_FOUND lookup failure returns immediately without resolution, start, or dispatch', async () => {
+  for(const code of ['FORBIDDEN','UNAVAILABLE'] as const){
+    const calls:string[]=[];
+    const repository:RiffCreatorRepository={
+      async find(){calls.push('find');return failure(code);},
+      async start(){calls.push('start');return storedSuccess;},
+      async list(){throw new Error('must not list');},
+    };
+    const operations=createRiffCreatorOperations(
+      {async verify(){return {account_id:accountA,scopes:['projects:write']};}},repository,
+      async()=>{calls.push('resolve');return source;},()=>{calls.push('dispatch');},()=>true,undefined,()=> 'short',
+    );
+    assert.deepEqual(await operations.execute('start_riff_creator','token',input),failure(code));
+    assert.deepEqual(calls,['find']);
+  }
 });
 
 test('invalid source classification reaches neither repository nor scheduler', async () => {
@@ -213,11 +279,14 @@ test('creator start lookup is a provider-free authenticated exact read', async (
     async start() { throw new Error('lookup must not start'); },
     async list() { throw new Error('lookup must not list'); },
   };
+  let classifications=0;
   const operations = createRiffCreatorOperations(
     { async verify() { return { account_id: accountA, scopes: ['projects:read'] }; } }, repository,
     async () => { throw new Error('lookup must not resolve'); },
     async () => { throw new Error('lookup must not dispatch'); },
     () => false,
+    undefined,
+    () => {classifications++;throw new Error('lookup must not classify');},
   );
   const result = await operations.execute('get_riff_creator_start', 'fixture-token', input);
   assert.deepEqual(StartRiffCreatorOutput.parse(result), {
@@ -232,6 +301,7 @@ test('creator start lookup is a provider-free authenticated exact read', async (
     },
   });
   assert.deepEqual(calls, [{ accountId: accountA, value: input }]);
+  assert.equal(classifications,0);
 });
 
 test('recent Riff work is a bounded account-scoped read with no start or URL resolution', async () => {

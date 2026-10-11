@@ -8,16 +8,24 @@ import { createCreatorOperations, createCreatorIngestion, projectCreatorDna, typ
 import { creatorContracts, StoredCreatorOutput, GetCreatorDnaOutput, CorrectCreatorDnaOutput } from '../packages/contracts/creator-operations.ts';
 import { creatorAnalysisFixture } from '../packages/contracts/fixtures/creator-profile.ts';
 import { SaveProjectOutput } from '../packages/contracts/index.ts';
-import { cachedMcpToolDescriptors, handleMcp } from '../apps/worker/mcp.ts';
+import { selectMcpToolDescriptors, handleMcp } from '../apps/worker/mcp.ts';
 import { oauthScopes } from '../packages/auth/index.ts';
 import { fixtureAuth, config } from './auth-fixtures.ts';
 import { createInput, accountA } from './fixtures.ts';
 
-test('descriptor catalogs are frozen and reused per isolate availability key', () => {
-  const build=()=>[{name:'fixture',inputSchema:{type:'object'},securitySchemes:[{type:'noauth'}]}] as never[];
-  const first=cachedMcpToolDescriptors('test-fixture',build);
-  const second=cachedMcpToolDescriptors('test-fixture',()=>{throw new Error('must not rebuild');});
-  assert.equal(second,first);assert.equal(Object.isFrozen(first),true);assert.equal(Object.isFrozen(first[0]),true);
+test('tool and security descriptor catalogs are fully hoisted, frozen, and reused per isolate', () => {
+  const availability={authenticated:true,creator:true,pipeline:true,riffCreator:true};
+  const first=selectMcpToolDescriptors(availability);
+  const second=selectMcpToolDescriptors({...availability});
+  assert.equal(second,first);assert.equal(Object.isFrozen(first),true);
+  for(const tool of first){
+    assert.equal(Object.isFrozen(tool),true);
+    assert.equal(Object.isFrozen(tool.securitySchemes),true);
+    assert.equal(Object.isFrozen(tool.annotations),true);
+  }
+  assert.ok(first.some(tool=>tool.name==='start_riff_creator'));
+  assert.deepEqual(selectMcpToolDescriptors({authenticated:false,creator:false,pipeline:false,riffCreator:false})
+    .map(tool=>tool.name),['kettle_diagnostic']);
 });
 
 test('Creator MCP reads, render and corrections use signed identity, real SQL and public projection', async t => {
