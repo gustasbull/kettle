@@ -146,9 +146,29 @@ test('Riff Home accepts only a coherent complete initial result and preserves th
     window.emitResult=params=>window.receiveHostMessage({source:window.parent,data:{
       jsonrpc:'2.0',method:'ui/notifications/tool-result',params,
     }});
-    window.accountResult=(id,name='Fixture')=>({structuredContent:{ok:true,data:{account:{
-      id,display_name:name,onboarding_seen_at:null,
-    }}},content:[],isError:false,_meta:{}});
+    window.accountContent=(id,name='Fixture')=>({ok:true,data:{account:{
+      id,display_name:name,state:'active',preferred_language:'en',created_at:'2026-10-11T00:00:00Z',onboarding_seen_at:null,
+    },entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}});
+    window.accountResult=(id,name='Fixture')=>({structuredContent:window.accountContent(id,name),content:[],isError:false,_meta:{}});
+    window.malformedAccountResults=id=>{
+      const make=mutate=>{const content=structuredClone(window.accountContent(id,'Malformed account'));mutate(content);return {
+        structuredContent:content,content:[],isError:false,_meta:{},
+      };};
+      return [
+        make(content=>{content.data.account.id='';}),
+        make(content=>{content.data.account.id='not-a-uuid';}),
+        make(content=>{content.data.account.state='suspended';}),
+        make(content=>{delete content.data.account.preferred_language;}),
+        make(content=>{content.data.account.created_at='yesterday';}),
+        make(content=>{content.data.account.onboarding_seen_at='not-a-timestamp';}),
+        make(content=>{content.data.entitlements.status='configured';}),
+        make(content=>{content.data.usage.reset_at='2026-10-12T00:00:00Z';}),
+        make(content=>{content.data.account.private_owner='spoof';}),
+        make(content=>{content.data.entitlements.private_plan='spoof';}),
+        make(content=>{content.data.usage.private_total=1;}),
+        make(content=>{content.data.private_account_id=id;}),
+      ];
+    };
     window.mutatingResult=(id)=>{
       const original={ok:true,data:{account:{id,display_name:'Injected account',onboarding_seen_at:null}}};
       const injected={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
@@ -189,6 +209,7 @@ test('Riff Home accepts only a coherent complete initial result and preserves th
       {...valid,_meta:1},
       Object.assign(Object.create(null),valid),
       window.mutatingResult(second),
+      ...window.malformedAccountResults(second),
     ];
     for(const result of malformed)window.emitResult(result);
   },[account1,account2]);
@@ -214,6 +235,7 @@ test('Riff Home accepts only a coherent complete initial result and preserves th
       {...valid,_meta:1},
       Object.assign(Object.create(null),valid),
       window.mutatingResult(id),
+      ...window.malformedAccountResults(id),
     ])window.emitResult(result);
   },account2);
   await frame.waitForTimeout(50);
@@ -246,7 +268,7 @@ test('Riff Home uses the ChatGPT compatibility tool bridge when MCP Apps serverT
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'chatgpt-compat',version:'1'},hostCapabilities:{message:{text:{}}},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
       });
@@ -287,7 +309,7 @@ test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT 
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'compat-timeout',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
       });
@@ -334,7 +356,7 @@ test('Riff Home reconciles the exact reported link after a timed-out start persi
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'reconcile',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
       });
@@ -377,7 +399,7 @@ test('Riff Home reconciles a malformed start response when the saved job exists'
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'malformed-start',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
       });
@@ -423,7 +445,7 @@ test('Riff Home preserves a definitely absent intent and maps returned applicati
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'absent',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');window.ready=true;
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;
         }
       });
     </script><iframe src="/frame"></iframe>`);
@@ -476,7 +498,7 @@ test('Riff Home safely maps host-rejected allowance and validation failures with
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'rejected-errors',version:'1'},hostCapabilities:{serverTools:{}},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');window.ready=true;
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;
         }
         if(m.method==='tools/call'&&m.params.name==='list_riff_work')return frame().postMessage({jsonrpc:'2.0',id:m.id,result:{content:[],structuredContent:{ok:true,data:{work:[]}}}},'*');
         if(m.method==='tools/call'&&m.params.name==='get_riff_creator_start'){window.lookups++;return;}
@@ -529,7 +551,7 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
       window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      const account=id=>{frame().activeAccountId=id;frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:id.endsWith('1')?'First account':'Second account',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');};
+      const account=id=>{frame().activeAccountId=id;frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:id.endsWith('1')?'First account':'Second account',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');};
       window.changeAccount=()=>account('00000000-0000-4000-8000-000000000002');
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'account-change',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
@@ -586,7 +608,7 @@ test('Riff Home ignores a catalog response from the previous account', async (t)
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
       window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'catalog-account-change',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}
@@ -646,7 +668,7 @@ test('Riff Home defers a catalog shortcut until the first account is ready', asy
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
       window.ready=false;window.initializeId=undefined;window.initializeVersion=undefined;const frame=()=>document.querySelector('iframe').contentWindow;
-      window.sendAccount=()=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      window.sendAccount=()=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
       window.finishConnect=()=>frame().postMessage({jsonrpc:'2.0',id:window.initializeId,result:{protocolVersion:window.initializeVersion,hostInfo:{name:'catalog-before-account',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize'){window.initializeId=m.id;window.initializeVersion=m.params.protocolVersion;window.ready=true;}
@@ -705,7 +727,7 @@ test('Riff Home ignores an older start response after a newer creator intent win
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'compat-ordering',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
       });
@@ -751,7 +773,7 @@ test('Riff Home reuses a logical request ID for ambiguous and retry-same-request
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize') frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},message:{text:{}}},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
         if(m.method==='tools/call'&&m.params.name==='list_riff_work') return result(m.id,{ok:true,data:{work:[]}});
@@ -818,7 +840,7 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize') frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},message:{text:{}}},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){
-          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
           window.ready=true;
         }
         if(m.method!=='tools/call')return;
@@ -892,6 +914,16 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
           }});
           return result;
         }
+        if(window.workStateSpoof==='sibling-mutating-proxy'){
+          const successData=spoofReceipt.data,structuredContent={ok:true,data:successData};
+          let prototypeReads=0;
+          const replace=next=>{for(const key of Reflect.ownKeys(structuredContent))delete structuredContent[key];Object.assign(structuredContent,next);};
+          const mutator=new Proxy({}, {
+            getPrototypeOf(){prototypeReads++;replace(prototypeReads%2===1?conflict:{ok:true,data:successData});return Object.prototype;},
+            get(){window.getterReads++;return undefined;},
+          });
+          return {_meta:{mutator},structuredContent,content:[],isError:true};
+        }
         if(window.workStateSpoof==='null-outer')return Object.assign(Object.create(null),wrapped(conflict));
         if(window.workStateSpoof==='null-inner')return wrapped(Object.assign(Object.create(null),conflict));
         if(window.workStateSpoof==='false-failure')return {...wrapped(conflict),isError:false};
@@ -915,7 +947,9 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
           hostInfo:{name:'work-state-fixture',version:'1'},hostCapabilities:{message:{text:{}}},hostContext:{}}},'*');
         if(message.method==='ui/notifications/initialized'){
           frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{
-            id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');window.ready=true;
+            id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',
+            created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},
+            entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;
         }
       });
     </script><iframe src="/frame"></iframe>`);
@@ -935,7 +969,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
     reads:window.calls.filter(call=>call.name==='get_creator_job').length,
     lists:window.calls.filter(call=>call.name==='list_riff_work').length,
   }));
-  for(const mode of ['proxy-outer','proxy-inner','null-outer','null-inner','false-failure','true-success','mutating-proxy']){
+  for(const mode of ['proxy-outer','proxy-inner','null-outer','null-inner','false-failure','true-success','mutating-proxy','sibling-mutating-proxy']){
     const writesBefore=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').length);
     await frame.evaluate(mode=>{window.workStateSpoof=mode;},mode);
     await frame.getByRole('button',{name:'Save for later'}).click();
@@ -971,8 +1005,8 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   await frame.getByRole('button',{name:'Open vault'}).click();
   await frame.locator('.riff-home__status').getByText('My videos opened, but saved work could not be refreshed.').waitFor();
   const workStateCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args));
-  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','saved','active','filmed','saved']);
-  for(const retry of workStateCalls.slice(1,8))
+  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','saved','saved','active','filmed','saved']);
+  for(const retry of workStateCalls.slice(1,9))
     assert.deepEqual(retry,workStateCalls[0],'every legitimate or rejected retry preserves the exact ambiguous write intent');
   assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=5,'initial load plus every confirmed mutation');
   await frame.evaluate(()=>window.bridge.dispose());
@@ -1007,7 +1041,7 @@ test('Riff Product context saves only on confirmation, retries exactly, updates,
     if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>
       window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
       addEventListener('message',e=>{const m=e.data;
         if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
         if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}
@@ -1107,7 +1141,7 @@ test('Riff Product save failures preserve drafts and obey retry, rotation, and i
     if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
       addEventListener('message',e=>{const m=e.data;if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product-errors',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
-      if(m.method==='ui/notifications/initialized'){frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');window.ready=true;}});</script><iframe src="/frame"></iframe>`);
+      if(m.method==='ui/notifications/initialized'){frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;}});</script><iframe src="/frame"></iframe>`);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(4_000);
@@ -1190,6 +1224,15 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
         }});
         return result;
       }
+      if(mode==='siblingMutatingProxyConflict'){
+        const successData={ignored:true},structuredContent={ok:true,data:successData};let prototypeReads=0;
+        const replace=next=>{for(const key of Reflect.ownKeys(structuredContent))delete structuredContent[key];Object.assign(structuredContent,next);};
+        const mutator=new Proxy({}, {
+          getPrototypeOf(){prototypeReads++;replace(prototypeReads%2===1?inner:{ok:true,data:successData});return Object.prototype;},
+          get(){window.getterReads++;return undefined;},
+        });
+        return {_meta:{mutator},structuredContent,content:[],isError:true};
+      }
     };
     window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
@@ -1206,7 +1249,7 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
   const server = createServer((req,res)=>{res.setHeader('Content-Type','text/html');
     if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
     res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');
       addEventListener('message',e=>{const m=e.data;if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product-boundary',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
       if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}});</script><iframe src="/frame"></iframe>`);
   });
@@ -1217,7 +1260,7 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
     await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');await frame.getByRole('button',{name:'Add filming constraint'}).click();await frame.getByLabel('Filming constraint 1').fill('Home desk');};
   await enter();const confirm=frame.getByRole('button',{name:'Confirm context'});await confirm.click();await frame.getByText('Context saved',{exact:true}).waitFor();
   await frame.getByLabel('Audience',{exact:true}).fill('Unsaved local audience');
-  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound','metaAccessorConflict','contentPrototypeNotFound','constraintsAccessorSuccess','constraintsPrototypeSuccess','factsPrototypeSuccess','mutatingProxyConflict'];
+  const spoofModes=['directConflict','unknownNotFound','accessorConflict','symbolNotFound','hiddenConflict','invalidIsErrorNotFound','undefinedContentConflict','invalidContentNotFound','innerSymbolConflict','innerHiddenNotFound','metaAccessorConflict','contentPrototypeNotFound','constraintsAccessorSuccess','constraintsPrototypeSuccess','factsPrototypeSuccess','mutatingProxyConflict','siblingMutatingProxyConflict'];
   for(const mode of spoofModes){const expected=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length+1);
     await frame.evaluate(value=>{window.mode=value},mode);await confirm.click();
     await frame.waitForFunction(count=>window.calls.filter(call=>call.name==='save_project').length===count,expected);

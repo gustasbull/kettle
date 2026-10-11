@@ -26,13 +26,10 @@ test('strict CallToolResult parsing preserves valid content and returns a detach
   assert.equal(Object.getPrototypeOf(parsed?.structuredContent),Object.prototype);
 });
 
-test('strict CallToolResult parsing neutralizes stable transparent proxies into detached ordinary JSON',()=>{
+test('strict CallToolResult parsing rejects transparent proxies that cannot cross the native serialization boundary',()=>{
   const raw=envelope();
   const proxiedContent=new Proxy(raw.structuredContent,{});
-  const parsed=parseStrictCallToolResult(new Proxy({...raw,structuredContent:proxiedContent},{}));
-  assert.deepEqual(parsed,{structuredContent:raw.structuredContent,isError:false});
-  assert.notEqual(parsed?.structuredContent,proxiedContent);
-  assert.equal(Object.getPrototypeOf(parsed?.structuredContent),Object.prototype);
+  assert.equal(parseStrictCallToolResult(new Proxy({...raw,structuredContent:proxiedContent},{})),undefined);
 });
 
 test('strict CallToolResult parsing preserves isError presence without interpreting arbitrary structured content',()=>{
@@ -107,6 +104,31 @@ test('strict CallToolResult parsing rejects nested proxy mutation without readin
   assert.equal(getterReads,0,'canonicalization must not native-clone or read the mutated live graph');
 });
 
+test('strict CallToolResult parsing rejects an earlier sibling proxy that restores a later mutated result',()=>{
+  const successData={value:'original success'};
+  const structuredContent:Record<string,unknown>={ok:true,data:successData};
+  const conflict={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+  let prototypeReads=0;
+  let getterReads=0;
+  const replaceStructuredContent=(next:Record<string,unknown>)=>{
+    for(const key of Reflect.ownKeys(structuredContent))delete structuredContent[key as string];
+    for(const [key,value] of Object.entries(next))structuredContent[key]=value;
+  };
+  const mutator=new Proxy({}, {
+    getPrototypeOf(){
+      prototypeReads+=1;
+      replaceStructuredContent(prototypeReads%2===1?conflict:{ok:true,data:successData});
+      return Object.prototype;
+    },
+    get(){getterReads+=1;return undefined;},
+  });
+  const raw={_meta:{mutator},structuredContent,content:[],isError:true};
+
+  assert.equal(parseStrictCallToolResult(raw),undefined,
+    'an intermediate sibling mutation must never become the trusted canonical result');
+  assert.equal(getterReads,0,'the mutating proxy must never be read as application data');
+});
+
 test('strict CallToolResult parsing enforces graph and string resource budgets',()=>{
   let tooDeep:Record<string,unknown>={value:true};
   for(let depth=0;depth<101;depth+=1)tooDeep={next:tooDeep};
@@ -123,6 +145,34 @@ test('strict CallToolResult parsing enforces graph and string resource budgets',
   ];
   for(const [index,raw] of cases.entries())
     assert.equal(parseStrictCallToolResult(raw),undefined,`over-budget graph ${index}`);
+});
+
+test('strict CallToolResult parsing rejects an over-budget object before requesting property descriptors',()=>{
+  const keys=Array.from({length:20_001},(_,index)=>`key_${index}`);
+  let descriptorCalls=0;
+  const oversized=new Proxy({}, {
+    ownKeys:()=>keys,
+    getOwnPropertyDescriptor(){
+      descriptorCalls+=1;
+      return {configurable:true,enumerable:true,writable:true,value:null};
+    },
+  });
+
+  assert.equal(parseStrictCallToolResult({structuredContent:{ok:true,data:{oversized}}}),undefined);
+  assert.equal(descriptorCalls,0,'the key budget is checked before building per-key descriptors');
+});
+
+test('strict CallToolResult parsing rejects a dense oversized array from its length before enumerating it',()=>{
+  let ownKeyCalls=0;
+  let descriptorCalls=0;
+  const oversized=new Proxy(Array.from({length:100_000},()=>null), {
+    ownKeys(target){ownKeyCalls+=1;return Reflect.ownKeys(target);},
+    getOwnPropertyDescriptor(target,key){descriptorCalls+=1;return Reflect.getOwnPropertyDescriptor(target,key);},
+  });
+
+  assert.equal(parseStrictCallToolResult({structuredContent:{ok:true,data:{oversized}}}),undefined);
+  assert.equal(ownKeyCalls,0,'array length is checked before ownKeys allocates the dense key list');
+  assert.equal(descriptorCalls,1,'only the array length descriptor is needed to reject the value');
 });
 
 test('content-block details match the installed MCP CallToolResult schema',()=>{

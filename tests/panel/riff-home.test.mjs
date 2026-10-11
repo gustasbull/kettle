@@ -264,8 +264,9 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
     });
     window.renderAccount=(marker,include=true)=>window.view.render(riffHomeStructuredOutput({ok:true,data:{account:{
       id:'00000000-0000-4000-8000-000000000001',display_name:'Fictional Creator',
+      state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',
       ...(include?{onboarding_seen_at:marker}:{})
-    }}}));
+    },entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}}));
     window.renderError=()=>window.view.render(riffHomeStructuredOutput({ok:false,error:{code:'UNAVAILABLE'}}));
   ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
   const browser = await chromium.launch({ headless: true });

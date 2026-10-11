@@ -8,6 +8,7 @@ import {
 import type { ProductDraft } from '../riff-product-context-validation.ts';
 import type { Project } from '../../../packages/contracts/index.ts';
 import type { RiffWorkState } from '../../../packages/contracts/riff-work-state.ts';
+import { cloneStrictJsonObject, strictObjectShape } from '../call-tool-result-validation.ts';
 import { mountRiffMenu } from '../riff-shell/menu.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
@@ -38,6 +39,8 @@ export type RiffRecentsState =
 type RecommendationResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'recommendations' }>;
 type ScriptResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'scripts' }>;
 const sameUuid=(left:string|undefined|null,right:string|undefined|null)=>!!left&&!!right&&left.toLowerCase()===right.toLowerCase();
+const uuid=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i;
+const timestamp=/^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8])))T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
 export type RiffHomeActions = {
   start(source: string): Promise<RiffActionResult>;
@@ -71,26 +74,39 @@ export type RiffHomeActions = {
 };
 
 export function riffHomeStructuredOutput(value: unknown): RiffHomeState {
-  if (!value || typeof value !== 'object') return { status: 'error', message: 'Riff could not read this account. Reopen it from ChatGPT.' };
-  const result = value as { ok?: unknown; data?: unknown; error?: unknown };
-  if (result.ok !== true || !result.data || typeof result.data !== 'object') {
-    const code = result.error && typeof result.error === 'object' ? (result.error as { code?: unknown }).code : undefined;
+  const canonical = cloneStrictJsonObject(value);
+  const success = strictObjectShape(canonical, ['ok', 'data']);
+  if (!success || success.ok !== true) {
+    const failure = strictObjectShape(canonical, ['ok', 'error']);
+    const error = strictObjectShape(failure?.error, ['code'], ['message', 'retryable', 'recovery']);
+    const code = error?.code;
     return { status: 'error', message: code === 'UNAUTHENTICATED' || code === 'FORBIDDEN'
       ? 'Reconnect your Riff account in ChatGPT, then reopen Home.'
       : 'Riff could not read this account. Reopen it from ChatGPT.' };
   }
-  const account = (result.data as { account?: unknown }).account;
-  if (!account || typeof account !== 'object') return { status: 'error', message: 'Riff returned incomplete account details. Reopen Home.' };
-  const { id, display_name: name, onboarding_seen_at: rawOnboardingSeenAt } = account as {
-    id?: unknown; display_name?: unknown; onboarding_seen_at?: unknown;
-  };
-  if (typeof id !== 'string' || typeof name !== 'string' || !name.trim()) {
+  const data = strictObjectShape(success.data, ['account', 'entitlements', 'usage']);
+  const account = strictObjectShape(data?.account,
+    ['id', 'display_name', 'state', 'preferred_language', 'created_at', 'onboarding_seen_at']);
+  const entitlements = strictObjectShape(data?.entitlements, ['status']);
+  const usage = strictObjectShape(data?.usage, ['status', 'reset_at']);
+  if (!data || !account || !entitlements || !usage
+    || typeof account.id !== 'string' || !uuid.test(account.id)
+    || typeof account.display_name !== 'string' || !account.display_name.trim() || account.display_name.trim().length > 120
+    || account.state !== 'active'
+    || typeof account.preferred_language !== 'string' || !account.preferred_language.trim()
+    || account.preferred_language.trim().length > 35
+    || typeof account.created_at !== 'string' || !timestamp.test(account.created_at)
+    || account.onboarding_seen_at !== null
+      && (typeof account.onboarding_seen_at !== 'string' || !timestamp.test(account.onboarding_seen_at))
+    || entitlements.status !== 'not_configured'
+    || usage.status !== 'not_configured' || usage.reset_at !== null) {
     return { status: 'error', message: 'Riff returned incomplete account details. Reopen Home.' };
   }
-  const onboardingSeenAt = rawOnboardingSeenAt === null ? null
-    : typeof rawOnboardingSeenAt === 'string' && !Number.isNaN(Date.parse(rawOnboardingSeenAt))
-      ? rawOnboardingSeenAt : undefined;
-  return { status: 'ready', account: { id, name: name.trim(), onboarding_seen_at: onboardingSeenAt } };
+  return { status: 'ready', account: {
+    id: account.id,
+    name: account.display_name.trim(),
+    onboarding_seen_at: account.onboarding_seen_at as string | null,
+  } };
 }
 
 const homeStyles = `

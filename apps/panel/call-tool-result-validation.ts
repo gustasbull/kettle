@@ -58,12 +58,11 @@ const STRICT_JSON_MAX_STRING_CODE_UNITS = 1_048_576;
 const STRICT_JSON_MAX_STRING_UTF8_BYTES = 1_048_576;
 const STRICT_JSON_MAX_TOTAL_UTF8_BYTES = 4_194_304;
 
-type DescriptorRecord = Record<PropertyKey, PropertyDescriptor>;
 type JsonSnapshot = {
   source: object;
   array: boolean;
   prototype: object | null;
-  descriptors: DescriptorRecord;
+  descriptors: Map<PropertyKey, PropertyDescriptor>;
   keys: PropertyKey[];
 };
 type JsonCopyContext = {
@@ -74,8 +73,8 @@ type JsonCopyContext = {
   snapshots: JsonSnapshot[];
 };
 
-function descriptorAt(descriptors: DescriptorRecord, key: PropertyKey): PropertyDescriptor | undefined {
-  return Object.getOwnPropertyDescriptor(descriptors, key)?.value as PropertyDescriptor | undefined;
+function descriptorAt(descriptors: Map<PropertyKey, PropertyDescriptor>, key: PropertyKey): PropertyDescriptor | undefined {
+  return descriptors.get(key);
 }
 
 function utf8Bytes(value: string, maximum: number): number | undefined {
@@ -107,10 +106,28 @@ function captureJsonSnapshot(value: object, context: JsonCopyContext): JsonSnaps
   const array = Array.isArray(value);
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== (array ? Array.prototype : Object.prototype)) return;
-  const descriptors = Object.getOwnPropertyDescriptors(value) as DescriptorRecord;
-  const keys = Reflect.ownKeys(descriptors);
-  const valueKeyCount = array ? keys.length - 1 : keys.length;
-  if (valueKeyCount < 0 || context.keys + valueKeyCount > STRICT_JSON_MAX_KEYS) return;
+  const descriptors = new Map<PropertyKey, PropertyDescriptor>();
+  let keys: PropertyKey[];
+  let valueKeyCount: number;
+  if (array) {
+    const length = Object.getOwnPropertyDescriptor(value, 'length');
+    if (!length || !('value' in length) || length.enumerable
+      || !Number.isSafeInteger(length.value) || length.value < 0
+      || length.value > STRICT_JSON_MAX_KEYS - context.keys) return;
+    keys = Reflect.ownKeys(value);
+    if (keys.length !== length.value + 1 || !keys.includes('length')) return;
+    descriptors.set('length', length);
+    valueKeyCount = length.value;
+  } else {
+    keys = Reflect.ownKeys(value);
+    valueKeyCount = keys.length;
+    if (valueKeyCount > STRICT_JSON_MAX_KEYS - context.keys) return;
+  }
+  for (const key of keys) {
+    if (array && key === 'length') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key); if (!descriptor) return;
+    descriptors.set(key, descriptor);
+  }
   context.keys += valueKeyCount;
   const snapshot = { source: value, array, prototype, descriptors, keys };
   context.snapshots.push(snapshot);
@@ -120,70 +137,74 @@ function captureJsonSnapshot(value: object, context: JsonCopyContext): JsonSnaps
 function unchangedJsonSnapshot(snapshot: JsonSnapshot) {
   if (Array.isArray(snapshot.source) !== snapshot.array
     || Object.getPrototypeOf(snapshot.source) !== snapshot.prototype) return false;
-  const current = Object.getOwnPropertyDescriptors(snapshot.source) as DescriptorRecord;
-  const keys = Reflect.ownKeys(current);
+  if (snapshot.array) {
+    const beforeLength = descriptorAt(snapshot.descriptors, 'length');
+    const afterLength = Object.getOwnPropertyDescriptor(snapshot.source, 'length');
+    if (!sameDataDescriptor(beforeLength, afterLength)) return false;
+  }
+  const keys = Reflect.ownKeys(snapshot.source);
   if (keys.length !== snapshot.keys.length
     || keys.some((key, index) => key !== snapshot.keys[index])) return false;
   for (const key of snapshot.keys) {
     const before = descriptorAt(snapshot.descriptors, key);
-    const after = descriptorAt(current, key);
-    if (!before || !after || !('value' in before) || !('value' in after)
-      || before.enumerable !== after.enumerable || before.configurable !== after.configurable
-      || before.writable !== after.writable || !Object.is(before.value, after.value)) return false;
+    const after = Object.getOwnPropertyDescriptor(snapshot.source, key);
+    if (!sameDataDescriptor(before, after)) return false;
   }
   return true;
 }
 
-function copyStrictJsonValue(value: unknown, context: JsonCopyContext, depth: number): unknown | undefined {
-  if (value === null || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return countString(value, context) ? value : undefined;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+function sameDataDescriptor(before: PropertyDescriptor | undefined, after: PropertyDescriptor | undefined) {
+  return !!before && !!after && 'value' in before && 'value' in after
+    && before.enumerable === after.enumerable && before.configurable === after.configurable
+    && before.writable === after.writable && Object.is(before.value, after.value);
+}
+
+function preflightStrictJsonValue(value: unknown, context: JsonCopyContext, depth: number): boolean {
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'string') return countString(value, context);
+  if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object' || depth > STRICT_JSON_MAX_DEPTH
-    || context.nodes >= STRICT_JSON_MAX_NODES || context.ancestors.has(value)) return;
+    || context.nodes >= STRICT_JSON_MAX_NODES || context.ancestors.has(value)) return false;
   context.nodes += 1;
   context.ancestors.add(value);
   try {
-    const snapshot = captureJsonSnapshot(value, context); if (!snapshot) return;
+    const snapshot = captureJsonSnapshot(value, context); if (!snapshot) return false;
     if (snapshot.array) {
       const length = descriptorAt(snapshot.descriptors, 'length');
       if (!length || !('value' in length) || length.enumerable
         || !Number.isSafeInteger(length.value) || length.value < 0
-        || snapshot.keys.length !== length.value + 1) return;
-      const result = new Array<unknown>(length.value);
+        || snapshot.keys.length !== length.value + 1) return false;
       for (let index = 0; index < length.value; index += 1) {
         const key = String(index);
         const descriptor = descriptorAt(snapshot.descriptors, key);
-        if (!descriptor || !descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return;
-        const copied = copyStrictJsonValue(descriptor.value, context, depth + 1);
-        if (copied === undefined) return;
-        result[index] = copied;
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined
+          || !preflightStrictJsonValue(descriptor.value, context, depth + 1)) return false;
       }
-      return result;
+      return true;
     }
-    const result: StrictJsonObject = {};
     for (const key of snapshot.keys) {
-      if (typeof key !== 'string' || !countString(key, context)) return;
+      if (typeof key !== 'string' || !countString(key, context)) return false;
       const descriptor = descriptorAt(snapshot.descriptors, key);
-      if (!descriptor || !descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return;
-      const copied = copyStrictJsonValue(descriptor.value, context, depth + 1);
-      if (copied === undefined) return;
-      Object.defineProperty(result, key, { value: copied, enumerable: true, configurable: true, writable: true });
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined
+        || !preflightStrictJsonValue(descriptor.value, context, depth + 1)) return false;
     }
-    return result;
+    return true;
   } finally { context.ancestors.delete(value); }
 }
 
-/** Copy untrusted JSON from captured data descriptors; never read or clone its live properties. */
+/** Admit only descriptor-safe JSON that can cross the platform's immutable serialization boundary. */
 export function cloneStrictJsonObject(raw: unknown): StrictJsonObject | undefined {
   try {
     const context: JsonCopyContext = { nodes: 0, keys: 0, bytes: 0, ancestors: new Set(), snapshots: [] };
-    const copied = copyStrictJsonValue(raw, context, 0);
-    if (!copied || typeof copied !== 'object' || Array.isArray(copied)) return;
+    if (!preflightStrictJsonValue(raw, context, 0)) return;
     // Check children before parents so a nested trap that mutates an ancestor is observed.
     for (let index = context.snapshots.length - 1; index >= 0; index -= 1) {
       if (!unchangedJsonSnapshot(context.snapshots[index]!)) return;
     }
-    return strictObject(copied);
+    // Reflection cannot identify every transparent Proxy; the platform clone is the trust boundary.
+    if (typeof globalThis.structuredClone !== 'function') return;
+    const cloned = globalThis.structuredClone(raw);
+    return strictObject(cloned);
   } catch { return; }
 }
 

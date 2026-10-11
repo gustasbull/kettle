@@ -141,6 +141,35 @@ test('work-state client rejects a nested proxy mutation without reading its rest
   assert.equal(rereads,0,'mutating metadata cannot inject a conflict that authorizes an authoritative reread');
 });
 
+test('work-state client rejects an earlier sibling proxy that restores an injected conflict without rereading truth',async()=>{
+  const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
+  const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
+  const successData={work_state:state};
+  const structuredContent:any={ok:true,data:successData};
+  const conflict={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+  let prototypeReads=0;
+  let getterReads=0;
+  const replaceStructuredContent=(next:Record<string,unknown>)=>{
+    for(const key of Reflect.ownKeys(structuredContent))delete structuredContent[key];
+    Object.assign(structuredContent,next);
+  };
+  const mutator=new Proxy({}, {
+    getPrototypeOf(){
+      prototypeReads+=1;
+      replaceStructuredContent(prototypeReads%2===1?conflict:{ok:true,data:successData});
+      return Object.prototype;
+    },
+    get(){getterReads+=1;return undefined;},
+  });
+  const raw={_meta:{mutator},structuredContent,content:[],isError:true};
+  let rereads=0;
+  const client=module.createRiffWorkStateClient(async()=>raw,async()=>{rereads+=1;return {...job,work_states:[state]};});
+
+  assert.equal((await client.set(job,variantId,'saved')).status,'failed');
+  assert.equal(getterReads,0);
+  assert.equal(rereads,0,'an intermediate injected conflict cannot authorize an authoritative reread');
+});
+
 test('work-state client accepts a complete valid MCP result envelope',async()=>{
   const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
   const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};

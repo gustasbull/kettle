@@ -251,6 +251,31 @@ test('save and get require a strict CallToolResult envelope', () => {
   for (const raw of malformedGet) assert.equal(parseProductGetResult(raw, projectId).status, 'malformed');
 });
 
+test('Product parsing rejects an earlier sibling proxy that restores an injected conflict',()=>{
+  const input=successfulInput();
+  const successData={project:project(input),request_id:requestId};
+  const structuredContent:any={ok:true,data:successData};
+  const conflict={ok:false,error:{code:'VERSION_CONFLICT',message:'Injected.',retryable:false,recovery:'reload'}};
+  let prototypeReads=0;
+  let getterReads=0;
+  const replaceStructuredContent=(next:Record<string,unknown>)=>{
+    for(const key of Reflect.ownKeys(structuredContent))delete structuredContent[key];
+    Object.assign(structuredContent,next);
+  };
+  const mutator=new Proxy({}, {
+    getPrototypeOf(){
+      prototypeReads+=1;
+      replaceStructuredContent(prototypeReads%2===1?conflict:{ok:true,data:successData});
+      return Object.prototype;
+    },
+    get(){getterReads+=1;return undefined;},
+  });
+  const raw={_meta:{mutator},structuredContent,content:[],isError:true};
+
+  assert.equal(parseProductSaveResult(raw,input).status,'malformed');
+  assert.equal(getterReads,0,'Product parsing must not read application data through the mutating proxy');
+});
+
 test('Product parsing rejects accessor-backed and custom-prototype arrays at every external boundary', () => {
   const input = successfulInput();
   const saved = project(input);
