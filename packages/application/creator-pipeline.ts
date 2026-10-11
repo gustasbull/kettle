@@ -8,6 +8,7 @@ import { StoredCreatorAnalysis } from '../contracts/creator-operations.ts';
 import { failure, type IdentityVerifier } from './operations.ts';
 import { projectCreatorDna, createCreatorIngestion, type CreatorRepository } from './creator-operations.ts';
 import { observed, type CreatorLatencyObserver } from './creator-observability.ts';
+import { parseRiffVideoIngestReceipt, riffVideoCatalogInput, type RiffVideoRepository } from './riff-videos.ts';
 
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
   | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'checkpoint_creator_job' | 'list_creator_dispatches';
@@ -114,9 +115,18 @@ export class PipelineRunError extends Error {
 export type AttemptCeilings = Record<'scrapecreators'|'lightreel'|'openai',number>;
 export type DurableStep = <T>(name:string,run:()=>Promise<T>)=>Promise<T>;
 export function createGuardedProviderContext(repository:PipelineRepository,job:StoredCreatorJob,
-  ceilings:AttemptCeilings, durableStep:DurableStep, telemetry?:CreatorLatencyObserver):CreatorProviderContext {
+  ceilings:AttemptCeilings, durableStep:DurableStep, telemetry?:CreatorLatencyObserver,
+  catalogRepository?:RiffVideoRepository):CreatorProviderContext {
   let revision=job.revision;
   return {now:()=>new Date().toISOString(),newId:()=>crypto.randomUUID(),
+    async ingestCatalog(checkpointKey,role,observations){
+      if(!catalogRepository)throw new PipelineRunError('failed');
+      const input=riffVideoCatalogInput(job,checkpointKey,role,observations);
+      const saved=await durableStep(`catalog:${checkpointKey}:${role}`,()=>observed(telemetry,
+        {stage:'catalog_persistence',clock:'monotonic',operation:'persist',item_count:observations.length},
+        async()=>parseRiffVideoIngestReceipt(await catalogRepository.ingest(job.account_id,input),input)));
+      parseRiffVideoIngestReceipt(saved,input);
+    },
     async checkpoint(key,stage,rawProgress){
       if(!/^[a-z0-9][a-z0-9:_-]{0,199}$/.test(key))throw new PipelineRunError('failed');
       const progress=CreatorJobProgress.parse(rawProgress);
@@ -175,7 +185,7 @@ export function canProcessCapturedDna(stored:z.infer<typeof StoredCreatorAnalysi
 }
 export async function runCreatorPipelineJob(repository:PipelineRepository,creatorRepository:CreatorRepository,
   accountId:string,jobId:string,providerFor:(job:StoredCreatorJob)=>CreatorPipelineProvider,
-  ceilings:AttemptCeilings,durableStep:DurableStep,telemetry?:CreatorLatencyObserver) {
+  ceilings:AttemptCeilings,durableStep:DurableStep,telemetry?:CreatorLatencyObserver,catalogRepository?:RiffVideoRepository) {
   const loaded=StoredCreatorJobOutput.parse(await durableStep('load-job',()=>repository.call('run_creator_job',accountId,{job_id:jobId})));
   if(!loaded.ok)return;
   const job=loaded.data.job;
@@ -184,7 +194,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
   telemetry?.record({stage:'queue_to_running',clock:'wall',status:'ok',
     duration_ms:Math.max(0,Date.now()-Date.parse(job.created_at))});
   try {
-    const context=createGuardedProviderContext(repository,job,ceilings,durableStep,telemetry);
+    const context=createGuardedProviderContext(repository,job,ceilings,durableStep,telemetry,catalogRepository);
     let output:NonNullable<CreatorJobView['result']>;
     if(job.kind==='scan') {
       const captured=CapturedCreatorScan.parse(job.captured);

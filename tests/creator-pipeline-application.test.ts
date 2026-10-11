@@ -7,6 +7,7 @@ import { projectCreatorDna, type CreatorRepository } from '../packages/applicati
 import { creatorAnalysisFixture } from '../packages/contracts/fixtures/creator-profile.ts';
 import { creatorJobFixture, recommendationBatchFixture, creatorScriptsFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 import type { CreatorPipelineProvider, PipelineOperation } from '../packages/contracts/creator-pipeline.ts';
+import { TrustedCatalogObservation } from '../packages/contracts/riff-videos.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}
@@ -500,4 +501,23 @@ test('checkpoint context accepts exact replay revision and rejects malformed per
   if(accepted)await assert.doesNotReject(context.checkpoint('script:generate:start','building_analysis',progress));
   else await assert.rejects(context.checkpoint('script:generate:start','building_analysis',progress),PipelineRunError);
  }
+});
+
+test('catalog context uses a separate retryable durable boundary and strictly validates its receipt',async()=>{
+ const job=stored('scan','running'),steps:string[]=[],pipelineCalls:string[]=[],catalogCalls:any[]=[];
+ const catalogObservation=TrustedCatalogObservation.parse({id:id(990),platform:'tiktok',native_id:'990',
+  canonical_url:'https://www.tiktok.com/@fixture/video/990',caption:null,thumbnail_url:null,published_at:null,duration_seconds:null,
+  metrics:{views:0,likes:null,comments:null,shares:null,saves:null},retrieved_at:job.updated_at,source_observed_at:null,
+  origin:'live',permission_basis:'Approved retained metadata.',limitations:['Metadata only.']});
+ const context=createGuardedProviderContext({async call(operation){pipelineCalls.push(operation);throw new Error('not used');}},job,ceilings,
+  async(name,run)=>{steps.push(name);return run();},undefined,{async list(){throw new Error('not used');},async ingest(owner,input){
+   catalogCalls.push({owner,input});return {ok:true,data:{status:'stored',ingested_count:1,observation_ids:[catalogObservation.id]}};
+  }});
+ await context.ingestCatalog('scan:feed:0','own_profile',[catalogObservation]);
+ assert.deepEqual(steps,['catalog:scan:feed:0:own_profile']);assert.deepEqual(pipelineCalls,[]);
+ assert.deepEqual(catalogCalls,[{owner:job.account_id,input:{job_id:job.id,checkpoint_key:'scan:feed:0',role:'own_profile',observations:[catalogObservation]}}]);
+ const malformed=createGuardedProviderContext({async call(){throw new Error('not used');}},job,ceilings,step,undefined,
+  {async list(){throw new Error('not used');},async ingest(){return {ok:true,data:{status:'stored',ingested_count:2,observation_ids:[catalogObservation.id]}};}});
+ await assert.rejects(malformed.ingestCatalog('scan:feed:0','own_profile',[catalogObservation]));
+ await assert.rejects(context.ingestCatalog('recommend:detail:990','discovered_reference',[catalogObservation]),/Invalid catalog source/);
 });

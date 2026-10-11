@@ -56,7 +56,10 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     providerConstructions++;
     const captured=stored.kind==='scan'?undefined:StoredCreatorAnalysis.parse((stored.captured as {stored:unknown}).stored);
     return createCreatorPipelineProvider({...f.options,...(stored.kind==='scan'?{seedUrl}:{}),credentials:{scrapeCreators:f.options.credentials.scrapeCreators,lightreel:f.options.credentials.lightreel},canProcessDna:view=>!!captured&&canProcessCapturedDna(captured,view)});
-  },{scrapecreators:0,lightreel:0,openai:0},async(_name,fn)=>fn());}
+  },{scrapecreators:0,lightreel:0,openai:0},async(_name,fn)=>fn(),undefined,{
+    async list(){throw new Error('provider workflow cannot list catalog');},
+    async ingest(owner,input){return sql('ingest_riff_videos',owner,input);},
+  });}
   const created=SaveProjectOutput.parse(await operations.execute('save_project',token,createInput()));assert.ok(created.ok);
   const projectId=created.data.project.id;
   await db.query("insert into public.creator_pipeline_allowances(account_id,profile_url,enabled,expires_at) values($1,$2,true,now()+interval '1 day')",[accountA,f.input.request.supplied_url]);

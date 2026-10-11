@@ -1,5 +1,6 @@
 import type { createPipelineOperations } from '../../packages/application/creator-pipeline.ts';
 import type { createRiffCreatorOperations } from '../../packages/application/riff-creator.ts';
+import type { createRiffVideoOperations } from '../../packages/application/riff-videos.ts';
 import { registerCreatorPipelineResource } from './creator-pipeline-resource.ts';
 import type { createCreatorOperations } from '../../packages/application/creator-operations.ts';
 import { registerCreatorReviewResource } from './creator-review-resource.ts';
@@ -14,7 +15,7 @@ import { registerRiffOnboardingResource } from './riff-onboarding-resource.ts';
 import { registerRiffHomeResource } from './riff-home-resource.ts';
 import {
   ACCOUNT_CONTRACT, CREATOR_TOOLS, DIAGNOSTIC_REGISTRATION, HOME_REGISTRATION,
-  PIPELINE_TOOLS, PRODUCT_TOOLS, PROFILE_REGISTRATION, RIFF_CREATOR_TOOLS,
+  PIPELINE_TOOLS, PRODUCT_TOOLS, PROFILE_REGISTRATION, RIFF_CREATOR_TOOLS, RIFF_VIDEO_TOOLS,
   WELCOME_REGISTRATION, selectMcpToolDescriptors,
 } from './mcp-definitions.ts';
 export { selectMcpToolDescriptors } from './mcp-definitions.ts';
@@ -30,6 +31,7 @@ export interface McpAuth {
   pipelineOperations?: ReturnType<typeof createPipelineOperations>;
   creatorOperations?: ReturnType<typeof createCreatorOperations>;
   riffCreatorOperations?: ReturnType<typeof createRiffCreatorOperations>;
+  riffVideoOperations?:ReturnType<typeof createRiffVideoOperations>;
 }
 const MCP_INSTRUCTIONS = [
   'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
@@ -94,6 +96,18 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
             result.error.code === 'FORBIDDEN' ? 'insufficient_scope' : 'invalid_token')] } } : {}),
         };
         return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], structuredContent: result };
+      });
+    }
+  }
+  if(auth?.riffVideoOperations){
+    for(const tool of RIFF_VIDEO_TOOLS){const {contract}=tool;
+      server.registerTool(tool.name,tool.registration,async(input:unknown)=>{
+        const result=await auth.riffVideoOperations!.execute(tool.operation,token,input);
+        const needsAuth=!result.ok&&(result.error.code==='UNAUTHENTICATED'||
+          (result.error.code==='FORBIDDEN'&&token&&!(await auth.verifier.verify(token))?.scopes.includes(contract.scope)));
+        if(!result.ok)return {content:[{type:'text' as const,text:result.error.message}],structuredContent:result,isError:true,
+          ...(needsAuth?{_meta:{'mcp/www_authenticate':[challenge(auth.config,result.error.code==='FORBIDDEN'?'insufficient_scope':'invalid_token')]}}:{})};
+        return {content:[{type:'text' as const,text:`Returned ${result.data.cards.length} saved Riff video cards; no provider refresh was performed.`}],structuredContent:result};
       });
     }
   }
@@ -167,6 +181,7 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
     creator: Boolean(auth?.creatorOperations),
     pipeline: Boolean(auth?.pipelineOperations),
     riffCreator: Boolean(auth?.riffCreatorOperations),
+    riffVideos:Boolean(auth?.riffVideoOperations),
   });
   server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...descriptors] }));
   // A new stateless transport per request works across Worker isolates. Product

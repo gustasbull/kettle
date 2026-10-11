@@ -12,23 +12,28 @@ export function fakeGuard() {
   const calls: { key: string; provider: string; operation: string }[] = [];
   const checkpointValues = new Map<string,string>();
   const checkpoints: {key:string;stage:string;progress:unknown}[]=[];
+  const catalogs:{key:string;role:string;observations:unknown[]}[]=[];
+  const catalogValues=new Map<string,string>(),events:string[]=[];
   const context: CreatorProviderContext = {
     now: () => '2026-10-09T12:00:00.000Z',
     newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12,'0')}`,
+    async ingestCatalog(key,role,observations){const receiptKey=`${key}:${role}`,value=JSON.stringify(observations),existing=catalogValues.get(receiptKey);
+      if(existing!==undefined){if(existing!==value)throw new Error('Synthetic catalog conflict');return;}
+      catalogValues.set(receiptKey,value);catalogs.push({key,role,observations:structuredClone([...observations])});events.push(`catalog:${key}:${role}`);},
     async checkpoint(key,stage,progress){
       const value=JSON.stringify({stage,progress}),existing=checkpointValues.get(key);
       if(existing!==undefined){if(existing!==value)throw new Error('Synthetic checkpoint conflict');return;}
-      checkpointValues.set(key,value);checkpoints.push({key,stage,progress:structuredClone(progress)});
+      checkpointValues.set(key,value);checkpoints.push({key,stage,progress:structuredClone(progress)});events.push(`checkpoint:${key}`);
     },
     async call(key, provider, operation, execute) {
       if (successes.has(key)) return structuredClone(successes.get(key));
       if (started.has(key)) throw new Error('Synthetic guard: reconciliation required');
       started.add(key); calls.push({ key, provider, operation });
       const result = await execute();
-      successes.set(key, structuredClone(result)); return result;
+      successes.set(key, structuredClone(result));events.push(`provider:${key}`); return result;
     },
   };
-  return { context, calls, successes, checkpoints };
+  return { context, calls, successes, checkpoints, catalogs, events };
 }
 export function providerHttpFixture() {
   const input = normalizedFixtureInput();

@@ -509,14 +509,30 @@ test('provider publishes stable truthful checkpoints only after validated bounda
  assert.equal(profile.handle,'fictional_kettle_creator');assert.equal('provider' in profile.provenance,false);
  const feed=(scan as any).checkpoints.find((entry:any)=>entry.key==='scan:feed:0').progress;
  assert.equal(feed.videos.length,1);assert.doesNotMatch(JSON.stringify(feed),/credits_charged|aweme_list|receipt|body/);
+ assert.equal(scan.catalogs.length,1);assert.equal(scan.catalogs[0]!.key,'scan:feed:0');assert.equal(scan.catalogs[0]!.role,'own_profile');
+ const scanCatalog:any=scan.catalogs[0]!.observations[0];
+ assert.equal(scanCatalog.id,analysis.scan.video_observations[0]!.id);assert.equal(scanCatalog.source_observed_at,analysis.scan.video_observations[0]!.provenance.source_observed_at);
+ assert.deepEqual(scanCatalog.limitations,analysis.scan.limitations);
+ for(const privateKey of ['provider','endpoint','receipt','body','credits','conversation_id'])assert.equal(privateKey in scanCatalog,false);
+ assert.ok(scan.events.indexOf('provider:feed:0')<scan.events.indexOf('checkpoint:scan:feed:0'));
+ assert.ok(scan.events.indexOf('checkpoint:scan:feed:0')<scan.events.indexOf('catalog:scan:feed:0:own_profile'));
+ const catalogId=scanCatalog.id;await provider.scan(f.input.request,scan.context);
+ assert.equal(scan.catalogs.length,1,'durable replay publishes no duplicate catalog receipt');assert.equal((scan.catalogs[0]!.observations[0] as any).id,catalogId);
  const dna=projectCreatorDna({dna_id:analysis.dna.id,project_id:'00000000-0000-4000-8000-000000000100',analysis});
- const recommendations=fakeGuard();await provider.recommend(dna,recommendations.context);
+ const recommendations=fakeGuard();const batch=await provider.recommend(dna,recommendations.context);
  assert.deepEqual((recommendations as any).checkpoints.map((entry:any)=>[entry.key,entry.stage]),[
   ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references'],
   ['recommend:detail:9000000000000000011','enriching_references'],['recommend:save','saving']]);
  const identities=(recommendations as any).checkpoints[1].progress;
  assert.equal(identities.identities.length,1);assert.deepEqual(identities.references,[]);
  assert.doesNotMatch(JSON.stringify(identities),/conversation/i);
+ assert.equal(recommendations.catalogs.length,1);assert.equal(recommendations.catalogs[0]!.key,'recommend:detail:9000000000000000011');
+ const referenceCatalog:any=recommendations.catalogs[0]!.observations[0];
+ assert.equal(referenceCatalog.id,batch.references[0]!.id);assert.deepEqual(referenceCatalog.limitations,batch.references[0]!.limitations);
+ assert.equal(referenceCatalog.metrics.comments,null);assert.equal(referenceCatalog.metrics.shares,null);
+ for(const privateKey of ['conversationId','provider','endpoint','receipt','body'])assert.equal(privateKey in referenceCatalog,false);
+ assert.ok(recommendations.events.indexOf('provider:video:9000000000000000011')<recommendations.events.indexOf('checkpoint:recommend:detail:9000000000000000011'));
+ assert.ok(recommendations.events.indexOf('checkpoint:recommend:detail:9000000000000000011')<recommendations.events.indexOf('catalog:recommend:detail:9000000000000000011:discovered_reference'));
 });
 
 test('supplied-video scan publishes review stage before any provider request',async()=>{
@@ -534,6 +550,7 @@ test('provider failure retains only the truthful pre-call checkpoint',async()=>{
  const f=providerHttpFixture();f.options.fetch=async()=>{throw new Error('offline transport failure');};const scan=fakeGuard();
  await assert.rejects(createCreatorPipelineProvider(f.options).scan(f.input.request,scan.context),/transport/);
  assert.deepEqual(scan.checkpoints.map(entry=>[entry.key,entry.stage]),[['scan:profile:start','reading_profile']]);
+ assert.deepEqual(scan.catalogs,[]);
 
  const setupResult=await setup(),recommendations=fakeGuard();let calls=0;
  const failing=createCreatorPipelineProvider({...setupResult.f.options,fetch:async(url,init)=>{
@@ -543,6 +560,7 @@ test('provider failure retains only the truthful pre-call checkpoint',async()=>{
  await assert.rejects(failing.recommend(setupResult.dna,recommendations.context),/transport/);
  assert.deepEqual(recommendations.checkpoints.map(entry=>[entry.key,entry.stage]),[
   ['recommend:research:start','researching_formats'],['recommend:identities','enriching_references']]);
+ assert.deepEqual(recommendations.catalogs,[]);
  assert.equal(calls,2);
 });
 
@@ -552,4 +570,5 @@ test('duplicate-only feed pages do not publish identical progress revisions',asy
   pages++;const body=await response.json() as any;body.has_more=pages===1;body.max_cursor='42';return Response.json(body);};
  const guard=fakeGuard();await createCreatorPipelineProvider(f.options).scan(f.input.request,guard.context);
  assert.equal(pages,2);assert.deepEqual(guard.checkpoints.filter(entry=>entry.key.startsWith('scan:feed:')).map(entry=>entry.key),['scan:feed:0']);
+ assert.deepEqual(guard.catalogs.map(entry=>entry.key),['scan:feed:0']);
 });

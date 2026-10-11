@@ -20,6 +20,7 @@ import { readLightreelSeedReview, seedReviewBody } from './seed-review.ts';
 import { receiptIds } from './ids.ts';
 import { sanitizedScrape, sourceObservedAt } from './sanitize.ts';
 import { observed, type CreatorLatencyObserver } from '../../application/creator-observability.ts';
+import { trustedCatalogObservation } from '../../contracts/riff-videos.ts';
 
 // Durable success receipt, not a parallel business/result schema.
 const receipt = z.object({ id: z.uuid(), status: z.number().int().min(200).max(299),
@@ -195,10 +196,15 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       if (parsed.kind !== 'available' || parsed.user.uniqueId.toLowerCase() !== parseTikTokUrl(request.supplied_url).handle.toLowerCase()) {
         throw new CreatorProviderError('unavailable');
       }
-      progress=scanProgress(normalizeLiveTikTokScan({id:context.newId(),created_at:profile.retrieved_at,request,
-        profileAttempt:profile,feedAttempts:[],latency_ms:profile.latency_ms,permission},context.newId));
+      const normalizedScan=async(feedAttempts:readonly (ScanReceipt&{requestedCursor:string|null})[])=>{
+        const deterministicIds=await receiptIds(profile.id,300);
+        return normalizeLiveTikTokScan({id:deterministicIds(),created_at:profile.retrieved_at,request,
+          profileAttempt:profile,feedAttempts,latency_ms:profile.latency_ms+feedAttempts.reduce((n,p)=>n+p.latency_ms,0),permission},deterministicIds);
+      };
+      progress=scanProgress(await normalizedScan([]));
       await context.checkpoint('scan:profile','reading_posts',progress);
       const pages: (ScanReceipt & { requestedCursor: string | null })[] = [];
+      const catalogedNativeIds=new Set<string>();
       let cursor: string | null = null;
       for (let page = 0; page < request.max_pages; page++) {
         const r = await call(context, `feed:${page}`, 'scrapecreators', 'feed',
@@ -208,10 +214,18 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         const replay = characterizeFeed({ profileBody: profile.body, attempts: pages,
           maxPages: request.max_pages, maxVideos: request.max_videos });
         if (replay.pages.length !== pages.length) throw new CreatorProviderError('malformed');
-        const nextProgress=scanProgress(normalizeLiveTikTokScan({id:context.newId(),created_at:profile.retrieved_at,request,
-          profileAttempt:profile,feedAttempts:pages,latency_ms:profile.latency_ms+pages.reduce((n,p)=>n+p.latency_ms,0),permission},context.newId));
+        const normalized=await normalizedScan(pages);
+        const nextProgress=scanProgress(normalized);
         if(nextProgress.videos.length>progress.videos.length){progress=nextProgress;
-          await context.checkpoint(`scan:feed:${page}`,'reading_posts',progress);}
+          const checkpointKey=`scan:feed:${page}`;
+          const admitted=normalized.video_observations.filter(observation=>{
+            const key=`${observation.video.platform}:${observation.video.native_id}`;
+            if(catalogedNativeIds.has(key))return false;catalogedNativeIds.add(key);return true;
+          });
+          await context.checkpoint(checkpointKey,'reading_posts',progress);
+          if(admitted.length)await context.ingestCatalog(checkpointKey,'own_profile',
+            admitted.map(observation=>trustedCatalogObservation(observation,normalized.limitations)));
+        }
         // A finite input replay ends here only when a valid next page can be requested.
         if (replay.stop !== 'replay_ended') break;
         cursor = replay.nextCursor;
@@ -307,7 +321,10 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         if(result.status==='rejected')break;
         references.push(result.value.reference);
         recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(result.value.observation)]};
-        try {await context.checkpoint(`recommend:detail:${candidates[index]!.nativeId}`,'enriching_references',recommendationProgress);}
+        try {const checkpointKey=`recommend:detail:${candidates[index]!.nativeId}`;
+          await context.checkpoint(checkpointKey,'enriching_references',recommendationProgress);
+          await context.ingestCatalog(checkpointKey,'discovered_reference',[
+            trustedCatalogObservation(result.value.observation,result.value.reference.limitations)]);}
         catch(error){checkpointFailure=error;break;}
       }
       if(firstAmbiguous||isAmbiguousAttempt(checkpointFailure))throw new Error('creator_attempt_needs_reconciliation');

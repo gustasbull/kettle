@@ -5,6 +5,7 @@ import { StoredCreatorAnalysis } from '../../packages/contracts/creator-operatio
 import { runCreatorPipelineJob, canProcessCapturedDna, type DurableStep, type AttemptCeilings, type StoredCreatorJob } from '../../packages/application/creator-pipeline.ts';
 import { createPipelineSupabaseRepository } from '../../packages/database/creator-pipeline-supabase.ts';
 import { createCreatorSupabaseRepository } from '../../packages/database/creator-supabase.ts';
+import { createRiffVideoSupabaseRepository } from '../../packages/database/riff-videos-supabase.ts';
 import { createCreatorPipelineProvider } from '../../packages/adapters/creator-pipeline/provider.ts';
 import type { ScrapeCreatorsCachePolicy } from '../../packages/adapters/creator-pipeline/requests.ts';
 import { createCreatorTelemetry, type CreatorTelemetry } from './creator-telemetry.ts';
@@ -55,6 +56,7 @@ export class CreatorPipelineWorkflow extends WorkflowEntrypoint<Env,{job_id:stri
     if(!pipelineConfigured(this.env))throw new Error('Creator pipeline unavailable');
     const repository=createPipelineSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
     const creators=createCreatorSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
+    const catalog=createRiffVideoSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
     const durableStep:DurableStep=createCreatorWorkflowDurableStep(step);
     const factory=(job:StoredCreatorJob)=>{
       const captured=z.object({stored:StoredCreatorAnalysis.optional(),seed_url:z.string().optional()}).parse(job.captured);
@@ -68,7 +70,7 @@ export class CreatorPipelineWorkflow extends WorkflowEntrypoint<Env,{job_id:stri
         telemetry,
       });
     };
-    await runCreatorPipelineJob(repository,creators,payload.account_id,payload.job_id,factory,pipelineCeilings(this.env),durableStep,telemetry);
+    await runCreatorPipelineJob(repository,creators,payload.account_id,payload.job_id,factory,pipelineCeilings(this.env),durableStep,telemetry,catalog);
     return {job_id:payload.job_id};
   }
 }

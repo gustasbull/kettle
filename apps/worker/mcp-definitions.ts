@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { creatorContracts } from '../../packages/contracts/creator-operations.ts';
 import { pipelineContracts } from '../../packages/contracts/creator-pipeline.ts';
 import { riffCreatorContracts } from '../../packages/contracts/riff-creator.ts';
+import { riffVideoContracts } from '../../packages/contracts/riff-videos.ts';
 import { CONTRACT_VERSION, toolContracts } from '../../packages/contracts/index.ts';
 import { OpenAIProfile } from '../../packages/contracts/openai-profile.ts';
 import { oauthScopes } from '../../packages/auth/index.ts';
@@ -20,6 +21,7 @@ export type McpToolAvailability = {
   creator: boolean;
   pipeline: boolean;
   riffCreator: boolean;
+  riffVideos?: boolean;
 };
 
 function deepFreezePlain<T>(value: T): T {
@@ -188,6 +190,17 @@ export const RIFF_CREATOR_TOOLS = Object.freeze([
   });
 }));
 
+export const RIFF_VIDEO_TOOLS=Object.freeze([{
+  name:'list_riff_videos',operation:'list_riff_videos' as const,title:'List saved Riff videos',
+  description:'List the signed-in account’s saved permitted TikTok video metadata, optionally filtered by owned project or source role. Provider-free and read-only: it never refreshes a provider, dispatches work, or spends allowance.',
+}].map(tool=>{
+  const contract=riffVideoContracts[tool.operation];
+  const annotations={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
+  const meta={securitySchemes:OAUTH_SECURITY,ui:{visibility:['model','app'] as const}};
+  return freezeTool({...tool,contract,securitySchemes:OAUTH_SECURITY,annotations,_meta:meta,
+    registration:{title:tool.title,description:tool.description,inputSchema:contract.input,annotations,_meta:meta}});
+}));
+
 export const ACCOUNT_CONTRACT = toolContracts.get_account_state;
 const OPENAI_HOME_UI = deepFreezePlain({
   preferredModelDisplayMode: 'fullscreen',
@@ -221,7 +234,7 @@ const inputSchema = (schema: z.ZodType) =>
 const outputSchema = (schema: z.ZodType) =>
   ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(schema), type: 'object' });
 const descriptorFor = (tool: typeof PRODUCT_TOOLS[number] | typeof CREATOR_TOOLS[number]
-  | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number]): AuthTool => {
+  | typeof PIPELINE_TOOLS[number] | typeof RIFF_CREATOR_TOOLS[number] | typeof RIFF_VIDEO_TOOLS[number]): AuthTool => {
   const output = tool.operation==='get_creator_job_status'
     ? outputSchema(tool.contract.output) : publishedOutputSchema(tool.contract.output);
   return deepFreezePlain({
@@ -262,20 +275,23 @@ const HOME_DESCRIPTOR = deepFreezePlain({
 const availabilityKey = (availability: McpToolAvailability) => {
   const authenticated = availability.authenticated;
   return [authenticated, authenticated && availability.creator, authenticated && availability.pipeline,
-    authenticated && availability.riffCreator].map(Number).join('');
+    authenticated && availability.riffCreator,authenticated && Boolean(availability.riffVideos)].map(Number).join('');
 };
 const catalogs: Record<string, readonly AuthTool[]> = {};
 for (const authenticated of [false, true]) for (const creator of [false, true]) {
   for (const pipeline of [false, true]) for (const riffCreator of [false, true]) {
+   for(const riffVideos of [false,true]){
     const descriptors: AuthTool[] = [DIAGNOSTIC_DESCRIPTOR];
     if (authenticated) {
       descriptors.push(WELCOME_DESCRIPTOR, ...PRODUCT_TOOLS.map(descriptorFor));
       if (creator) descriptors.push(...CREATOR_TOOLS.map(descriptorFor));
       if (pipeline) descriptors.push(...PIPELINE_TOOLS.map(descriptorFor));
       if (riffCreator) descriptors.push(...RIFF_CREATOR_TOOLS.map(descriptorFor));
+      if(riffVideos)descriptors.push(...RIFF_VIDEO_TOOLS.map(descriptorFor));
       descriptors.push(PROFILE_DESCRIPTOR, HOME_DESCRIPTOR);
     }
-    catalogs[availabilityKey({ authenticated, creator, pipeline, riffCreator })] = Object.freeze(descriptors);
+    catalogs[availabilityKey({ authenticated, creator, pipeline, riffCreator, riffVideos })] = Object.freeze(descriptors);
+   }
   }
 }
 const DESCRIPTOR_CATALOGS = Object.freeze(catalogs);

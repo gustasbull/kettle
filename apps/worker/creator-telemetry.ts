@@ -6,7 +6,7 @@ const stages = z.enum([
   'request_receipt', 'mcp_route', 'auth_metadata', 'auth_jwks', 'identity_lookup',
   'application_operation', 'supabase_rpc', 'workflow_dispatch', 'queue_to_running',
   'provider_reservation', 'provider_http', 'sanitization', 'receipt_persistence',
-  'checkpoint_persistence', 'terminal_save', 'poll_observation', 'panel_render',
+  'checkpoint_persistence', 'catalog_persistence', 'terminal_save', 'poll_observation', 'panel_render',
 ]);
 const statuses = z.enum(['ok', 'error', 'timeout', 'rejected', 'replay', 'ambiguous', 'unavailable']);
 const providers = z.enum(['scrapecreators', 'lightreel', 'openai']);
@@ -18,7 +18,7 @@ const endpoints = z.enum([
   'worker_health', 'worker_home', 'worker_mcp', 'worker_oauth', 'worker_not_found',
   'mcp_transport', 'auth_discovery', 'auth_jwks', 'identity_rpc',
   'riff_creator_find', 'riff_creator_start', 'riff_creator_list',
-  'creator_pipeline_rpc', 'workflow_create', 'workflow_get', 'workflow_status',
+  'creator_pipeline_rpc', 'riff_video_catalog_rpc', 'workflow_create', 'workflow_get', 'workflow_status',
   'scrapecreators_profile', 'scrapecreators_feed', 'scrapecreators_video',
   'lightreel_research', 'lightreel_poll', 'openai_responses',
   'panel_home', 'panel_onboarding', 'panel_pipeline',

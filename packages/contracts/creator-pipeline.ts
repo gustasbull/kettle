@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Id, Timestamp, result } from './index.ts';
 import { ProfileScanRequest, CreatorAnalysis, CreatorUrl, TikTokImageUrl } from './creator-profile.ts';
 import { CreatorDnaView } from './creator-operations.ts';
+import type { RiffVideoRole, TrustedCatalogObservation } from './riff-videos.ts';
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const ReferenceMultiplierBasis = z.strictObject({
@@ -223,6 +224,8 @@ export interface CreatorProviderContext {
   call(key:string,provider:'scrapecreators'|'lightreel'|'openai',operation:'profile'|'feed'|'research'|'poll'|'video'|'generate',execute:()=>Promise<unknown>):Promise<unknown>;
   /** Persist a validated public display snapshot. This never reserves provider allowance. */
   checkpoint(key:string,stage:CreatorJobStage,progress:CreatorJobProgress):Promise<void>;
+  /** Publish only the original validated safe observation after its matching checkpoint is durable. */
+  ingestCatalog(checkpointKey:string,role:RiffVideoRole,observations:readonly TrustedCatalogObservation[]):Promise<void>;
 }
 export interface CreatorPipelineProvider {
   scan(request:z.infer<typeof ProfileScanRequest>,context:CreatorProviderContext):Promise<z.infer<typeof CreatorAnalysis>>;
