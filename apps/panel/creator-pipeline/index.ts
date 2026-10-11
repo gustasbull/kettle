@@ -764,7 +764,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const active = doc.activeElement as HTMLElement | null;
     const hadFocus = !!active && content.contains(active);
     const focusKey = same && hadFocus ? active.dataset.focus : undefined;
-    if (!same) { ideaIndex = 0; catalogIndex=0;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined; }
+    if (!same) {
+      ideaIndex = 0; catalogIndex=0;discoveryLibrary = 'videos'; discoveryFilter = 'For you'; studioTab = 0;sourceUrl=undefined;
+      if(current?.project_id!==job.project_id){catalog=undefined;catalogRequested=false;}
+    }
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;
     identity = nextIdentity; current = job;currentStatus=presentation.status;showingCatalog=false; wrapper.dataset.mode = mode; content.replaceChildren();

@@ -34,7 +34,7 @@ function setup(t: TestContext, overrides: Partial<CreatorPipelineLimits> = {}) {
   const notices: string[] = [];
   const clears: string[] = [];
   const statusCalls: Array<{ input: { job_id: string }; signal: AbortSignal; resolve(value: unknown): void }> = [];
-  const fullCalls: Array<{ input: { job_id: string }; signal: AbortSignal; resolve(value: unknown): void }> = [];
+  const fullCalls: Array<{ input: { job_id: string }; signal: AbortSignal; resolve(value: unknown): void; reject(reason?: unknown): void }> = [];
   const controller = createCreatorPipelineController({
     loading() {},
     job(snapshot, state) {
@@ -44,7 +44,7 @@ function setup(t: TestContext, overrides: Partial<CreatorPipelineLimits> = {}) {
     cleared(reason) { clears.push(reason); },
   }, {
     readStatus: (input, signal) => new Promise(resolve => statusCalls.push({ input, signal, resolve })),
-    readFull: (input, signal) => new Promise(resolve => fullCalls.push({ input, signal, resolve })),
+    readFull: (input, signal) => new Promise((resolve,reject) => fullCalls.push({ input, signal, resolve, reject })),
   }, {
     timeoutMs: 100,
     pollIntervalMs: 250,
@@ -88,17 +88,85 @@ test('polls compact status, suppresses equal revisions, and reads the full job e
   assert.equal(f.snapshots.filter(item => item.status?.revision === 1).length, 0, 'equal status revisions do not rerender');
 
   await f.tick(400);
-  const terminalStatus = makeStatus(initial, {
-    state: 'succeeded', stage: 'saving', revision: 2, updated_at: '2026-10-11T12:00:00Z',
-    progress: { kind: 'scan', profile: null, videos: [], limitations: [] }, terminal_result_available: true,
-  });
+  const terminal = creatorJobFixture('scan'); terminal.revision = 2;
+  const terminalStatus = makeStatus(terminal);
   f.statusCalls[1]!.resolve(statusOutput(terminalStatus)); await flush();
   assert.equal(f.fullCalls.length, 1);
-  const terminal = creatorJobFixture('scan'); terminal.revision = 2;
   f.fullCalls[0]!.resolve(jobOutput(terminal)); await flush();
   assert.equal(f.snapshots.at(-1)?.job.state, 'succeeded');
   assert.equal(f.fullCalls.length, 1);
   await f.tick(500); assert.equal(f.statusCalls.length, 2);
+});
+
+test('manual refresh retries a terminal full read that timed out', async t => {
+  const f = setup(t);
+  const initial = creatorJobFixture('scan');
+  initial.state = 'running'; initial.result = null; initial.revision = 1; initial.stage = 'reading_profile';
+  initial.progress = { kind: 'scan', profile: null, videos: [], limitations: [] };
+  f.controller.receiveInput({ job_id: initial.id });
+  f.controller.receiveResult(jobOutput(initial));
+  f.controller.connected(true);
+  const terminal = creatorJobFixture('scan'); terminal.revision = 2;
+  const terminalStatus = makeStatus(terminal);
+  f.statusCalls[0]!.resolve(statusOutput(terminalStatus)); await flush();
+  assert.equal(f.fullCalls.length, 1);
+  await f.tick(100);
+  assert.equal(f.fullCalls[0]!.signal.aborted, true);
+
+  const retry = f.controller.refresh();
+  assert.equal(f.statusCalls.length, 2);
+  f.statusCalls[1]!.resolve(statusOutput(terminalStatus)); await flush();
+  await retry;
+  assert.equal(f.fullCalls.length, 2, 'the explicit refresh retries the unavailable terminal result');
+  f.fullCalls[1]!.resolve(jobOutput(terminal)); await flush();
+  assert.equal(f.snapshots.at(-1)?.job.state, 'succeeded');
+});
+
+test('terminal full transport rejection retains the compact snapshot and refresh retries', async t => {
+  const f = setup(t);
+  const initial = creatorJobFixture('scan');
+  initial.state = 'running'; initial.result = null; initial.revision = 1; initial.stage = 'reading_profile';
+  initial.progress = { kind: 'scan', profile: null, videos: [], limitations: [] };
+  f.controller.receiveInput({ job_id: initial.id });
+  f.controller.receiveResult(jobOutput(initial));
+  f.controller.connected(true);
+
+  const terminal = creatorJobFixture('scan'); terminal.revision = 2;
+  const terminalStatus = makeStatus(terminal);
+  f.statusCalls[0]!.resolve(statusOutput(terminalStatus)); await flush();
+  assert.equal(f.fullCalls.length, 1);
+  f.fullCalls[0]!.reject(new Error('transport closed')); await flush();
+  assert.deepEqual(f.clears, []);
+  assert.equal(f.snapshots.at(-1)?.status?.revision, 2);
+  assert.equal(f.snapshots.at(-1)?.status?.state, 'succeeded');
+  assert.match(f.notices.at(-1) ?? '', /could not be loaded/i);
+
+  const retry = f.controller.refresh();
+  assert.equal(f.statusCalls.length, 2);
+  f.statusCalls[1]!.resolve(statusOutput(terminalStatus)); await flush();
+  await retry;
+  assert.equal(f.fullCalls.length, 2, 'the explicit refresh retries a rejected terminal full read');
+  f.fullCalls[1]!.resolve(jobOutput(terminal)); await flush();
+  assert.equal(f.snapshots.at(-1)?.job.state, 'succeeded');
+});
+
+test('rejects a full result that contradicts the compact status at the same revision', async t => {
+  const f = setup(t);
+  const initial = creatorJobFixture('scan');
+  initial.state = 'running'; initial.result = null; initial.revision = 1; initial.stage = 'reading_profile';
+  initial.progress = { kind: 'scan', profile: null, videos: [], limitations: [] };
+  f.controller.receiveInput({ job_id: initial.id }); f.controller.receiveResult(jobOutput(initial)); f.controller.connected(true);
+  const compact = makeStatus(initial, {
+    revision: 2, stage: 'reading_posts', updated_at: '2026-10-11T12:00:00Z',
+    progress: { kind: 'scan', profile: null, videos: [], limitations: ['Truth A.'] },
+  });
+  f.statusCalls[0]!.resolve(statusOutput(compact)); await flush();
+  const contradictory = structuredClone(initial);
+  contradictory.revision = 2; contradictory.stage = 'reading_profile'; contradictory.updated_at = compact.updated_at;
+  contradictory.progress = { kind: 'scan', profile: null, videos: [], limitations: ['Truth B.'] };
+  f.controller.receiveResult(jobOutput(contradictory)); await flush();
+  assert.deepEqual(f.snapshots.at(-1)?.status?.progress, compact.progress);
+  assert.match(f.notices.at(-1) ?? '', /contradictory/i);
 });
 
 test('streams monotonic progress and rejects contradictory same revisions without replacing the prior view', async t => {
@@ -166,6 +234,16 @@ test('connected-before-input ordering performs one initial full read',async t=>{
   f.fullCalls[0]!.resolve(jobOutput(job));await flush();
   assert.equal(f.snapshots.at(-1)?.job.id,job.id);assert.equal(f.fullCalls.length,1);
   assert.equal(f.statusCalls.length,1,'the compact status read begins immediately after the initial full view');
+});
+
+test('input-only full timeout leaves loading with a visible connection recovery',async t=>{
+  const f=setup(t);const job=creatorJobFixture('scan');
+  f.controller.connected(true);f.controller.receiveInput({job_id:job.id});
+  await f.tick(0);assert.equal(f.fullCalls.length,1);
+  await f.tick(100);
+  assert.equal(f.fullCalls[0]!.signal.aborted,true);
+  assert.deepEqual(f.clears,['connection']);
+  assert.equal(f.snapshots.length,0,'unverified input-only data is never rendered');
 });
 
 test('explicit same-job reopen starts a fresh active observation session without terminal reactivation',async t=>{

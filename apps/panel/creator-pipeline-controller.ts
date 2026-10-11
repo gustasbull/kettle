@@ -105,6 +105,9 @@ export function createCreatorPipelineController(
   function statusIdentityMatches(next:CreatorJobStatusView){
     return !!selection&&!!job&&selection.job_id===next.id&&job.id===next.id&&job.kind===next.kind&&job.created_at===next.created_at;
   }
+  function fullMatchesObservedStatus(next:CreatorJobView){
+    return !status||next.revision!==status.revision||fingerprint(projectedStatus(next))===fingerprint(status);
+  }
   function failed(raw:unknown,automatic:boolean){
     const parsed=parseCreatorJobStatusOutput(raw)??parseCreatorJobOutput(raw);
     if(!parsed)return 'invalid' as const;
@@ -130,17 +133,20 @@ export function createCreatorPipelineController(
       }
       const next=parsed.data.job;
       if(!selection||next.id!==selection.job_id||(job&&(next.project_id!==job.project_id||next.kind!==job.kind||next.created_at!==job.created_at))
-        ||expectedRevision!==undefined&&(next.revision!==expectedRevision||next.state!=='succeeded')){
+        ||expectedRevision!==undefined&&(next.revision!==expectedRevision||next.state!=='succeeded')||!fullMatchesObservedStatus(next)){
         if(expectedRevision!==undefined){paused=true;publish('A mismatched saved result was ignored. Refresh or reopen in chat.');}
         else clear('invalid');return;
       }
       if(job&&next.revision<job.revision){publish('An older response was ignored. Refresh or reopen in chat.');schedule();return;}
-      job=next;status=projectedStatus(next);stopInitial();paused=false;publish();
+      job=next;status=projectedStatus(next);if(next.state==='succeeded')terminalRevision=next.revision;
+      stopInitial();paused=false;publish();
       if(active(next.state)&&expectedRevision===undefined&&!legacy&&maxPolls>0)void readStatus(true);
       else schedule();
     }catch{
       if(disposed||requestEpoch!==epoch)return;pending=undefined;
-      if(timedOut){paused=true;publish('Updates timed out. Refresh or reopen in chat to try again.');}
+      if(timedOut&&job){paused=true;publish('Updates timed out. Refresh or reopen in chat to try again.');}
+      else if(timedOut)clear('connection');
+      else if(expectedRevision!==undefined&&job){paused=true;publish('The saved result could not be loaded. Refresh or reopen in chat to try again.');}
       else clear('connection');
     }finally{if(timer!==undefined)clearTimeout(timer);}
   }
@@ -172,13 +178,19 @@ export function createCreatorPipelineController(
       if(next.revision<current.revision){finish?.('rejected');if(legacy){paused=true;publish('An older response was ignored. Refresh or reopen in chat.');}else schedule();return;}
       if(next.revision===current.revision){
         if(fingerprint(next)!==fingerprint(current)){finish?.('rejected');if(legacy)clear('invalid');else{paused=true;publish('A contradictory update was ignored. Refresh or reopen in chat.');}return;}
-        unchanged++;finish?.('ok');schedule();return;
+        unchanged++;finish?.('ok');
+        if(!active(next.state)){
+          stopPoll();
+          if(next.terminal_result_available&&terminalRevision!==next.revision)void readFull(next.revision,true);
+          return;
+        }
+        schedule();return;
       }
       if(!active(current.state)&&active(next.state)){finish?.('rejected');if(legacy)clear('invalid');else{paused=true;publish('A contradictory update was ignored. Refresh or reopen in chat.');}return;}
       status=structuredClone(next);unchanged=0;publish();finish?.('ok');
       if(!active(next.state)){
         stopPoll();
-        if(next.terminal_result_available&&terminalRevision!==next.revision){terminalRevision=next.revision;void readFull(next.revision,true);}
+        if(next.terminal_result_available&&terminalRevision!==next.revision)void readFull(next.revision,true);
         return;
       }
       schedule();
@@ -219,10 +231,12 @@ export function createCreatorPipelineController(
       const observedRevision=status?.revision??job?.revision;
       const observedState=status?.state??job?.state;
       if(observedRevision!==undefined&&next.revision<observedRevision){paused=true;publish('An older response was ignored. Refresh or reopen in chat.');return;}
+      if(!fullMatchesObservedStatus(next)){paused=true;publish('A contradictory saved result was ignored. Refresh or reopen in chat.');return;}
       if(job&&next.revision===job.revision&&JSON.stringify(next)!==JSON.stringify(job)){clear('invalid');return;}
       if(observedState&&!active(observedState)&&active(next.state)){clear('invalid');return;}
       job=structuredClone(next);status=undefined;stopInitial();
       if(active(next.state)){polls=0;unchanged=0;started=Date.now();paused=false;terminalRevision=undefined;}
+      else if(next.state==='succeeded')terminalRevision=next.revision;
       publish();
       if(connected&&tools&&active(next.state)){if(legacy||maxPolls===0)schedule();else void readStatus(true);}
     },

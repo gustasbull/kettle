@@ -432,6 +432,94 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
   assert.equal(await frame.evaluate(() => window.lookups), 0, 'the old account pending start is not reconciled under the new account');
 });
 
+test('Riff Home ignores a catalog response from the previous account', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.catalogCalls=[];
+    window.openai={callTool:async(name,args)=>{
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='list_riff_videos')return new Promise(resolve=>window.catalogCalls.push({args,resolve}));
+      return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}}};
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      window.account=id=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id,display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'catalog-account-change',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(m.method==='ui/notifications/initialized'){window.account('00000000-0000-4000-8000-000000000001');window.ready=true;}
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  await frame.getByRole('button', { name: 'Trending videos', exact: true }).click();
+  await frame.waitForFunction(() => window.catalogCalls.length === 1);
+
+  await page.evaluate(() => window.account('00000000-0000-4000-8000-000000000002'));
+  await frame.getByRole('button', { name: 'Trending videos', exact: true }).waitFor();
+  await frame.evaluate(() => window.catalogCalls[0].resolve({structuredContent:{ok:true,data:{
+    cards:[{
+      id:'00000000-0000-4000-8000-000000000801',platform:'tiktok',native_id:'9000000000000000801',
+      canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000801',caption:'Account A secret',
+      thumbnail_url:null,published_at:null,duration_seconds:null,
+      metrics:{views:null,likes:null,comments:null,shares:null,saves:null},
+      retrieved_at:'2026-10-11T12:00:00Z',source_observed_at:null,observed_at:'2026-10-11T12:00:00Z',
+      origin:'fixture',role:'discovered_reference',permission_basis:'Authored browser fixture for safe rendering.',limitations:[],
+    }],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.',
+  }}}));
+  await frame.waitForTimeout(50);
+  await frame.getByRole('button', { name: 'Trending videos', exact: true }).click();
+  await frame.waitForFunction(() => window.catalogCalls.length === 2);
+  assert.doesNotMatch(await frame.locator('body').textContent(), /Account A secret/,
+    'a late catalog response cannot cross the account boundary or seed the next account cache');
+});
+
+test('Riff Home defers a catalog shortcut until the first account is ready', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.catalogCalls=[];
+    window.openai={callTool:async(name,args)=>{
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name==='list_riff_videos'){window.catalogCalls.push(args);return {structuredContent:{ok:true,data:{cards:[],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}}};}
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'), {timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;window.initializeId=undefined;window.initializeVersion=undefined;const frame=()=>document.querySelector('iframe').contentWindow;
+      window.sendAccount=()=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:null}}},content:[]}},'*');
+      window.finishConnect=()=>frame().postMessage({jsonrpc:'2.0',id:window.initializeId,result:{protocolVersion:window.initializeVersion,hostInfo:{name:'catalog-before-account',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+      addEventListener('message',e=>{const m=e.data;
+        if(m.method==='ui/initialize'){window.initializeId=m.id;window.initializeVersion=m.params.protocolVersion;window.ready=true;}
+        if(m.method==='ui/notifications/initialized')window.sendAccount();
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage(); page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await page.waitForFunction(() => window.ready);
+  const frame = page.frames().find((item) => item.url().endsWith('/frame'));
+  await frame.getByRole('button', { name: 'Trending videos', exact: true }).click();
+  await frame.waitForTimeout(50);
+  assert.equal(await frame.evaluate(() => window.catalogCalls.length),0,'no account-scoped read starts before the host connection and identity are ready');
+  await page.evaluate(() => window.finishConnect());
+  await frame.waitForFunction(() => window.catalogCalls.length === 1);
+  assert.deepEqual(await frame.evaluate(() => window.catalogCalls[0]),{sort:'observed_at_desc',limit:8});
+});
+
 test('Riff Home ignores an older start response after a newer creator intent wins', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';

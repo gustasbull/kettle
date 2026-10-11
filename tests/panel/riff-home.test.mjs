@@ -33,6 +33,14 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
     assert.equal(await page.getByRole('button', { name: 'Create a video' }).count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Open Riff menu' }).count(), 0);
     assert.match(await page.locator('.riff-home__chrome').textContent(),/Riff\s*\/\s*Home/);
+    const brandGeometry = await page.locator('.riff-home__brand').evaluate(node => ({
+      height: node.getBoundingClientRect().height,
+      textHeight: node.querySelector('span').getBoundingClientRect().height,
+      logoWidth: node.querySelector('svg').getBoundingClientRect().width,
+    }));
+    assert.ok(brandGeometry.height <= 24, `Home breadcrumb brand wrapped to ${brandGeometry.height}px`);
+    assert.ok(brandGeometry.textHeight <= 20, `Home breadcrumb text wrapped to ${brandGeometry.textHeight}px`);
+    assert.equal(Math.round(brandGeometry.logoWidth), 22);
     assert.equal(await page.locator('.riff-home').evaluate(node=>getComputedStyle(node).padding),'12px');
     assert.match(await page.locator('.riff-home').evaluate(node=>getComputedStyle(node).backgroundImage),/radial-gradient/);
     assert.equal(await page.locator('.riff-home__composer').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 246, 250)');

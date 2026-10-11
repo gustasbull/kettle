@@ -46,6 +46,30 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   const root = page.locator('#root');
 
+  await t.test('fullscreen chrome keeps the exact Riff breadcrumb on one line', async () => {
+    await page.setViewportSize({ width: 1055, height: 820 });
+    await page.evaluate(() => boot('video-analysis', 'fullscreen'));
+    const geometry = await root.locator('.riff-pipeline__brand').evaluate(node => {
+      const text = node.querySelector('span');
+      const logo = node.querySelector('svg');
+      const brand = node.getBoundingClientRect();
+      const textRect = text.getBoundingClientRect();
+      const logoRect = logo.getBoundingClientRect();
+      return {
+        brandHeight: brand.height,
+        textHeight: textRect.height,
+        logoWidth: logoRect.width,
+        text: text.textContent,
+      };
+    });
+    assert.equal(geometry.text, 'Riff');
+    assert.ok(geometry.brandHeight <= 24, `breadcrumb brand wrapped to ${geometry.brandHeight}px`);
+    assert.ok(geometry.textHeight <= 20, `breadcrumb text wrapped to ${geometry.textHeight}px`);
+    assert.equal(Math.round(geometry.logoWidth), 22);
+    assert.match(await root.locator('.riff-pipeline__chrome-trail').textContent(), /Riff\s*\/\s*Analysis/);
+    await page.setViewportSize({ width: 1200, height: 900 });
+  });
+
   await t.test('pending and recovery states contain no invented job chrome or retry action', async () => {
     await page.evaluate(() => boot('queued', 'fullscreen'));
     assert.equal(await root.locator('svg[aria-label="Riff"]').count(), 0);
@@ -448,6 +472,19 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       'arrows, tabs and loaded filters never make another tool call');
     assert.doesNotMatch(await root.locator('[data-catalog-card]').allTextContents().then(values => values.join(' ')),
       /recommended|viral|Make it mine|Why it fits|Batch limitations/i);
+
+    const loadsBeforeProjectChange = await page.evaluate(() => window.discoveryLoads.length);
+    await page.evaluate(() => {
+      const next = structuredClone(window.job);
+      next.id = '00000000-0000-4000-8000-000000000998';
+      next.project_id = '00000000-0000-4000-8000-000000000997';
+      window.view.render(next);
+      window.view.showCatalog();
+    });
+    assert.equal(await root.getByText(/Observed catalog caption/).count(), 0,
+      'a different project never paints the prior project catalog');
+    assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsBeforeProjectChange + 1,
+      'a different project gets its own provider-free catalog request');
   });
 
   await t.test('Studio matches Paper script tabs and omits unavailable caption and developer panels', async () => {

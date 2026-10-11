@@ -28,7 +28,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const card = doc.createElement('div');
   host.append(card, message); root.replaceChildren(host);
   let view: ReturnType<typeof mountCreatorPipeline> | undefined;
-  let currentProjectId:string|undefined,catalogAttempted=false,catalogLoading=false;
+  let currentProjectId:string|undefined,catalogAttemptedFor:string|undefined,catalogLoadingFor:string|undefined;
   const sourceByJob=new Map<string,string>();let pendingSource:string|undefined;
   function clearCard(text: string) {
     const hadFocus = host.contains(doc.activeElement);
@@ -78,12 +78,14 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     }
   };
   const loadCatalog=async()=>{
-    if(catalogAttempted||catalogLoading||!bridgeReady)return;catalogAttempted=true;catalogLoading=true;
+    const projectId=currentProjectId;
+    if(!projectId||catalogAttemptedFor===projectId||catalogLoadingFor===projectId||!bridgeReady)return;
+    catalogAttemptedFor=projectId;catalogLoadingFor=projectId;
     try{
-      const result=riffVideosStructuredOutput(await app.callServerTool({name:'list_riff_videos',arguments:{...(currentProjectId?{project_id:currentProjectId}:{}),sort:'observed_at_desc',limit:8}},
+      const result=riffVideosStructuredOutput(await app.callServerTool({name:'list_riff_videos',arguments:{project_id:projectId,sort:'observed_at_desc',limit:8}},
         {timeout:timeoutMs+1_000,maxTotalTimeout:timeoutMs+1_000}));
-      if(result?.ok)view?.setCatalog(result.data);
-    }catch{/* Discovery keeps the approved empty state. */}finally{catalogLoading=false;}
+      if(result?.ok&&currentProjectId===projectId)view?.setCatalog(result.data);
+    }catch{/* Discovery keeps the approved empty state. */}finally{if(catalogLoadingFor===projectId)catalogLoadingFor=undefined;}
   };
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
@@ -92,7 +94,9 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         displayMode: app.getHostContext()?.displayMode === 'fullscreen' ? 'fullscreen' : 'inline',
         sendPrompt, requestFullscreen,onDiscoveryOpen:()=>void loadCatalog(),
       });
-      currentProjectId=snapshot.job.project_id;
+      if(currentProjectId!==snapshot.job.project_id){
+        currentProjectId=snapshot.job.project_id;catalogAttemptedFor=undefined;catalogLoadingFor=undefined;view.setCatalog(undefined);
+      }
       view.render(snapshot.job,{...(snapshot.status?{status:snapshot.status}:{}),...(sourceByJob.get(snapshot.job.id)?{sourceUrl:sourceByJob.get(snapshot.job.id)}:{})});
       if(snapshot.status?.progress.kind==='scan'&&snapshot.status.progress.videos.length)sourceByJob.delete(snapshot.job.id);
       message.textContent = status.notice ?? '';

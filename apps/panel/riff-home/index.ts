@@ -81,11 +81,12 @@ body { min-height: 100vh; }
 .riff-home { min-height: 100vh; padding: 12px; background: radial-gradient(circle, rgba(101,86,122,.06) .6px, transparent .85px) center/16px 16px, radial-gradient(at 10% 70%, #DCEBFA 0%, transparent 60%), radial-gradient(at 70% 65%, #E6DDF6 0%, transparent 58%), radial-gradient(at 92% 30%, #F5E2EF 0%, transparent 55%), #FCFCFE; color: #242426; }
 .riff-home__account { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .riff-home__chrome { display:flex; width:100%; flex:0 0 auto; align-items:center; justify-content:space-between; padding:calc(16px + var(--riff-safe-top,0px)) 24px 8px; border-radius:24px 24px 0 0; }
-.riff-home__chrome-trail { display:flex; width:fit-content; height:44px; align-items:center; gap:14px; }
+.riff-home__chrome-trail { display:flex; width:fit-content; height:44px; flex:0 0 auto; align-items:center; gap:14px; white-space:nowrap; }
 .riff-home__rail-symbol { display:flex; width:36px; height:36px; flex:0 0 auto; align-items:center; justify-content:center; border:1px solid #E3E7EE; border-radius:10px; background:#FFF; box-shadow:0 1px 3px #18243A08; }
 .riff-home__rail-symbol svg { width:18px;height:18px; }
-.riff-home__brand { display:flex;align-items:center;gap:8px;color:#242426;font-size:14px;font-weight:600;line-height:20px; }
-.riff-home__brand svg { width:22px;height:22px; }
+.riff-home__brand { display:flex;flex:0 0 auto;align-items:center;gap:8px;color:#242426;font-size:14px;font-weight:600;line-height:20px;overflow-wrap:normal;white-space:nowrap; }
+.riff-home__brand svg, .riff-home__brand > span { flex:0 0 auto; }
+.riff-app .riff-home__brand .riff-logo { width:22px;height:22px; }
 .riff-home__separator { color:#ABB0B9;font-size:14px;line-height:20px; }
 .riff-home__location { color:#242426;font-size:13px;line-height:20px; }
 .riff-home__home { display: flex; min-height: calc(100vh - 92px); width: 100%; align-items: center; flex-direction: column; gap: 20px; padding: 28px calc(28px + var(--riff-safe-right, 0px)) calc(40px + var(--riff-safe-bottom, 0px)) calc(28px + var(--riff-safe-left, 0px)); border-radius: 0 0 24px 24px; background: transparent; }
