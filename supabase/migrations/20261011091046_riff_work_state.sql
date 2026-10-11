@@ -34,8 +34,10 @@ create table public.riff_work_state_receipts (
   job_id uuid not null,
   variant_id uuid not null,
   input jsonb not null check (jsonb_typeof(input)='object' and octet_length(input::text)<=16384),
-  output jsonb not null check (jsonb_typeof(output)='object' and octet_length(output::text)<=16384
-    and output->>'ok'='true' and jsonb_typeof(output#>'{data,work_state}')='object'),
+  output jsonb not null check ((jsonb_typeof(output)='object' and octet_length(output::text)<=16384
+    and jsonb_typeof(output->'ok')='boolean' and output->'ok'='true'::jsonb
+    and jsonb_typeof(output->'data')='object'
+    and jsonb_typeof(output#>'{data,work_state}')='object') is true),
   created_at timestamptz not null default now(),
   primary key (account_id,request_id),
   foreign key (job_id,variant_id,account_id) references public.riff_work_states(job_id,variant_id,account_id)
@@ -83,6 +85,9 @@ begin
     or jsonb_typeof(p_input->'state') is distinct from 'string'
     or jsonb_typeof(p_input->'expected_version') is distinct from 'number'
     or jsonb_typeof(p_input->'request_id') is distinct from 'string'
+    or p_input->>'job_id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+    or p_input->>'variant_id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+    or p_input->>'request_id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
   then return public.kettle_error('VALIDATION_ERROR'); end if;
 
   begin
@@ -111,11 +116,12 @@ begin
     or jsonb_array_length(v_job.result#>'{scripts,variants}')=0
     or exists (select 1 from jsonb_array_elements(v_job.result#>'{scripts,variants}') item
       where jsonb_typeof(item) is distinct from 'object' or jsonb_typeof(item->'id') is distinct from 'string'
-        or item->>'id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
-    or (select count(*) from jsonb_array_elements(v_job.result#>'{scripts,variants}')) <>
-       (select count(distinct item->>'id') from jsonb_array_elements(v_job.result#>'{scripts,variants}') item)
+        or item->>'id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$')
+  then return public.kettle_error('NOT_FOUND'); end if;
+  if (select count(*) from jsonb_array_elements(v_job.result#>'{scripts,variants}')) <>
+       (select count(distinct (item->>'id')::uuid) from jsonb_array_elements(v_job.result#>'{scripts,variants}') item)
     or not exists (select 1 from jsonb_array_elements(v_job.result#>'{scripts,variants}') item
-      where item->>'id'=v_variant_id::text)
+      where (item->>'id')::uuid=v_variant_id)
   then return public.kettle_error('NOT_FOUND'); end if;
 
   select * into v_current from public.riff_work_states
@@ -166,12 +172,12 @@ begin
     where j.id=(p_input->>'job_id')::uuid and j.account_id=p_account_id;
   exception when invalid_text_representation then return public.kettle_error('VALIDATION_ERROR'); end;
   if not found then return public.kettle_error('NOT_FOUND'); end if;
-  select coalesce(jsonb_agg(jsonb_build_object('job_id',v_job.id,'variant_id',variant.value->>'id','state',ws.state,
+  select coalesce(jsonb_agg(jsonb_build_object('job_id',v_job.id,'variant_id',ws.variant_id,'state',ws.state,
       'version',ws.version,'updated_at',ws.updated_at) order by variant.ordinality),'[]'::jsonb)
     into v_states from jsonb_array_elements(case when v_job.kind='scripts' and v_job.state='succeeded'
       and jsonb_typeof(v_job.result#>'{scripts,variants}')='array' then v_job.result#>'{scripts,variants}' else '[]'::jsonb end)
       with ordinality variant(value,ordinality)
-    join public.riff_work_states ws on ws.job_id=v_job.id and ws.variant_id::text=variant.value->>'id' and ws.account_id=p_account_id;
+    join public.riff_work_states ws on ws.job_id=v_job.id and ws.variant_id::text=lower(variant.value->>'id') and ws.account_id=p_account_id;
   return jsonb_build_object('ok',true,'data',jsonb_build_object('job',to_jsonb(v_job)||jsonb_build_object('work_states',v_states)));
 end;
 $$;

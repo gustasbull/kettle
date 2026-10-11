@@ -59,8 +59,9 @@ export const RiffWorkSummary = z.strictObject({
 }).superRefine((work,context)=>{
   if((work.variant_id===null)!==(work.work_state===null))
     context.addIssue({code:'custom',message:'Recent variant and work state must be present together'});
-  if(work.work_state&&(work.kind!=='scripts'||work.state!=='succeeded'||work.work_state.job_id!==work.job_id||
-    work.work_state.variant_id!==work.variant_id))
+  if(work.work_state&&(work.kind!=='scripts'||work.state!=='succeeded'
+    ||work.work_state.job_id.toLowerCase()!==work.job_id.toLowerCase()
+    ||work.work_state.variant_id.toLowerCase()!==work.variant_id?.toLowerCase()))
     context.addIssue({code:'custom',message:'Recent work state must match its successful script job and variant'});
 });
 export const ListRiffWorkOutput = result(z.strictObject({

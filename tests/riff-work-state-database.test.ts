@@ -8,6 +8,7 @@ const db=new PGlite();
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 let project:string,foreignProject:string;
 const job=id(701),variantA=id(702),variantB=id(703),foreignJob=id(704),scanJob=id(705),runningJob=id(706),rollbackJob=id(707),rollbackVariant=id(708);
+const variantV7Upper='018F3E12-9ABC-7DEF-8ABC-1234567890AB',variantV7=variantV7Upper.toLowerCase();
 const request=(n:number)=>id(800+n);
 type Reply={ok:boolean;data?:any;error?:{code:string}};
 async function rpc(input:unknown,account=accountA):Promise<Reply>{return db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_set_riff_work_state($1::uuid,$2::jsonb) value',[account,JSON.stringify(input)])).rows[0]!.value;});}
@@ -21,7 +22,7 @@ before(async()=>{
   const foreign=createInput();foreign.name='Foreign work';
   const save=async(account:string,input:unknown)=>(await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_save_project($1::uuid,$2::jsonb) value',[account,JSON.stringify(input)])).rows[0]!.value;}));
   project=(await save(accountA,own)).data!.project.id;foreignProject=(await save(accountB,foreign)).data!.project.id;
-  const scriptResult=JSON.stringify({kind:'scripts',scripts:{variants:[{id:variantA},{id:variantB}]}});
+  const scriptResult=JSON.stringify({kind:'scripts',scripts:{variants:[{id:variantA},{id:variantB},{id:variantV7Upper}]}});
   const rollbackResult=JSON.stringify({kind:'scripts',scripts:{variants:[{id:rollbackVariant},{id:id(712)}]}});
   for(const [jobId,owner,projectId,kind,state,result] of [[job,accountA,project,'scripts','succeeded',scriptResult],[foreignJob,accountB,foreignProject,'scripts','succeeded',scriptResult],[scanJob,accountA,project,'scan','succeeded',JSON.stringify({kind:'scan'})],[runningJob,accountA,project,'scripts','running',null],[rollbackJob,accountA,project,'scripts','succeeded',rollbackResult]] as const){
     const progress=kind==='scan'?{kind:'scan',profile:null,videos:[],limitations:[]}:{kind:'scripts',limitations:[]};
@@ -77,6 +78,13 @@ test('owned succeeded script and persisted variant lineage precede receipt inspe
   assert.equal((await rpc(mutation('saved',0,request(31),variantA,foreignJob),accountB)).ok,true,'foreign owner can mutate its own job');
 });
 
+test('v7 and uppercase stored variant IDs reconcile semantically through mutation and full projection',async()=>{
+  const saved=await rpc(mutation('saved',0,request(32),variantV7));
+  assert.equal(saved.ok,true);assert.equal(saved.data.work_state.variant_id,variantV7);
+  const full=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_get_creator_job($1::uuid,$2::jsonb) value',[accountA,JSON.stringify({job_id:job})])).rows[0]!.value;});
+  assert.ok(full.data.job.work_states.some((state:any)=>state.variant_id===variantV7&&state.state==='saved'));
+});
+
 test('receipt insertion failure rolls back projection/event and exact retry succeeds',async()=>{
   const input=mutation('saved',0,request(40),rollbackVariant,rollbackJob);
   await db.exec("create function public.test_riff_receipt_failure() returns trigger language plpgsql as $$ begin raise exception 'synthetic receipt failure'; end; $$; create trigger test_riff_receipt_failure before insert on public.riff_work_state_receipts for each row execute function public.test_riff_receipt_failure();");
@@ -94,9 +102,17 @@ test('service role direct DML is denied while owner-level event/receipt rewrites
   await assert.rejects(db.exec('delete from public.riff_work_state_receipts'),/append-only/i);
 });
 
+test('owner-level receipt inserts reject missing or string success booleans',async()=>{
+  const insert=(requestId:string,output:unknown)=>db.query(
+    'insert into public.riff_work_state_receipts(account_id,request_id,job_id,variant_id,input,output) values($1,$2,$3,$4,$5::jsonb,$6::jsonb)',
+    [accountA,requestId,job,variantA,'{}',JSON.stringify(output)]);
+  await assert.rejects(insert(request(50),{ok:'true',data:{work_state:{}}}),/check constraint/i);
+  await assert.rejects(insert(request(51),{ok:true}),/check constraint/i);
+});
+
 test('full-job and recent reads are additive, ordered, owner-scoped and redacted',async()=>{
   const full=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_get_creator_job($1::uuid,$2::jsonb) value',[accountA,JSON.stringify({job_id:job})])).rows[0]!.value;});
-  assert.equal(full.ok,true);assert.deepEqual(full.data.job.work_states.map((state:any)=>state.variant_id),[variantA,variantB]);
+  assert.equal(full.ok,true);assert.deepEqual(full.data.job.work_states.map((state:any)=>state.variant_id),[variantA,variantB,variantV7]);
   assert.equal(full.data.job.work_states.some((state:any)=>'account_id' in state||'request_id' in state),false);
   const historical=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_get_creator_job($1::uuid,$2::jsonb) value',[accountA,JSON.stringify({job_id:scanJob})])).rows[0]!.value;});
   assert.deepEqual(historical.data.job.work_states,[]);

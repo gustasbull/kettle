@@ -154,6 +154,38 @@ test('Riff Home reproduces the Paper Home surface with only the CURRENT breadcru
   }
 });
 
+test('embedded Open vault returns to Home and focuses the matching visible saved work',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffHome } from './apps/panel/riff-home/index.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.job=pipelineFixture('scripts');
+    window.variant=window.job.result.scripts.variants[1];
+    window.view=mountRiffHome(document.getElementById('root'),{
+      start:async()=>({status:'sent',message:'Started.'}),send:async()=>({status:'sent',message:'Sent.'}),
+      setVariantState:async({job,variant,state})=>{
+        const previous=job.work_states.find(item=>item.variant_id.toLowerCase()===variant.id.toLowerCase());
+        const workState={job_id:job.id.toLowerCase(),variant_id:variant.id.toLowerCase(),state,version:(previous?.version??0)+1,updated_at:'2026-10-11T12:00:00Z'};
+        window.job={...job,work_states:[...job.work_states.filter(item=>item.variant_id.toLowerCase()!==variant.id.toLowerCase()),workState]};
+        window.view.setRecents([{job_id:job.id,title:'Saved Studio',stage:state==='saved'?'Ideas saved':'Continue script',state:'succeeded',
+          updated_at:workState.updated_at,platform:'tiktok',handle:'fixture',variant_id:workState.variant_id,work_state:workState}]);
+        return {status:'confirmed',message:state==='saved'?'Saved for later.':'Save undone.',workState,job:window.job};
+      },
+    });
+    window.view.render({status:'ready',account:{id:'00000000-0000-4000-8000-000000000001',name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}});
+    window.view.setRecents([{job_id:window.job.id,title:'Saved Studio',stage:'Continue script',state:'succeeded',updated_at:window.job.updated_at,
+      platform:'tiktok',handle:'fixture',variant_id:window.variant.id,work_state:null}]);
+    window.view.showJob(window.job,{variantId:window.variant.id});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage({viewport:{width:1200,height:850}});
+  await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
+  await page.getByRole('button',{name:'Save for later'}).click();
+  await page.getByRole('button',{name:'Open vault'}).click();
+  assert.equal(await page.getByRole('heading',{name:'Let’s make your next video go viral.'}).count(),1);
+  assert.match(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')??''),/Open Saved Studio — Ideas saved/);
+  assert.match(await page.locator('.riff-home__status').textContent(),/My videos.*opened.*saved script/i);
+});
+
 test('Riff Home drawer recents clear Studio discovery context for current and different jobs', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHome } from './apps/panel/riff-home/index.ts';

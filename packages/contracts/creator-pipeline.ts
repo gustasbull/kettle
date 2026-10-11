@@ -78,7 +78,7 @@ export const CreatorScriptSet = z.strictObject({
   idea: CreatorIdea.optional(), references: z.array(PipelineReference).min(1).max(3).optional(),
   contains_fixture_data: z.boolean(), limitations: z.array(text(1000)).max(30),
 }).superRefine((v,c)=>{
-  if(new Set(v.variants.map(x=>x.id)).size!==v.variants.length || new Set(v.variants.map(x=>x.label)).size!==v.variants.length)c.addIssue({code:'custom',message:'Variants need unique IDs and labels'});
+  if(new Set(v.variants.map(x=>x.id.toLowerCase())).size!==v.variants.length || new Set(v.variants.map(x=>x.label)).size!==v.variants.length)c.addIssue({code:'custom',message:'Variants need unique IDs and labels'});
   if((v.idea===undefined)!==(v.references===undefined)){
     c.addIssue({code:'custom',message:'Studio idea and references must be persisted together'});return;
   }
@@ -189,13 +189,13 @@ export const CreatorJobView = z.strictObject({
     context.addIssue({code:'custom',message:'Queued jobs begin with empty accepted progress'});
   if(job.state==='succeeded'&&job.stage!=='saving')
     context.addIssue({code:'custom',message:'Succeeded jobs have reached saving'});
-  if(new Set(job.work_states.map(state=>state.variant_id)).size!==job.work_states.length)
+  if(new Set(job.work_states.map(state=>state.variant_id.toLowerCase())).size!==job.work_states.length)
     context.addIssue({code:'custom',message:'Work states must have unique variant IDs'});
-  if(job.work_states.some(state=>state.job_id!==job.id))
+  if(job.work_states.some(state=>state.job_id.toLowerCase()!==job.id.toLowerCase()))
     context.addIssue({code:'custom',message:'Work states must belong to the projected job'});
-  const scriptVariantIds=new Set(job.result?.kind==='scripts'?job.result.scripts.variants.map(variant=>variant.id):[]);
+  const scriptVariantIds=new Set(job.result?.kind==='scripts'?job.result.scripts.variants.map(variant=>variant.id.toLowerCase()):[]);
   if(job.work_states.length&&(job.state!=='succeeded'||job.result?.kind!=='scripts'||
-    job.work_states.some(state=>!scriptVariantIds.has(state.variant_id))))
+    job.work_states.some(state=>!scriptVariantIds.has(state.variant_id.toLowerCase()))))
     context.addIssue({code:'custom',message:'Work states require persisted variants from a successful script job'});
 });
 export const CreatorJobOutput=result(z.strictObject({job:CreatorJobView}));

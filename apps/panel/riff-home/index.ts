@@ -37,6 +37,7 @@ export type RiffRecentsState =
 
 type RecommendationResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'recommendations' }>;
 type ScriptResult = Extract<NonNullable<CreatorJobView['result']>, { kind: 'scripts' }>;
+const sameUuid=(left:string|undefined|null,right:string|undefined|null)=>!!left&&!!right&&left.toLowerCase()===right.toLowerCase();
 
 export type RiffHomeActions = {
   start(source: string): Promise<RiffActionResult>;
@@ -352,6 +353,20 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
     menu?.render({ activeRoute: 'home' });
   };
+  const openVault:NonNullable<import('../creator-pipeline/index.ts').CreatorPipelineOptions['openVault']>=async({job,variant})=>{
+    const finish=(result:RiffActionResult)=>{status.textContent=result.message;return result;};
+    showHome();
+    if(disposed)return finish({status:'failed',message:'My videos could not be opened because this Riff view closed.'});
+    if(recentsState.status==='loading')return finish({status:'pending',message:'My videos opened. Saved work is still loading.'});
+    if(recentsState.status==='error')return finish({status:'failed',message:'My videos opened, but saved work could not be refreshed.'});
+    const item=recentsState.items.find(candidate=>sameUuid(candidate.job_id,job.id)&&sameUuid(candidate.variant_id,variant.id));
+    if(!item)return finish({status:'failed',message:'My videos opened, but this saved script is not visible in the latest recent work.'});
+    const target=[...recents.querySelectorAll<HTMLButtonElement>('.riff-home__recent-card')]
+      .find(card=>sameUuid(card.dataset.jobId,item.job_id)&&sameUuid(card.dataset.variantId,item.variant_id));
+    if(!target)return finish({status:'failed',message:'My videos opened, but this saved script could not be focused.'});
+    target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'});
+    return finish({status:'sent',message:'My videos opened with the saved script selected.'});
+  };
   const ensurePipeline=()=>{
     product?.dispose(); product=undefined;
     return pipeline??=mountCreatorPipeline(workflowRoot,{
@@ -359,7 +374,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     requestFullscreen:async()=>({status:'sent',message:'Already open in Riff.'}),
     startRecommendations:actions.startRecommendations,makeMine:actions.makeMine,
     proposeCatalogReference:actions.proposeCatalogReference,onCatalogRetry:actions.retryCatalog,
-    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,openVault:showHome,
+    setVariantState:actions.setVariantState,onDiscoveryOpen:actions.onDiscoveryOpen,openVault,
     });
   };
   const showProduct=(description:string)=>{
@@ -383,7 +398,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     account:undefined,recents:[],activeRoute:'home',
     onNavigate(route){if(route==='home')showHome();else showCatalog('videos');},
     onOpenRecent(recent){
-      const item=recentsState.status==='ready'?recentsState.items.find(candidate=>candidate.job_id===recent.id):undefined;
+      const item=recentsState.status==='ready'?recentsState.items.find(candidate=>sameUuid(candidate.job_id,recent.id)):undefined;
       if(!item)return;
       pipeline?.leaveCatalog();
       void invoke(actions.openRecent?()=>actions.openRecent!(item.job_id,item.variant_id??undefined):()=>actions.send(`Open my saved Riff work, “${item.title}”.`),`Opening ${item.title}…`);
@@ -457,6 +472,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     }
     for (const item of items.slice(0, 4)) {
       const card = node('button', undefined, 'riff-home__recent-card'); card.type = 'button';
+      card.dataset.jobId=item.job_id;if(item.variant_id)card.dataset.variantId=item.variant_id;
       card.setAttribute('aria-label', `Open ${item.title} — ${item.stage}`);
       const source = node('span', undefined, 'riff-home__recent-source');
       source.append(node('span', undefined, 'riff-home__recent-thumbnail'));

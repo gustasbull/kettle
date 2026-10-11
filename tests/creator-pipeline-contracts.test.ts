@@ -109,6 +109,12 @@ test('public Riff work-state projections enforce exact job and persisted variant
    handle:'fixture',canonical_url:'https://www.tiktok.com/@fixture/video/1',profile_url:'https://www.tiktok.com/@fixture',
    video_url:'https://www.tiktok.com/@fixture/video/1'},variant_id:variantId,work_state:workState};
  assert.ok(RiffWorkSummary.safeParse(summary).success);
+ const semantic=structuredClone(job);semantic.id='018F3E12-9ABC-7DEF-8ABC-1234567890AB';
+ if(semantic.result?.kind!=='scripts')throw new Error('scripts fixture mismatch');
+ semantic.result.scripts.variants[0]!.id='018F3E13-9ABC-7DEF-8ABC-1234567890AB';
+ const semanticState={...workState,job_id:semantic.id.toLowerCase(),variant_id:semantic.result.scripts.variants[0]!.id.toLowerCase()};
+ assert.ok(CreatorJobView.safeParse({...semantic,work_states:[semanticState]}).success,'UUID lineage is semantic across v7 casing');
+ assert.ok(RiffWorkSummary.safeParse({...summary,job_id:semantic.id,variant_id:semantic.result.scripts.variants[0]!.id,work_state:semanticState}).success);
  assert.ok(!RiffWorkSummary.safeParse({...summary,variant_id:null}).success);
  assert.ok(!RiffWorkSummary.safeParse({...summary,job_id:job.project_id}).success);
 });

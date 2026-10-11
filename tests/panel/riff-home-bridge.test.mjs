@@ -763,6 +763,84 @@ test('Riff Home tolerates a transient status-read failure and refreshes recents 
   await frame.evaluate(() => window.bridge.dispose());
 });
 
+test('Riff Home refreshes recent truth after every Studio state change and reopens the selected variant',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
+    window.job=pipelineFixture('scripts');window.variant=window.job.result.scripts.variants[1];
+    window.job.work_states=[{job_id:window.job.id,variant_id:window.variant.id,state:'active',version:1,updated_at:'2026-10-11T12:00:01Z'}];
+    window.calls=[];window.listFailNext=false;
+    const wrapped=value=>({structuredContent:value,content:[]});
+    const failure=()=>wrapped({ok:false,error:{code:'UNAVAILABLE',message:'Fixture list failure.',retryable:true,recovery:'retry_same_request'}});
+    const recent=()=>({project_id:window.job.project_id,project_name:'Saved Studio',job_id:window.job.id,kind:'scripts',state:'succeeded',
+      updated_at:window.job.updated_at,source:{platform:'tiktok',kind:'profile',handle:'fixture',canonical_url:'https://www.tiktok.com/@fixture',
+        profile_url:'https://www.tiktok.com/@fixture',video_url:null},variant_id:window.variant.id,work_state:window.job.work_states[0]});
+    window.openai={callTool:async(name,args)=>{
+      window.calls.push({name,args});
+      if(name==='list_riff_work'){
+        if(window.listFailNext){window.listFailNext=false;return failure();}
+        return wrapped({ok:true,data:{work:[recent()]}});
+      }
+      if(name==='get_creator_job')return wrapped({ok:true,data:{job:window.job}});
+      if(name==='set_riff_work_state'){
+        const previous=window.job.work_states.find(item=>item.variant_id.toLowerCase()===args.variant_id.toLowerCase());
+        if((previous?.version??0)!==args.expected_version)return wrapped({ok:false,error:{code:'VERSION_CONFLICT',message:'Changed.',retryable:false,recovery:'reload'}});
+        const work_state={job_id:window.job.id.toLowerCase(),variant_id:args.variant_id.toLowerCase(),state:args.state,
+          version:(previous?.version??0)+1,updated_at:'2026-10-11T12:00:0'+((previous?.version??0)+1)+'Z'};
+        window.job={...window.job,work_states:[work_state]};return wrapped({ok:true,data:{work_state}});
+      }
+      return failure();
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const server=createServer((req,res)=>{
+    res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,
+          hostInfo:{name:'work-state-fixture',version:'1'},hostCapabilities:{message:{text:{}}},hostContext:{}}},'*');
+        if(message.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{
+            id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage({viewport:{width:1200,height:850}});page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  const openRecent=async stage=>{const card=frame.getByRole('button',{name:new RegExp(`Open Saved Studio — ${stage}`)});await card.waitFor();await card.click();
+    await frame.getByRole('heading',{name:'Your script, ready to film.'}).waitFor();
+    assert.equal(await frame.getByRole('radio',{name:'Creator Fit'}).getAttribute('aria-checked'),'true');};
+  const goHome=async()=>{await frame.getByRole('button',{name:'Open Riff menu'}).click();await frame.getByRole('navigation',{name:'Riff navigation'}).getByRole('button',{name:'Home',exact:true}).click();};
+
+  await openRecent('Continue script');
+  await frame.getByRole('button',{name:'Save for later'}).click();await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
+  await frame.getByRole('button',{name:'Open vault'}).click();
+  const savedCard=frame.getByRole('button',{name:/Open Saved Studio — Ideas saved/});await savedCard.waitFor();
+  assert.match(await frame.evaluate(()=>document.activeElement?.getAttribute('aria-label')??''),/Ideas saved/);
+
+  await savedCard.click();await frame.getByRole('button',{name:'Undo save'}).click();await frame.getByRole('button',{name:'Save for later'}).waitFor();
+  await goHome();await frame.getByRole('button',{name:/Open Saved Studio — Continue script/}).waitFor();
+  await openRecent('Continue script');
+  await frame.getByRole('button',{name:'I filmed it'}).click();await frame.getByText('Marked as filmed.').waitFor();
+  await goHome();await frame.getByRole('button',{name:/Open Saved Studio — Filmed/}).waitFor();
+  await openRecent('Filmed');
+
+  await frame.evaluate(()=>{window.listFailNext=true;});
+  await frame.getByRole('button',{name:'Save for later'}).click();await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
+  assert.match(await frame.locator('.riff-pipeline__status').textContent(),/saved.*recent work could not be refreshed/i);
+  await frame.getByRole('button',{name:'Open vault'}).click();
+  await frame.locator('.riff-home__status').getByText('My videos opened, but saved work could not be refreshed.').waitFor();
+  assert.deepEqual(await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args.state)),['saved','active','filmed','saved']);
+  assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=5,'initial load plus every confirmed mutation');
+  await frame.evaluate(()=>window.bridge.dispose());
+});
+
 test('Riff Product context saves only on confirmation, retries exactly, updates, and hands off the exact saved snapshot', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';

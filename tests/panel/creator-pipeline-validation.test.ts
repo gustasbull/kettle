@@ -32,6 +32,13 @@ for(const kind of ['scan','recommendations','scripts'] as const)test(`valid ${ki
   const job=creatorJobFixture(kind),raw={ok:true as const,data:{job}};
   const parsed=parseCreatorJobOutput(raw);assert.deepEqual(parsed,raw);assert.notEqual(parsed,raw);assert.notEqual(parsed?.data,raw.data);
 });
+test('standalone job parsing normalizes omitted legacy work states before rendering',()=>{
+  const raw:any=structuredClone(envelope('scripts'));delete raw.data.job.work_states;
+  const parsed=parseCreatorJobOutput(raw);
+  assert.ok(parsed?.ok);if(!parsed?.ok)return;
+  assert.deepEqual(parsed.data.job.work_states,[]);
+  assert.equal(Object.hasOwn(raw.data.job,'work_states'),false);
+});
 for(const code of ['UNAUTHENTICATED','FORBIDDEN','VALIDATION_ERROR','NOT_FOUND','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','UNAVAILABLE'] as const)
   test(`accepts public failure ${code}`,()=>assert.deepEqual(parseCreatorJobOutput(creatorFailure(code)),creatorFailure(code)));
 

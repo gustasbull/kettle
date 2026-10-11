@@ -9,6 +9,7 @@ import {
 } from './creator-pipeline-validation.ts';
 
 type Selection={job_id:string};
+const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();
 export type CreatorPipelineSnapshot=CreatorJobView&{job:CreatorJobView;status?:CreatorJobStatusView};
 export interface CreatorPipelineObserver {
   loading():void;
@@ -103,7 +104,7 @@ export function createCreatorPipelineController(
     pollTimer=setTimeout(()=>{pollTimer=undefined;if(!inWindow()){pauseAtDeadline();return;}void readStatus(true);},Math.min(delay,Math.max(1,remaining)));
   }
   function statusIdentityMatches(next:CreatorJobStatusView){
-    return !!selection&&!!job&&selection.job_id===next.id&&job.id===next.id&&job.kind===next.kind&&job.created_at===next.created_at;
+    return !!selection&&!!job&&sameUuid(selection.job_id,next.id)&&sameUuid(job.id,next.id)&&job.kind===next.kind&&job.created_at===next.created_at;
   }
   function fullMatchesObservedStatus(next:CreatorJobView){
     return !status||next.revision!==status.revision||fingerprint(projectedStatus(next))===fingerprint(status);
@@ -132,7 +133,7 @@ export function createCreatorPipelineController(
         clear(parsed.error.code==='UNAUTHENTICATED'?'reauthorize':'unavailable');return;
       }
       const next=parsed.data.job;
-      if(!selection||next.id!==selection.job_id||(job&&(next.project_id!==job.project_id||next.kind!==job.kind||next.created_at!==job.created_at))
+      if(!selection||!sameUuid(next.id,selection.job_id)||(job&&(!sameUuid(next.project_id,job.project_id)||next.kind!==job.kind||next.created_at!==job.created_at))
         ||expectedRevision!==undefined&&(next.revision!==expectedRevision||next.state!=='succeeded')||!fullMatchesObservedStatus(next)){
         if(expectedRevision!==undefined){paused=true;publish('A mismatched saved result was ignored. Refresh or reopen in chat.');}
         else clear('invalid');return;
@@ -217,7 +218,7 @@ export function createCreatorPipelineController(
     receiveInput(raw:unknown){
       if(disposed||blocked)return;const parsed=parseGetCreatorJobInput(raw);if(!parsed){clear('invalid');return;}
       invalidate();
-      if(selection?.job_id!==parsed.job_id){job=undefined;status=undefined;polls=0;unchanged=0;started=Date.now();paused=false;terminalRevision=undefined;legacyTerminal=undefined;}
+      if(!selection||!sameUuid(selection.job_id,parsed.job_id)){job=undefined;status=undefined;polls=0;unchanged=0;started=Date.now();paused=false;terminalRevision=undefined;legacyTerminal=undefined;}
       selection=parsed;
       if(job){publish();schedule();}else loading();
       if(!job&&connected&&tools)queueInitialFull();
@@ -227,7 +228,7 @@ export function createCreatorPipelineController(
       const parsed=parseCreatorJobOutput(raw);if(!parsed){clear('invalid');return;}
       if(!parsed.ok){clear(parsed.error.code==='UNAUTHENTICATED'?'reauthorize':'unavailable');return;}
       const next=parsed.data.job;
-      if(!selection||selection.job_id!==next.id||(job&&(next.project_id!==job.project_id||next.kind!==job.kind||next.created_at!==job.created_at))){clear('invalid');return;}
+      if(!selection||!sameUuid(selection.job_id,next.id)||(job&&(!sameUuid(next.project_id,job.project_id)||next.kind!==job.kind||next.created_at!==job.created_at))){clear('invalid');return;}
       const observedRevision=status?.revision??job?.revision;
       const observedState=status?.state??job?.state;
       if(observedRevision!==undefined&&next.revision<observedRevision){paused=true;publish('An older response was ignored. Refresh or reopen in chat.');return;}

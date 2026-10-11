@@ -7,13 +7,14 @@ const object = (value: unknown): JsonObject | undefined => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return undefined;
-  if (Object.values(Object.getOwnPropertyDescriptors(value)).some(descriptor => !('value' in descriptor))) return undefined;
+  if (Object.values(Object.getOwnPropertyDescriptors(value)).some(descriptor => !('value' in descriptor)||!descriptor.enumerable)) return undefined;
   return value as JsonObject;
 };
 const shape = (value: unknown, required: readonly string[], optionalKeys: readonly string[] = []): JsonObject | undefined => {
   const item = object(value); if (!item) return undefined;
-  const keys = Object.keys(item), allowed = new Set([...required, ...optionalKeys]);
-  return required.every(key => Object.hasOwn(item, key)) && keys.every(key => allowed.has(key)) ? item : undefined;
+  const keys = Reflect.ownKeys(item), allowed = new Set([...required, ...optionalKeys]);
+  return required.every(key => Object.hasOwn(item, key))
+    &&keys.every(key=>typeof key==='string'&&allowed.has(key)) ? item : undefined;
 };
 const text = (value: unknown, max: number, allowEmpty = false): value is string =>
   typeof value === 'string' && value.length <= max && (allowEmpty || value.trim().length > 0);
@@ -319,7 +320,7 @@ function scripts(value: unknown) {
     || hasIdea !== hasReferences || (hasIdea && (!idea(item.idea) || !list(item.references, 3, reference, 1)))
     || typeof item.contains_fixture_data !== 'boolean' || !textList(item.limitations, 30, 1_000)) return false;
   const variants=item.variants as JsonObject[];
-  if (!unique(variants,entry=>entry.id) || !unique(variants,entry=>entry.label)) return false;
+  if (!unique(variants,entry=>String(entry.id).toLowerCase()) || !unique(variants,entry=>entry.label)) return false;
   for (const entry of variants) {
     const variantReferenceIds=new Set(entry.reference_ids as unknown[]);
     const segments=(entry.timed_segments as JsonObject[]|undefined)??[];
@@ -338,13 +339,21 @@ function scripts(value: unknown) {
 }
 function workState(value:unknown,jobId:unknown){
   const item=shape(value,['job_id','variant_id','state','version','updated_at']);
-  return !!item&&item.job_id===jobId&&id(item.variant_id)&&enumValue(item.state,['active','saved','filmed'])
+  return !!item&&id(item.job_id)&&id(jobId)&&item.job_id.toLowerCase()===jobId.toLowerCase()
+    &&id(item.variant_id)&&enumValue(item.state,['active','saved','filmed'])
     &&Number.isSafeInteger(item.version)&&Number(item.version)>0&&timestamp(item.updated_at);
+}
+
+function normalizedJob(value:unknown):JsonObject|undefined{
+  const candidate=shape(value,['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','message'],
+    ['source_kind','work_states']);
+  if(!candidate)return;
+  return candidate.work_states===undefined?{...candidate,work_states:[]}:candidate;
 }
 
 /** Lightweight full display-boundary validation. This deliberately avoids pulling
  * the server's Zod graph into Home's first-paint bundle. */
-export function isCreatorJobView(value: unknown): value is CreatorJobView {
+function validCreatorJobView(value:unknown):value is CreatorJobView{
   const candidate = object(value); if (!candidate) return false;
   const job = shape(candidate, ['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','work_states','message'], ['source_kind']); if (!job) return false;
   try { if (JSON.stringify(job).length > 1_500_000) return false; } catch { return false; }
@@ -354,7 +363,7 @@ export function isCreatorJobView(value: unknown): value is CreatorJobView {
     || !enumValue(job.stage,['accepted','reviewing_video','reading_profile','reading_posts','building_analysis','researching_formats','enriching_references','saving'])
     || !jobProgress(job.progress,String(job.kind))
     || !Array.isArray(job.work_states)||job.work_states.length>3||!job.work_states.every(value=>workState(value,job.id))
-    || new Set(job.work_states.map(value=>(value as JsonObject).variant_id)).size!==job.work_states.length
+    || new Set(job.work_states.map(value=>String((value as JsonObject).variant_id).toLowerCase())).size!==job.work_states.length
     || !timestamp(job.created_at) || !timestamp(job.updated_at)
     || !(job.message === null || text(job.message, 1_000))) return false;
   if (job.source_kind !== undefined && (!enumValue(job.source_kind, ['video', 'profile']) || job.kind !== 'scan')) return false;
@@ -377,5 +386,16 @@ export function isCreatorJobView(value: unknown): value is CreatorJobView {
   if (result.kind === 'recommendations') return recommendations(result.batch);
   if(result.kind!=='scripts'||!scripts(result.scripts))return false;
   const variants=(result.scripts as JsonObject).variants as JsonObject[];
-  return job.work_states.every(value=>variants.some(variant=>variant.id===(value as JsonObject).variant_id));
+  return job.work_states.every(value=>variants.some(variant=>String(variant.id).toLowerCase()
+    ===String((value as JsonObject).variant_id).toLowerCase()));
+}
+
+export function parseCreatorJobView(value:unknown):CreatorJobView|undefined{
+  const normalized=normalizedJob(value);if(!normalized||!validCreatorJobView(normalized))return;
+  try{return structuredClone(normalized) as CreatorJobView;}catch{return;}
+}
+
+export function isCreatorJobView(value: unknown): value is CreatorJobView {
+  const normalized=normalizedJob(value);
+  return !!normalized&&validCreatorJobView(normalized);
 }

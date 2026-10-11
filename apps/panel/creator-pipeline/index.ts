@@ -81,7 +81,11 @@ export type CreatorPipelineOptions = {
     state: 'active' | 'saved' | 'filmed';
   }) => Promise<RiffActionResult | {status:'confirmed';message:string;workState:RiffWorkState;job:CreatorJobView}
     | {status:'conflict';message:string;job:CreatorJobView}|{status:'stale';message:string}>;
-  openVault?: () => void;
+  openVault?: (context:{
+    job:CreatorJobView;
+    scripts:ScriptResult['scripts'];
+    variant:ScriptResult['scripts']['variants'][number];
+  }) => Promise<RiffActionResult>;
   onDiscoveryOpen?: (scope:{projectId?:string}) => void;
   embeddedChrome?:boolean;
   menu?: {
@@ -110,6 +114,7 @@ const scriptLoading={title:'Building your filming variants',subtitle:'Turning yo
 const unavailable: RiffPanelAction = async () => ({
   status: 'unsupported', message: 'Continue with this request in the ChatGPT composer.',
 });
+const sameUuid=(left:string|undefined,right:string|undefined)=>!!left&&!!right&&left.toLowerCase()===right.toLowerCase();
 
 /** Pure presentation plus explicit host handoffs. It never fetches, saves, retries, or starts provider work. */
 export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipelineOptions = {}): {
@@ -823,9 +828,9 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       setStatus('Studio ready.'); return heading;
     }
     screen('studio');
-    const variant=scripts.variants.find(item=>item.id===studioVariantId)??scripts.variants[0]!;
+    const variant=scripts.variants.find(item=>sameUuid(item.id,studioVariantId))??scripts.variants[0]!;
     studioVariantId=variant.id;
-    const persisted=job.work_states.find(item=>item.variant_id===variant.id);
+    const persisted=job.work_states.find(item=>sameUuid(item.variant_id,variant.id));
     const mutate=async(state:'active'|'saved'|'filmed')=>{
       if(pendingVariantMutation)return {status:'pending' as const,message:'This script change is still being confirmed.'};
       pendingVariantMutation={jobId:job.id,variantId:variant.id};
@@ -838,7 +843,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         return {...result,message:`${result.message} This action is not persisted in Riff.`};
       }
       const result=await options.setVariantState({job,scripts,variant,state});
-      if((result.status==='confirmed'||result.status==='conflict')&&result.job.id===job.id&&current?.id===job.id&&studioVariantId===variant.id){
+      if((result.status==='confirmed'||result.status==='conflict')&&sameUuid(result.job.id,job.id)&&sameUuid(current?.id,job.id)&&sameUuid(studioVariantId,variant.id)){
         render(result.job);
         queueMicrotask(()=>{
           const focus=result.status==='confirmed'&&state==='saved'?content.querySelector<HTMLElement>('.riff-saved-confirmation h1'):
@@ -849,7 +854,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       return result;
       }finally{
         pendingVariantMutation=undefined;
-        if(current?.id===job.id)content.querySelectorAll<HTMLButtonElement>('button').forEach(control=>{control.disabled=false;});
+        if(sameUuid(current?.id,job.id))content.querySelectorAll<HTMLButtonElement>('button').forEach(control=>{control.disabled=false;});
       }
     };
     if(persisted?.state==='saved'){
@@ -858,7 +863,9 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       const heading=el('h1','Your viral script, saved.');heading.tabIndex=-1;
       card.append(heading,el('p','My videos · Reference and ready-to-film script saved.'));
       const cardActions=actions(
-        button('Open vault','riff-button riff-button--primary',()=>{options.openVault?.();setStatus('Opening My videos.');},'open-vault'),
+        button('Open vault','riff-button riff-button--primary',()=>void run(()=>options.openVault
+          ?options.openVault({job,scripts,variant})
+          :Promise.resolve({status:'unsupported' as const,message:'My videos is unavailable in this Riff surface.'})),'open-vault'),
         button('Undo save','riff-button riff-button--soft',()=>void run(()=>mutate('active')),'undo-save'),
       );
       cardActions.classList.add('riff-saved-confirmation__actions');card.append(cardActions);content.append(card);
@@ -878,14 +885,14 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if(persisted?.state==='filmed')content.append(el('p','Marked as filmed in Riff.','riff-studio-filmed-status'));
     const variantSelector=el('div',undefined,'riff-studio-variants');variantSelector.setAttribute('role','radiogroup');variantSelector.setAttribute('aria-label','Script variant');
     scripts.variants.forEach((candidate,index)=>{
-      const selected=candidate.id===variant.id;
+      const selected=sameUuid(candidate.id,variant.id);
       const control=button(candidate.label,'riff-studio-variant',()=>{studioVariantId=candidate.id;render(job);},`studio-variant-${candidate.id}`);
       control.setAttribute('role','radio');control.setAttribute('aria-checked',String(selected));control.tabIndex=selected?0:-1;control.dataset.variant=candidate.id;
       control.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;event.preventDefault();
         const target=event.key==='Home'?0:event.key==='End'?scripts.variants.length-1:
           (index+(event.key==='ArrowRight'?1:-1)+scripts.variants.length)%scripts.variants.length;
         studioVariantId=scripts.variants[target]!.id;render(job);
-        [...content.querySelectorAll<HTMLElement>('[role="radio"]')].find(node=>node.dataset.variant===studioVariantId)?.focus({preventScroll:true});
+        [...content.querySelectorAll<HTMLElement>('[role="radio"]')].find(node=>sameUuid(node.dataset.variant,studioVariantId))?.focus({preventScroll:true});
       });variantSelector.append(control);
     });
     content.append(variantSelector);
@@ -1013,7 +1020,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       if(current?.project_id!==job.project_id){catalogState={status:'loading'};catalogScopeKey=undefined;}
     }
     if(!preserveStudioCatalog)studioExplore=undefined;
-    if(presentation.variantId&&job.result?.kind==='scripts'&&job.result.scripts.variants.some(item=>item.id===presentation.variantId))
+    if(presentation.variantId&&job.result?.kind==='scripts'&&job.result.scripts.variants.some(item=>sameUuid(item.id,presentation.variantId)))
       studioVariantId=presentation.variantId;
     if(presentation.sourceUrl)sourceUrl=presentation.sourceUrl;
     if(presentation.status?.progress.kind==='scan'&&presentation.status.progress.videos.length)sourceUrl=undefined;

@@ -39,7 +39,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'none'");
     if (req.url === '/frame') res.end(`<div id="review"></div><script>${bundle.outputFiles[0].text}</script>`);
     else res.end(`<script>${fixture.outputFiles[0].text}</script><script>
-      window.calls=[]; window.sizes=[]; window.messages=[]; window.displayRequests=[]; window.ready=false; window.respond=true;
+      window.calls=[]; window.sizes=[]; window.messages=[]; window.displayRequests=[]; window.ready=false; window.respond=true;window.rejectMessages=false;
       window.catalogPage={ok:true,data:{cards:[{
         id:'00000000-0000-4000-8000-000000000801',platform:'tiktok',native_id:'9000000000000000801',
         canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000801',caption:'Saved studio reference',thumbnail_url:null,
@@ -48,6 +48,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
         role:'discovered_reference',permission_basis:'Authored bridge fixture.',limitations:[],
       }],next_cursor:null,coverage:'Saved observations only.',freshness:'As last observed.'}};
       if(location.search==='?scripts')window.output=window.makeOutput('scripts');
+      if(location.search==='?legacy-scripts'){window.output=window.makeOutput('scripts');delete window.output.data.job.work_states;}
       if(location.search==='?running'){window.output.data.job.state='running';window.output.data.job.result=null;}
       window.send=(method,params)=>document.querySelector('iframe').contentWindow.postMessage({jsonrpc:'2.0',method,params},'*');
       window.reply=(id,result)=>document.querySelector('iframe').contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
@@ -75,7 +76,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
           window.reply(m.id,{structuredContent,content:[]});
         } }
         if(m.method==='ui/request-display-mode') { window.displayRequests.push(m.params); window.reply(m.id,{mode:'fullscreen'}); window.send('ui/notifications/host-context-changed',{displayMode:'fullscreen'}); }
-        if(m.method==='ui/message') { window.messages.push(m.params); window.reply(m.id,{}); }
+        if(m.method==='ui/message') { window.messages.push(m.params); window.reply(m.id,window.rejectMessages?{isError:true}:{}); }
         if(m.method==='ui/notifications/size-changed') window.sizes.push(m.params);
         if(m.id==='teardown') window.tornDown=m;
       });
@@ -151,11 +152,24 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
       assert.doesNotMatch(text,/has been selected|has been saved|has been written/i);
     }
   });
+  await t.test('legacy script jobs that omit work states normalize and render Studio',async()=>{
+    frame=await launch('?legacy-scripts');
+    await frame.getByRole('heading',{name:'Your script, ready to film.'}).waitFor();
+    assert.doesNotMatch(await frame.locator('#review').textContent(),/invalid or mismatched/i);
+  });
   await t.test('Studio persists save and undo only through matching receipts and a reconciled full reread',async()=>{
     frame=await launch('?scripts');await page.evaluate(()=>{window.calls=[];});
     await frame.getByRole('button',{name:'Open Studio'}).click();
     await frame.getByRole('button',{name:'Save for later'}).click();
     await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
+    await page.evaluate(()=>{window.rejectMessages=true;});
+    await frame.getByRole('button',{name:'Open vault'}).click();
+    await frame.locator('.riff-pipeline__status').getByText(/did not accept that handoff/i).waitFor();
+    const vault=await page.evaluate(()=>{const active=window.output.data.job,message=window.messages.at(-1).content[0].text;return {
+      hasJob:message.includes(active.id),hasVariant:message.includes(active.result.scripts.variants[0].id),message,
+    };});
+    assert.equal(vault.hasJob,true);assert.equal(vault.hasVariant,true);
+    await page.evaluate(()=>{window.rejectMessages=false;});
     await frame.getByRole('button',{name:'Undo save'}).click();
     await frame.getByRole('button',{name:'Save for later'}).waitFor();
     const writes=await page.evaluate(()=>window.calls.filter(call=>call.params.name==='set_riff_work_state').map(call=>call.params.arguments));
@@ -237,5 +251,5 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.equal(await page.evaluate(()=>window.sizes.length),count);
   });
   assert.deepEqual(errors,[]);
-  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/?start',url+'/?scripts',url+'/frame'].includes(r)));
+  assert.ok(requests.every(r=>[url+'/',url+'/?no-tools',url+'/?silent',url+'/?running',url+'/?start',url+'/?scripts',url+'/?legacy-scripts',url+'/frame'].includes(r)));
 });

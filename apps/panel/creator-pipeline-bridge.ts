@@ -11,6 +11,7 @@ import { createRiffVideoCatalogLoader } from './riff-video-catalog-loader.ts';
 import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 
 const WAIT_MS = 10_000;
+const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();
 
 /** Read-only persisted job view. No provider calls, storage or start/generate capability. */
 export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPipelineLimits = {}) {
@@ -101,7 +102,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
   const controller = createCreatorPipelineController({
     loading() { clearCard('Loading your saved creator job…'); },
     job(snapshot, status) {
-      if(currentJobId&&currentJobId!==snapshot.job.id)workStateClient.invalidate();
+      if(currentJobId&&!sameUuid(currentJobId,snapshot.job.id))workStateClient.invalidate();
       currentJobId=snapshot.job.id;
       const latestVariant=[...snapshot.job.work_states].sort((left,right)=>
         right.updated_at.localeCompare(left.updated_at)||right.version-left.version||left.variant_id.localeCompare(right.variant_id))[0]?.variant_id;
@@ -112,7 +113,7 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         proposeCatalogReference:proposal=>sendPrompt(riffCatalogProposalHandoff(proposal)),
         onCatalogRetry:()=>void catalogLoader.retry(),
         setVariantState:({job,variant,state})=>workStateClient.set(job,variant.id,state),
-        openVault:()=>void sendPrompt('Open Riff Home and show My videos with this saved script selected.'),
+        openVault:({job,variant})=>sendPrompt(`Open Riff Home and show My videos with saved job ${job.id} and script variant ${variant.id} selected. Treat both IDs as exact handoff context, and do not claim navigation succeeded unless the host confirms it.`),
       });
       if(currentProjectId!==snapshot.job.project_id){
         currentProjectId=snapshot.job.project_id;catalogLoader.reset();

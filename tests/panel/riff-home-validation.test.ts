@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCreatorJobView } from '../../apps/panel/riff-home-validation.ts';
+import { isCreatorJobView,parseCreatorJobView } from '../../apps/panel/riff-home-validation.ts';
 import { pipelineFixture } from '../../apps/panel/creator-pipeline/fixtures.ts';
 import { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 
@@ -17,6 +17,15 @@ test('Home accepts complete shared creator jobs without bundling the server sche
   const pending = structuredClone(pipelineFixture('video-analysis'));
   pending.state = 'running'; pending.result = null; pending.source_kind = 'video';
   assert.equal(isCreatorJobView(pending), true);
+});
+
+test('Home normalizes an omitted legacy work-state collection without weakening exact keys',()=>{
+  const legacy:any=structuredClone(pipelineFixture('scripts'));delete legacy.work_states;
+  const parsed=parseCreatorJobView(legacy);
+  assert.ok(parsed);assert.deepEqual(parsed.work_states,[]);
+  assert.equal(Object.hasOwn(legacy,'work_states'),false,'display parsing must not mutate the transport value');
+  assert.equal(isCreatorJobView(legacy),true);
+  assert.equal(parseCreatorJobView({...legacy,private_receipt:'secret'}),undefined);
 });
 
 test('Home rejects malformed nested media and source data before it reaches the Paper UI', () => {

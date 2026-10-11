@@ -1,7 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import type { RiffVideoCard } from '../../packages/contracts/riff-videos.ts';
 import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
-import { isCreatorJobStatusView, isCreatorJobView } from './riff-home-validation.ts';
+import { isCreatorJobStatusView, parseCreatorJobView } from './riff-home-validation.ts';
 
 type JsonObject = Record<string, unknown>;
 export type CreatorJobPublicOutput = { ok: true; data: { job: CreatorJobView } } | {
@@ -100,10 +100,8 @@ function jobOutput(value:unknown):CreatorJobPublicOutput|undefined {
   const failed=failure(value);if(failed)return failed;
   const outer=record(value,['ok','data']);if(!outer||outer.ok!==true)return;
   const data=record(outer.data,['job']);if(!data)return;
-  const job=record(data.job,['id','project_id','revision','kind','state','stage','progress','created_at','updated_at','result','work_states','message']
-    .concat((data.job as JsonObject)?.source_kind===undefined?[]:['source_kind']));
-  if(!job||!isCreatorJobView(job))return;
-  return {ok:true,data:{job:structuredClone(job) as CreatorJobView}};
+  const job=parseCreatorJobView(data.job);if(!job)return;
+  return {ok:true,data:{job}};
 }
 
 function statusOutput(value:unknown):CreatorJobStatusPublicOutput|undefined {

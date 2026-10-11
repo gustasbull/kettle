@@ -11,6 +11,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     import { mountCreatorPipeline, creatorLoadingVariants } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.actions=[]; window.fullscreen=[]; window.connectedActions=[]; window.catalogProposals=[]; window.discoveryLoads=[];
+    window.vaultResult={status:'sent',message:'My videos opened.'};
     window.creatorLoadingVariants=creatorLoadingVariants;
     window.boot=(scenario='scan',mode='fullscreen')=>{
       window.view?.dispose();
@@ -38,6 +39,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
             version:(previous?.version??0)+1,updated_at:'2026-10-11T09:10:46.000Z'};
           window.job={...job,work_states:[...job.work_states.filter(item=>item.variant_id!==variant.id),workState]};
           return {status:'confirmed',message:state==='saved'?'Saved for later.':'Marked as filmed.',workState,job:window.job};},
+        openVault:async context=>{window.connectedActions.push({kind:'open-vault',jobId:context.job.id,scriptsId:context.scripts.id,variantId:context.variant.id});return window.vaultResult;},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
     };
@@ -916,9 +918,16 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.deepEqual(await card.evaluate(node=>{const s=getComputedStyle(node);return {width:s.width,padding:s.padding,radius:s.borderRadius,gap:s.gap};}),
       {width:'576px',padding:'24px',radius:'18px',gap:'12px'});
     assert.equal(await card.getByRole('button',{name:'Open vault'}).count(),1);
+    await page.evaluate(()=>{window.vaultResult={status:'failed',message:'My videos could not be opened.'};});
+    await card.getByRole('button',{name:'Open vault'}).click();
+    assert.equal(await root.getByRole('status').textContent(),'My videos could not be opened.');
+    assert.deepEqual(await page.evaluate(()=>{const action=window.connectedActions.at(-1);return {
+      kind:action.kind,jobMatches:action.jobId===window.job.id,scriptsMatch:action.scriptsId===window.job.result.scripts.id,
+      variantMatches:action.variantId===window.job.result.scripts.variants[0].id,
+    };}),{kind:'open-vault',jobMatches:true,scriptsMatch:true,variantMatches:true});
     await card.getByRole('button',{name:'Undo save'}).click();
     assert.equal(await root.getByRole('button',{name:'Save for later'}).count(),1);
-    assert.deepEqual((await page.evaluate(()=>window.connectedActions)).slice(-2).map(item=>item.state),['saved','active']);
+    assert.deepEqual((await page.evaluate(()=>window.connectedActions.filter(item=>item.kind==='variant-state'))).slice(-2).map(item=>item.state),['saved','active']);
   });
 
   await t.test('Studio uses ID-keyed variants, actual timings, complete provenance and local-only controls', async () => {

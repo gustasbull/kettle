@@ -73,6 +73,13 @@ test('requires validated selection and handshake; missing tools displays without
   assert.deepEqual(Object.fromEntries(Object.entries(f.visible()!).filter(([key])=>key!=='job'&&key!=='status')),value.data.job); assert.equal(f.calls.length,0);
 });
 
+test('controller treats v7 UUID casing as one persisted job identity',t=>{
+  const f=setup(t),value=output();
+  value.data.job.id='018f3e12-9abc-7def-8abc-1234567890ab';
+  f.controller.receiveInput({job_id:value.data.job.id.toUpperCase()});f.controller.receiveResult(value);f.controller.connected(false);
+  assert.equal(f.visible()?.id,value.data.job.id);assert.equal(f.reason(),undefined);
+});
+
 test('polling is bounded, only selected read input, one in flight; manual refresh never resets budget',async t=>{
   const f=setup(t); f.launch(); assert.equal(f.calls.length,0);
   for(let i=0;i<3;i++){
