@@ -52,6 +52,18 @@ test('display validation fails closed for malformed, hostile and oversized value
   assert.doesNotThrow(()=>parseCreatorJobOutput(hostile));assert.equal(parseCreatorJobOutput(hostile),undefined);
 });
 
+test('delegated pipeline validation rejects a video outside its displayed profile pathname',()=>{
+ const raw=structuredClone(envelope('scan'));
+ raw.data.job.progress={kind:'scan',profile:{platform:'tiktok',native_id:'alice',url:'https://www.tiktok.com/@alice',handle:'alice',
+  display_name:null,bio:null,follower_count:null,provenance:{origin:'live',retrieved_at:raw.data.job.created_at,
+   source_observed_at:null,permission_basis:'Fixture permission.',limitations:[]}},videos:[{platform:'tiktok',native_id:'9000000000000000011',
+  url:'https://www.tiktok.com/@bob/video/9000000000000000011',caption:null,published_at:null,duration_seconds:null,
+  metrics:{views:null,likes:null,comments:null,shares:null},provenance:{origin:'live',retrieved_at:raw.data.job.created_at,
+   source_observed_at:null,permission_basis:'Fixture permission.',limitations:[]}}],limitations:[]};
+ assert.equal(CreatorJobOutput.safeParse(raw).success,false,'authoritative contract rejects @alice/@bob mismatch');
+ assert.equal(parseCreatorJobOutput(raw),undefined,'delegated validator rejects @alice/@bob mismatch');
+});
+
 test('DNA mutations rejected by server contracts are rejected at the display boundary',()=>{
   const cases:Array<[string,(job:any)=>void]>=[
     ['observed claim without evidence',job=>{job.result.dna.claims[0].evidence=[];}],

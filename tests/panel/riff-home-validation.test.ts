@@ -93,6 +93,13 @@ test('Home validates required safe progress without rendering raw provider or pr
  assert.equal(isCreatorJobView(job),true);
  assert.equal(isCreatorJobView({...job,stage:'researching_formats'}),false);
  assert.equal(isCreatorJobView({...job,progress:{...job.progress,receipt:{raw:'secret'}}}),false);
+ const mismatch=structuredClone(job);
+ if(mismatch.progress.kind!=='scan'||mismatch.progress.profile===null)assert.fail('expected scan progress fixture');
+ mismatch.progress.videos=[{platform:'tiktok',native_id:'9000000000000000011',url:'https://www.tiktok.com/@bob/video/9000000000000000011',
+  caption:null,published_at:null,duration_seconds:null,metrics:{views:null,likes:null,comments:null,shares:null},
+  provenance:structuredClone(mismatch.progress.profile.provenance)}];
+ mismatch.progress.profile.url='https://www.tiktok.com/@alice';mismatch.progress.profile.handle='alice';
+ assert.equal(isCreatorJobView(mismatch),false,'displayed @alice profile cannot admit an @bob video');
  const queued={...job,state:'queued' as const};
  assert.equal(isCreatorJobView(queued),false,'queued jobs cannot claim partial progress');
 });

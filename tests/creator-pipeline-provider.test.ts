@@ -207,6 +207,28 @@ test('known conversation ID enables bounded history only, followed by at most th
   assert.equal(count, 2); assert.deepEqual(batch.ideas, []);
   assert.deepEqual(guard.calls.map(c => c.key), ['research', 'poll:0']);
 });
+test('history-supplied identities use the accepting history receipt timestamp',async()=>{
+ const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch;
+ let lightreelCalls=0;
+ f.options.maxHistoryReads=1;
+ f.options.fetch=async(url,init)=>{
+  if(new URL(url).hostname!=='api.lightreel.ai')return fallback(url,init);
+  lightreelCalls++;
+  return lightreelCalls===1?Response.json({conversationId:'known-chat'}):Response.json({conversationId:'known-chat',messages:[
+   {role:'assistant',answer:{urls:['https://www.tiktok.com/@fictional_kettle_creator/video/9000000000000000011']}}]});
+ };
+ const guard=fakeGuard(),submission='2026-10-09T12:00:00.000Z',history='2026-10-09T12:00:05.000Z';
+ const guardedCall=guard.context.call.bind(guard.context);
+ guard.context.call=async(key,provider,operation,execute)=>{
+  const receipt=await guardedCall(key,provider,operation,execute) as any;
+  if(key==='research'||key==='poll:0')receipt.retrieved_at=key==='poll:0'?history:submission;
+  return receipt;
+ };
+ await createCreatorPipelineProvider(f.options).recommend(dna,guard.context);
+ const identities=(guard.checkpoints.find(entry=>entry.key==='recommend:identities')!.progress as any).identities;
+ assert.equal(identities[0].retrieved_at,history);
+ assert.notEqual(identities[0].retrieved_at,submission);
+});
 test('missing research ID and HTTP failures stop after one call and keep raw diagnostics out of errors', async () => {
   const { dna } = await setup(); const f = providerHttpFixture();
   for (const response of [Response.json({ answer: { urls: [] } }), new Response('sensitive error', { status: 500 })]) {

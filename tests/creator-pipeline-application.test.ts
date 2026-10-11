@@ -460,13 +460,16 @@ test('compact status read works with providers disabled and never schedules or a
 
 test('checkpoint context accepts exact replay revision and rejects malformed persistence replies',async()=>{
  const job=stored('scripts','running');job.revision=2;const progress={kind:'scripts' as const,limitations:[]};
- for(const reply of [
-  {ok:true,data:{status:'replay',revision:2,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:2,created_at:job.updated_at}}},
-  {ok:true,data:{status:'stored',revision:1,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:1,created_at:job.updated_at}}},
-  {ok:true,data:{status:'stored',revision:3,checkpoint:{key:'changed',stage:'building_analysis',progress,revision:3,created_at:job.updated_at}}},
+ for(const [reply,accepted] of [
+  [{ok:true,data:{status:'replay',revision:4,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:3,created_at:job.updated_at}}},true],
+  [{ok:true,data:{status:'stored',revision:3,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:3,created_at:job.updated_at}}},true],
+  [{ok:true,data:{status:'stored',revision:2,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:2,created_at:job.updated_at}}},false],
+  [{ok:true,data:{status:'stored',revision:4,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:4,created_at:job.updated_at}}},false],
+  [{ok:true,data:{status:'stored',revision:3,checkpoint:{key:'script:generate:start',stage:'building_analysis',progress,revision:2,created_at:job.updated_at}}},false],
+  [{ok:true,data:{status:'stored',revision:3,checkpoint:{key:'changed',stage:'building_analysis',progress,revision:3,created_at:job.updated_at}}},false],
  ] as const){
   const context=createGuardedProviderContext({async call(){return reply;}},job,ceilings,step) as any;
-  if(reply.data.status==='replay')await assert.doesNotReject(context.checkpoint('script:generate:start','building_analysis',progress));
+  if(accepted)await assert.doesNotReject(context.checkpoint('script:generate:start','building_analysis',progress));
   else await assert.rejects(context.checkpoint('script:generate:start','building_analysis',progress),PipelineRunError);
  }
 });

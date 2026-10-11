@@ -237,16 +237,18 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const research = await call(context, 'research', 'lightreel', 'research', new URL('https://api.lightreel.ai/v1/chat'), query,
         body => JSON.stringify(readLightreelSubmission(body)));
       let result = researchResult(research.body);
+      let acceptedResearch = research;
       // No invented status protocol: inspect only documented assistant history for a known ID.
       for (let read = 0; result.urls === null && read < maxHistoryReads; read++) {
         const id = result.conversationId;
         const history = await call(context, `poll:${read}`, 'lightreel', 'poll', historyRequest(id), undefined,
           body => JSON.stringify(readLightreelHistory(body, id)));
         result = researchResult(history.body);
+        if(result.urls!==null)acceptedResearch=history;
       }
       if (result.urls === null) throw new CreatorProviderError('unavailable');
       const identities=result.urls.map(url=>{const parsed=parseTikTokUrl(url);return {platform:'tiktok' as const,
-        native_id:parsed.videoId!,url,retrieved_at:research.retrieved_at,origin:'live' as const,
+        native_id:parsed.videoId!,url,retrieved_at:acceptedResearch.retrieved_at,origin:'live' as const,
         permission_basis:permission.basis.slice(0,1000),limitations:[]};});
       let recommendationProgress:z.infer<typeof CreatorJobProgress>={kind:'recommendations',identities,references:[],limitations:[]};
       await context.checkpoint('recommend:identities','enriching_references',recommendationProgress);
@@ -288,7 +290,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(o)]};
         await context.checkpoint(`recommend:detail:${nativeId}`,'enriching_references',recommendationProgress);
       }
-      const batch=buildRecommendations(dna, references, { newId: await receiptIds(research.id, 5), now: () => research.retrieved_at });
+      const batch=buildRecommendations(dna, references, { newId: await receiptIds(acceptedResearch.id, 5), now: () => acceptedResearch.retrieved_at });
       await context.checkpoint('recommend:save','saving',recommendationProgress);
       return batch;
     },

@@ -325,6 +325,29 @@ test('checkpoint insert failure rolls back revision/event and checkpoint writes 
 
 test('checkpoint and status never change attempts, receipts, grants, trials or budget and direct writes stay denied',async()=>{
  const job=await runningScan();
+ const authority=(await db.query<{security_definer:boolean;empty_path:boolean;stage_update:boolean;checkpoint_insert:boolean;rpc_execute:boolean}>(`
+  select p.prosecdef security_definer,p.proconfig=array['search_path=""']::text[] empty_path,
+   has_column_privilege('service_role','public.creator_jobs','stage','UPDATE') stage_update,
+   has_table_privilege('service_role','public.creator_job_checkpoints','INSERT') checkpoint_insert,
+   has_function_privilege('service_role','public.kettle_checkpoint_creator_job(uuid,jsonb)','EXECUTE') rpc_execute
+  from pg_proc p where p.oid='public.kettle_checkpoint_creator_job(uuid,jsonb)'::regprocedure`)).rows[0]!;
+ assert.deepEqual(authority,{security_definer:true,empty_path:true,stage_update:false,checkpoint_insert:false,rpc_execute:true});
+ const beforeRevision=job.revision;
+ const beforeEvents=(await db.query<{count:number}>('select count(*)::int count from public.creator_job_events where job_id=$1',[job.id])).rows[0]!.count;
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
+  await tx.exec("select set_config('kettle.checkpoint_write','on',true)");
+  await tx.query("update public.creator_jobs set stage='reading_profile',revision=revision+1,updated_at=now() where id=$1",[job.id]);
+  throw new Error('caller-settable checkpoint GUC bypass succeeded');
+ }),/permission denied|immutable creator job/);
+ await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
+  await tx.query("insert into public.creator_job_checkpoints(job_id,key,stage,progress,revision) values($1,'scan:forged','reading_profile',$2::jsonb,$3)",
+   [job.id,JSON.stringify(job.progress),job.revision+1]);
+  throw new Error('direct checkpoint insert succeeded');
+ }),/permission denied/);
+ const afterBypass=(await rpc('get_creator_job',{job_id:job.id})).data.job;
+ assert.equal(afterBypass.revision,beforeRevision);assert.equal(afterBypass.stage,'accepted');
+ assert.equal((await db.query<{count:number}>('select count(*)::int count from public.creator_job_events where job_id=$1',[job.id])).rows[0]!.count,beforeEvents);
+ assert.deepEqual((await db.query('select * from public.creator_job_checkpoints where job_id=$1',[job.id])).rows,[]);
  const before={attempts:(await db.query('select * from public.creator_attempts where job_id=$1',[job.id])).rows,
   receipts:(await db.query('select * from public.creator_attempt_receipts where job_id=$1',[job.id])).rows,
   budget:(await db.query('select * from public.creator_pipeline_budget')).rows,
@@ -336,7 +359,7 @@ test('checkpoint and status never change attempts, receipts, grants, trials or b
  assert.deepEqual((await db.query('select * from public.creator_pipeline_budget')).rows,before.budget);
  assert.deepEqual((await db.query('select * from public.creator_provider_trials order by provider')).rows,before.trials);
  await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
-  await tx.query("update public.creator_jobs set stage='building_analysis',revision=revision+1 where id=$1",[job.id]);}),/immutable creator job/);
+  await tx.query("update public.creator_jobs set stage='building_analysis',revision=revision+1 where id=$1",[job.id]);}),/permission denied|immutable creator job/);
  await assert.rejects(db.transaction(async tx=>{await tx.exec('set local role service_role');
   await tx.query('delete from public.creator_job_checkpoints where job_id=$1',[job.id]);}),/permission denied/);
 });

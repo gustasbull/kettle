@@ -36,8 +36,7 @@ create table public.creator_job_checkpoints (
 );
 alter table public.creator_job_checkpoints enable row level security;
 revoke all on public.creator_job_checkpoints from public,anon,authenticated,service_role;
-grant select,insert on public.creator_job_checkpoints to service_role;
-grant update(stage,progress) on public.creator_jobs to service_role;
+grant select on public.creator_job_checkpoints to service_role;
 
 create function public.kettle_creator_empty_progress(p_kind text) returns jsonb language sql immutable security invoker set search_path='' as $$
  select case p_kind when 'scan' then '{"kind":"scan","profile":null,"videos":[],"limitations":[]}'::jsonb
@@ -142,7 +141,7 @@ begin
     or new.project_id<>old.project_id or new.kind<>old.kind or new.id<>old.id or new.created_at<>old.created_at
     or new.revision<>old.revision+1 then raise exception 'immutable creator job or invalid transition'; end if;
   if old.state='running' and new.state='running' then
-   if current_setting('kettle.checkpoint_write',true) is distinct from 'on' or new.result is distinct from old.result
+   if new.result is distinct from old.result
      or new.message is distinct from old.message or new.stage is not distinct from old.stage and new.progress is not distinct from old.progress
      then raise exception 'immutable creator job or invalid transition'; end if;
   elsif not ((old.state='queued' and new.state in ('running','failed','needs_reconciliation'))
@@ -212,7 +211,7 @@ begin
  return jsonb_build_object('ok',true,'data',jsonb_build_object('job',to_jsonb(j)));
 end; $$;
 
-create function public.kettle_checkpoint_creator_job(p_account_id uuid,p_input jsonb) returns jsonb language plpgsql security invoker set search_path='' as $$
+create function public.kettle_checkpoint_creator_job(p_account_id uuid,p_input jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
 declare j public.creator_jobs%rowtype;c public.creator_job_checkpoints%rowtype;k text:=p_input->>'key';s text:=p_input->>'stage';p jsonb:=p_input->'progress';expected integer;
 begin
  perform 1 from public.accounts where id=p_account_id and state='active' for update;if not found then return public.kettle_error('FORBIDDEN'); end if;
@@ -237,9 +236,7 @@ begin
    or not public.kettle_creator_progress_valid(j.kind,p) then return public.kettle_error('VALIDATION_ERROR'); end if;
  if s=j.stage and not public.kettle_creator_progress_advances(j.kind,j.progress,p) then return public.kettle_error('VALIDATION_ERROR'); end if;
  if s<>j.stage and j.progress<>p and not public.kettle_creator_progress_advances(j.kind,j.progress,p) then return public.kettle_error('VALIDATION_ERROR'); end if;
- perform set_config('kettle.checkpoint_write','on',true);
  update public.creator_jobs set stage=s,progress=p,revision=revision+1,updated_at=now() where id=j.id returning * into j;
- perform set_config('kettle.checkpoint_write','off',true);
  insert into public.creator_job_checkpoints(job_id,key,stage,progress,revision) values(j.id,k,s,p,j.revision) returning * into c;
  return jsonb_build_object('ok',true,'data',jsonb_build_object('status','stored','checkpoint',jsonb_build_object(
   'key',c.key,'stage',c.stage,'progress',c.progress,'revision',c.revision,'created_at',c.created_at),'revision',j.revision));

@@ -92,7 +92,9 @@ function jobProgress(value:unknown,kind:string){
     const item=shape(value,['kind','profile','videos','limitations']);if(!item||item.kind!=='scan')return false;
     const videos=Array.isArray(item.videos)?item.videos:[];
     return (item.profile===null||progressProfile(item.profile))&&list(item.videos,10,progressCard)&&textList(item.limitations,20,500)
-      &&unique(videos,video=>{const card=object(video);return `${card?.platform}:${card?.native_id}`;});
+      &&unique(videos,video=>{const card=object(video);return `${card?.platform}:${card?.native_id}`;})
+      &&(item.profile===null||videos.every(video=>new URL(String((video as JsonObject).url)).pathname.split('/video/')[0]
+        ===new URL(String((item.profile as JsonObject).url)).pathname.replace(/\/$/,'')));
   }
   if(kind==='recommendations'){
     const item=shape(value,['kind','identities','references','limitations']);if(!item||item.kind!=='recommendations'

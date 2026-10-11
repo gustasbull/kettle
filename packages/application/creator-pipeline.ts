@@ -128,11 +128,14 @@ export function createGuardedProviderContext(repository:PipelineRepository,job:S
       const parsed=z.strictObject({ok:z.literal(true),data:z.strictObject({status:z.enum(['stored','replay']),
         revision:z.number().int().positive(),checkpoint:z.strictObject({key:z.string(),stage:CreatorJobStage,
           progress:CreatorJobProgress,revision:z.number().int().positive(),created_at:Timestamp})})}).safeParse(saved);
-      if(!parsed.success||parsed.data.data.checkpoint.key!==key||parsed.data.data.checkpoint.stage!==stage||
-        JSON.stringify(parsed.data.data.checkpoint.progress)!==JSON.stringify(progress)||
-        parsed.data.data.revision<revision||parsed.data.data.checkpoint.revision>parsed.data.data.revision)
+      const data=parsed.success?parsed.data.data:undefined;
+      const validRevision=data?.status==='stored'
+        ? data.revision===revision+1&&data.checkpoint.revision===data.revision
+        : data?.status==='replay'&&data.revision>=revision&&data.checkpoint.revision<=data.revision;
+      if(!data||data.checkpoint.key!==key||data.checkpoint.stage!==stage||
+        JSON.stringify(data.checkpoint.progress)!==JSON.stringify(progress)||!validRevision)
         throw new PipelineRunError('failed');
-      revision=parsed.data.data.revision;
+      revision=data.revision;
     },
     async call(key,provider,operation,execute) {
       if(!/^[\w:-]{1,200}$/.test(key)||!Number.isSafeInteger(ceilings[provider])||ceilings[provider]<0)throw new PipelineRunError('failed');
