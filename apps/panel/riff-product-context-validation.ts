@@ -161,7 +161,15 @@ function failure(value: unknown) {
 }
 function structured(raw: unknown) {
   const outer = object(raw);
-  return { outer, result: object(outer?.structuredContent) ?? outer };
+  if (!outer || !Object.hasOwn(outer, 'structuredContent')) return;
+  const allowed = new Set(['content', 'structuredContent', 'isError', '_meta']);
+  if (Object.keys(outer).some(key => !allowed.has(key))
+    || (outer.content !== undefined && !Array.isArray(outer.content))
+    || (outer.isError !== undefined && typeof outer.isError !== 'boolean')
+    || (outer._meta !== undefined && !object(outer._meta))) return;
+  const result = object(outer.structuredContent);
+  if (!result) return;
+  return { outer, result };
 }
 function canonicalJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalJson);
@@ -174,7 +182,9 @@ export function parseProductSaveResult(raw: unknown, input: SaveProjectInput):
   | { status: 'saved'; project: Project; requestId: string }
   | { status: 'failure'; failure: { code: string; recovery: string } }
   | { status: 'malformed' } {
-  const { outer, result } = structured(raw);
+  const envelope = structured(raw);
+  if (!envelope) return { status: 'malformed' };
+  const { outer, result } = envelope;
   const parsedFailure = failure(result);
   if (parsedFailure) return { status: 'failure', failure: parsedFailure };
   const success = shape(result, ['ok', 'data']);
@@ -194,7 +204,9 @@ export function parseProductGetResult(raw: unknown, projectId: string):
   | { status: 'loaded'; project: Project }
   | { status: 'failure'; failure: { code: string; recovery: string } }
   | { status: 'malformed' } {
-  const { outer, result } = structured(raw);
+  const envelope = structured(raw);
+  if (!envelope) return { status: 'malformed' };
+  const { outer, result } = envelope;
   const parsedFailure = failure(result);
   if (parsedFailure) return { status: 'failure', failure: parsedFailure };
   const success = shape(result, ['ok', 'data']);

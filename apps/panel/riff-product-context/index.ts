@@ -36,6 +36,13 @@ export function mountRiffProductContext(root: HTMLElement, actions: ProductConte
   let project: Project | null = null;
   let savedProject: Project | null = null;
   let busy = false;
+  let pendingFrame: number | undefined;
+
+  function cancelPendingFrame() {
+    if (pendingFrame === undefined) return;
+    root.ownerDocument.defaultView?.cancelAnimationFrame?.(pendingFrame);
+    pendingFrame = undefined;
+  }
 
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className = '') => {
     const node = doc.createElement(tag); node.className = className;
@@ -94,6 +101,7 @@ export function mountRiffProductContext(root: HTMLElement, actions: ProductConte
     errorSummary.setAttribute('role', 'alert'); errorSummary.hidden = true;
     const controls = new Map<keyof ProductDraft, HTMLElement>();
     const errors = new Map<keyof ProductDraft, HTMLElement>();
+    let validationRevealed = false;
 
     const row = (labelText: string, field: keyof ProductDraft, control: HTMLInputElement | HTMLTextAreaElement) => {
       const wrapper = element('div', undefined, 'riff-product__row');
@@ -144,7 +152,7 @@ export function mountRiffProductContext(root: HTMLElement, actions: ProductConte
       if (focusIndex !== undefined) constraintList.querySelector<HTMLInputElement>(`#riff-product-constraint-${focusIndex}`)?.focus({ preventScroll: true });
     }
     addConstraint.addEventListener('click', () => {
-      if (draft.filming_constraints.length >= 20) return;
+      if (draft.filming_constraints.length >= 21) return;
       draft.filming_constraints.push(''); changed('filming_constraints'); renderConstraints(draft.filming_constraints.length - 1); updateValidity();
     });
     renderConstraints();
@@ -173,40 +181,47 @@ export function mountRiffProductContext(root: HTMLElement, actions: ProductConte
       errorSummary.hidden = true; errorSummary.textContent = '';
     }
     function currentValidation() { return validateProductDraft(draft, project, validationRequestId); }
-    function updateValidity() {
-      const validation = currentValidation(); confirm.disabled = busy || !validation.ok;
-      const missing: string[] = [];
-      if (!draft.product.trim()) missing.push('Product');
-      if (!draft.audience.trim()) missing.push('Audience');
-      if (!draft.goal.trim()) missing.push('Main benefit');
-      if (!draft.tone.trim()) missing.push('Content style');
-      if (!draft.language.trim()) missing.push('Language');
-      if (!draft.duration_seconds.trim()) missing.push('Duration');
-      const missingText = missing.length > 1
-        ? `${missing.slice(0, -1).join(', ')}, and ${missing.at(-1)}`
-        : missing[0] ?? 'the highlighted fields';
-      help.textContent = validation.ok ? 'All required context is ready to confirm.'
-        : `Complete ${missingText} before confirming.`;
+    function clearErrors() {
+      for (const field of fieldOrder) {
+        const error = errors.get(field); if (error) { error.hidden = true; error.textContent = ''; }
+        const control = controls.get(field); control?.removeAttribute('aria-invalid'); control?.removeAttribute('aria-describedby');
+      }
+      errorSummary.hidden = true; errorSummary.textContent = '';
     }
-    function setBusy(next: boolean) {
-      busy = next; form.setAttribute('aria-busy', String(next));
-      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>('input,textarea,button').forEach(control => { control.disabled = next; });
-      if (!next) updateValidity();
-    }
-    function showErrors(validation: Extract<ReturnType<typeof validateProductDraft>, { ok: false }>) {
+    function showErrors(validation: Extract<ReturnType<typeof validateProductDraft>, { ok: false }>, moveFocus: boolean) {
+      clearErrors();
       errorSummary.hidden = false; errorSummary.textContent = 'Review the highlighted product context fields.';
       for (const field of fieldOrder) {
         const message = validation.errors[field]; if (!message) continue;
         const error = errors.get(field); const control = controls.get(field); if (!error || !control) continue;
         error.textContent = message; error.hidden = false; control.setAttribute('aria-invalid', 'true'); control.setAttribute('aria-describedby', error.id);
       }
-      const first = fieldOrder.find(field => validation.errors[field]); controls.get(first ?? 'product')?.focus({ preventScroll: true });
-      live.textContent = 'Product context needs corrections before it can be saved.';
+      if (moveFocus) {
+        const first = fieldOrder.find(field => validation.errors[field]);
+        if (first === 'filming_constraints') {
+          (constraintList.querySelector<HTMLInputElement>('input') ?? addConstraint).focus({ preventScroll: true });
+        } else controls.get(first ?? 'product')?.focus({ preventScroll: true });
+        live.textContent = 'Product context needs corrections before it can be saved.';
+      }
+    }
+    function updateValidity() {
+      const validation = currentValidation(); confirm.disabled = busy;
+      addConstraint.disabled = busy || draft.filming_constraints.length > 20;
+      help.textContent = validation.ok ? 'All required context is ready to confirm.'
+        : Object.values(validation.errors).filter(Boolean).join(' ');
+      if (validationRevealed) {
+        if (validation.ok) clearErrors(); else showErrors(validation, false);
+      }
+    }
+    function setBusy(next: boolean) {
+      busy = next; form.setAttribute('aria-busy', String(next));
+      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>('input,textarea,button').forEach(control => { control.disabled = next; });
+      if (!next) updateValidity();
     }
     form.addEventListener('submit', event => {
       event.preventDefault(); if (busy) return;
       const validation = currentValidation();
-      if (!validation.ok) { showErrors(validation); return; }
+      if (!validation.ok) { validationRevealed = true; showErrors(validation, true); return; }
       const current = generation; setBusy(true); live.textContent = 'Saving your product context…';
       const submitted = structuredClone(draft);
       void actions.onSave({ draft: submitted, project }).then(outcome => {
@@ -240,15 +255,20 @@ export function mountRiffProductContext(root: HTMLElement, actions: ProductConte
   return {
     start(source: ProductContextSource) {
       if (disposed) return;
+      cancelPendingFrame();
       const current = ++generation; busy = false;
       if (source.kind === 'saved') {
         project = source.project; savedProject = source.project; draft = productDraftFromProject(source.project); editor(true); return;
       }
       project = null; savedProject = null; draft = emptyProductDraft(source.description); pending();
-      // Yield one short paint window so the truthful received/preparing state is
-      // perceivable. This does not advance or simulate backend progress.
-      setTimeout(() => { if (!disposed && current === generation) editor(true); }, 160);
+      const advance = () => {
+        pendingFrame = undefined;
+        if (!disposed && current === generation) editor(true);
+      };
+      const view = doc.defaultView;
+      if (view?.requestAnimationFrame) pendingFrame = view.requestAnimationFrame(advance);
+      else queueMicrotask(advance);
     },
-    dispose() { if (disposed) return; disposed = true; generation++; root.replaceChildren(); },
+    dispose() { if (disposed) return; disposed = true; generation++; cancelPendingFrame(); root.replaceChildren(); },
   };
 }

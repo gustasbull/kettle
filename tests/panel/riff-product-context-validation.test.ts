@@ -152,6 +152,44 @@ test('strict save parsing requires a matching successful receipt and complete sa
   assert.deepEqual(failure, { status: 'failure', failure: { code: 'UNAVAILABLE', recovery: 'retry_same_request' } });
 });
 
+test('save and get require a strict CallToolResult envelope', () => {
+  const input = successfulInput();
+  const saved = project(input);
+  const saveContent = { ok: true, data: { project: saved, request_id: requestId } };
+  const getContent = { ok: true, data: { project: saved } };
+  assert.equal(parseProductSaveResult({
+    content: [], structuredContent: saveContent, isError: false, _meta: {},
+  }, input).status, 'saved');
+  assert.equal(parseProductGetResult({
+    content: [], structuredContent: getContent, isError: false, _meta: {},
+  }, projectId).status, 'loaded');
+
+  const accessor = Object.defineProperty({}, 'structuredContent', { get: () => saveContent, enumerable: true });
+  const inherited = Object.assign(Object.create({ inherited: true }), { structuredContent: saveContent });
+  const malformedSave = [
+    saveContent,
+    {},
+    { content: [] },
+    { structuredContent: saveContent, extra: true },
+    { structuredContent: saveContent, isError: 'false' },
+    { structuredContent: saveContent, content: {} },
+    { structuredContent: saveContent, _meta: [] },
+    accessor,
+    inherited,
+  ];
+  for (const raw of malformedSave) assert.equal(parseProductSaveResult(raw, input).status, 'malformed');
+
+  const getAccessor = Object.defineProperty({}, 'structuredContent', { get: () => getContent, enumerable: true });
+  const malformedGet = [
+    getContent,
+    {},
+    { structuredContent: getContent, extra: true },
+    { structuredContent: getContent, isError: 0 },
+    getAccessor,
+  ];
+  for (const raw of malformedGet) assert.equal(parseProductGetResult(raw, projectId).status, 'malformed');
+});
+
 test('strict get parsing accepts historical snapshots but only for the trusted project ID', () => {
   const input = successfulInput();
   const historical = project(input, 1, false);

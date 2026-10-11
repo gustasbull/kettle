@@ -125,3 +125,61 @@ the local editable brief is being prepared; it shows no invented percentage.
 None within Task 4 scope. Cross-session Product reopening and Product-to-DNA
 discovery still require a future trusted project-selection/link contract and are not
 simulated by this implementation.
+
+## Fix round 1/5 — next-paint truth, strict envelopes, reachable validation, and failure coverage
+
+All reviewer findings were addressed within Task 4:
+
+- Removed the artificial 160 ms Product-pending timer. Unsaved Product context now
+  advances on `requestAnimationFrame`, with only a microtask fallback when no browser
+  frame API exists. A new start cancels the prior frame, disposal cancels the current
+  frame, and generation checks remain as a second stale-work guard. There is no
+  elapsed-time progress or wall-clock delay.
+- Save/Get parsing now requires an own `structuredContent` property inside a plain
+  CallToolResult object. Only `content`, `structuredContent`, `isError`, and `_meta`
+  are allowed; optional `content`, `isError`, and `_meta` must have valid top-level
+  types. Direct inner results, missing structured content, unknown outer keys,
+  accessors, inherited prototypes, malformed content/meta, and non-boolean
+  `isError` all fail closed. Strict inner exact-key validation is unchanged.
+- **Confirm context** remains reachable when the draft is invalid. Its help text is
+  derived from every current validation error, including Unknown placeholders,
+  bounds, duration, and constraints. A real button click or Enter submission reveals
+  all inline errors, associates them with controls via `aria-invalid` and
+  `aria-describedby`, and focuses the first invalid input. Errors update as the user
+  edits; an excess 21st constraint is explicitly recoverable by removal.
+- Expanded the actual Home bridge regression through timeout, transport rejection,
+  UNAVAILABLE, UNAUTHENTICATED, FORBIDDEN, VALIDATION_ERROR, NOT_FOUND, and
+  IDEMPOTENCY_CONFLICT. It proves safe Product copy, local draft preservation, exact
+  request reuse for ambiguous/retry-same-request outcomes, rotation after definitive
+  failures, exact-intent blocking after idempotency conflict, and a fresh request
+  after the intent changes.
+- `get_project` remains unavailable to create failures and is called only for a
+  trusted current project after VERSION_CONFLICT or NOT_FOUND. A successfully reread
+  NOT_FOUND path retains the local draft/base snapshot but now reports that the
+  saved Product context is unavailable; it no longer invents a “newer version.”
+
+### RED/GREEN evidence
+
+- RED — strict-envelope regression passed 0/1: a direct inner success was returned
+  as `saved` instead of `malformed`.
+- RED — Product browser regressions passed 0/2: Confirm was disabled (`false` versus
+  expected reachable `true`), and two starts scheduled `[160, 160]` timers with zero
+  animation frames or cancellation.
+- RED — expanded bridge regressions passed 1/2: the new failure matrix already
+  confirmed correct retry/auth/idempotency behavior, while trusted NOT_FOUND timed
+  out waiting for the required unavailable message because it rendered the version-
+  conflict message instead.
+- GREEN — Product validation passed 6/6, Product component browser coverage passed
+  4/4, and focused Product bridge coverage passed 3/3.
+- `npm run typecheck && npm run build:panel` — PASS.
+- `npm run check` — PASS: TypeScript, 533/533 Node tests, Worker dry-run build at
+  4,017.40 KiB / 813.85 KiB gzip, local workerd smoke, and 90/90 real-browser tests.
+- Riff Home bundle: 199,875 bytes raw / 56,542 bytes gzip,
+  `sha256:e2bf0923823355d04b3a55b3794513df7a2588cc284fc59eab71ee14980e52a5`.
+- `git diff --check` — PASS.
+
+Fix base: `d83e08088bb98f785e9d6122a4379c0e48f86b8c`.
+
+Fix commit: this commit (`fix: harden Paper product context flow`); its final hash is
+returned in the agent handoff. No remaining concern requires Task 5+, provider,
+database, migration, public-tool, or deployment scope.

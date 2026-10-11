@@ -311,7 +311,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         if (reread.status === 'response') {
           const parsed = parseProductGetResult(reread.value, trustedProjectId);
           if (parsed.status === 'loaded') return {
-            status: 'conflict', latest: parsed.project, message: productFailureMessage('VERSION_CONFLICT'),
+            status: 'conflict', latest: parsed.project, message: productFailureMessage(failure.code),
           };
           if (parsed.status === 'failure') return { status: 'failed', message: productFailureMessage(parsed.failure.code) };
         }

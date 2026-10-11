@@ -867,6 +867,76 @@ test('Riff Product context saves only on confirmation, retries exactly, updates,
   assert.equal(await frame.evaluate(() => window.calls.some(call => /provider|model|classif/i.test(call.name))), false);
 });
 
+test('Riff Product save failures preserve drafts and obey retry, rotation, and idempotency boundaries', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.calls=[];window.mode='timeout';
+    const failures={
+      unavailable:{code:'UNAVAILABLE',retryable:true,recovery:'retry_same_request'},
+      unauthenticated:{code:'UNAUTHENTICATED',retryable:false,recovery:'reauthorize'},
+      forbidden:{code:'FORBIDDEN',retryable:false,recovery:'contact_support'},
+      validation:{code:'VALIDATION_ERROR',retryable:false,recovery:'correct_input'},
+      notfound:{code:'NOT_FOUND',retryable:false,recovery:'reload'},
+      idempotency:{code:'IDEMPOTENCY_CONFLICT',retryable:false,recovery:'correct_input'},
+    };
+    window.openai={callTool:async(name,args)=>{window.calls.push({name,args:structuredClone(args)});
+      if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:[]}}};
+      if(name!=='save_project')return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'private',retryable:false,recovery:'reload'}}};
+      if(window.mode==='timeout')return new Promise(()=>{});
+      if(window.mode==='transport')throw new Error('private transport detail');
+      const failure=failures[window.mode];return {structuredContent:{ok:false,error:{...failure,message:'private'}}};
+    }};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:40,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',e=>{const m=e.data;if(m.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params.protocolVersion,hostInfo:{name:'product-errors',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+      if(m.method==='ui/notifications/initialized'){frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',onboarding_seen_at:'2026-10-11T00:00:00Z'}}},content:[]}},'*');window.ready=true;}});</script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);const frame=page.frames().find(item=>item.url().endsWith('/frame'));
+  const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  await input.fill('A product description');await input.press('Control+Enter');await frame.getByRole('button',{name:'Product description'}).click();
+  await frame.getByRole('heading',{name:'Give your product viral potential.'}).waitFor();
+  await frame.getByLabel('Product',{exact:true}).fill('FocusNest');await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');
+  await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');await frame.getByLabel('Content style',{exact:true}).fill('Demo');
+  await frame.getByLabel('Language',{exact:true}).fill('en');await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');
+  const confirm=frame.getByRole('button',{name:'Confirm context'});
+  const attempt=async(mode,pattern)=>{const expected=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length+1);
+    await frame.evaluate(value=>{window.mode=value},mode);await confirm.click();
+    await frame.waitForFunction(count=>window.calls.filter(call=>call.name==='save_project').length===count,expected);
+    await frame.waitForFunction(()=>document.querySelector('form[aria-label="Your product brief"]')?.getAttribute('aria-busy')==='false');
+    assert.match(await frame.getByRole('status').textContent(),pattern);
+  };
+  await attempt('timeout',/could not verify/i);
+  await attempt('transport',/could not verify/i);
+  await attempt('unavailable',/same save again/i);
+  await attempt('unauthenticated',/Reconnect Riff.*product context/i);
+  await attempt('forbidden',/cannot save this product context/i);
+  await attempt('validation',/product brief/i);
+  await attempt('notfound',/saved product context is unavailable/i);
+  assert.equal(await frame.evaluate(()=>window.calls.some(call=>call.name==='get_project')),false,
+    'create failures have no trusted project ID to reread');
+  await attempt('idempotency',/change.*confirm/i);
+  const beforeBlockedRetry=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length);
+  await confirm.click();await frame.waitForTimeout(50);
+  assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').length),beforeBlockedRetry,
+    'the exact same intent is blocked after idempotency conflict');
+  assert.match(await frame.getByRole('status').textContent(),/change.*confirm/i);
+
+  await frame.getByLabel('Audience',{exact:true}).fill('Small remote teams');
+  await attempt('unavailable',/same save again/i);
+  const saves=await frame.evaluate(()=>window.calls.filter(call=>call.name==='save_project').map(call=>call.args));
+  assert.equal(new Set(saves.slice(0,4).map(call=>call.request_id)).size,1,
+    'timeout, transport, unavailable, and the following definitive attempt reuse the pending request');
+  for(let index=4;index<saves.length;index++)assert.notEqual(saves[index].request_id,saves[index-1].request_id,
+    `definitive failure ${index} rotates the next request ID`);
+  assert.equal(await frame.getByLabel('Audience',{exact:true}).inputValue(),'Small remote teams');
+  assert.equal(await frame.getByRole('button',{name:'Discover formats'}).count(),0);
+});
+
 test('Riff Product context rereads only a receipt-trusted conflict ID and invalidates late private work on account change', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
@@ -879,6 +949,7 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
       if(name==='get_project')return {structuredContent:{ok:true,data:{project:window.latest}}};
       if(name==='save_project'){
         if(window.mode==='conflict'){window.latest=make(args,2);return {structuredContent:{ok:false,error:{code:'VERSION_CONFLICT',message:'private',retryable:false,recovery:'reload'}}};}
+        if(window.mode==='notfound')return {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'private',retryable:false,recovery:'reload'}}};
         if(window.mode==='pending')return new Promise(resolve=>window.pending.push({args,resolve}));
         window.latest=make(args);return {structuredContent:{ok:true,data:{project:window.latest,request_id:args.request_id}}};
       }}};
@@ -903,6 +974,15 @@ test('Riff Product context rereads only a receipt-trusted conflict ID and invali
   const getCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').map(call=>call.args));
   assert.deepEqual(getCalls,[{project_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}]);
   assert.equal(Object.hasOwn(getCalls[0],'account_id'),false);
+
+  await frame.evaluate(()=>{window.mode='notfound';});await confirm.click();
+  await frame.getByText(/saved product context is unavailable/i).waitFor();
+  assert.equal(await frame.getByLabel('Audience',{exact:true}).inputValue(),'Unsaved local audience');
+  const notFoundGets=await frame.evaluate(()=>window.calls.filter(call=>call.name==='get_project').map(call=>call.args));
+  assert.deepEqual(notFoundGets,[
+    {project_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'},
+    {project_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'},
+  ]);
 
   await frame.evaluate(()=>{window.mode='pending';});await confirm.click();await frame.waitForFunction(()=>window.pending.length===1);
   await page.evaluate(()=>window.account('00000000-0000-4000-8000-000000000002'));
