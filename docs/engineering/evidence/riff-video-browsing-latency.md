@@ -43,9 +43,9 @@ entry can be tied to deployed bytes.
 
 | Panel/resource | SHA-256 bundle version | Raw bytes / budget | Gzip bytes / budget |
 | --- | --- | ---: | ---: |
-| Riff Home `riff-home-v3` | `sha256:27179e56c65cfe9977ada9f98a799adbfb23928c461b6760764751ee0ec29ecc` | 479,678 / 500,000 | 107,010 / 110,000 |
+| Riff Home `riff-home-v3` | `sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450` | 142,850 / 500,000 | 40,454 / 110,000 |
 | Onboarding `riff-onboarding-v1` | `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0` | 382,496 / 400,000 | 80,543 / 85,000 |
-| Pipeline `creator-pipeline-v3` | `sha256:44db778cf6b6f697884f94e1be1aae7dc57c62c0034d595b175a8404aeac6b40` | 94,037 / 250,000 | 26,630 / 75,000 |
+| Pipeline `creator-pipeline-v3` | `sha256:fc6bbf1be1a5556fe398d7e137ee69dfb1bcff7e8ff8d964ea176a5d23dae120` | 114,785 / 250,000 | 31,949 / 75,000 |
 
 Evidence class: `fixture`; proof surface: `local-process`. These are the values
 consumed from the generated local manifest by the Task 9 fixture benchmark. They
@@ -58,13 +58,13 @@ current-live ChatGPT, Cloudflare, Supabase, or provider percentiles.
 
 ### Browser
 
-Headless Chromium loaded the exact served Home resource above:
+Headless Chromium loaded the exact final Home artifact above,
+`sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450`:
 
-- `first-paint`: 72.0 ms from navigation start.
-- `first-contentful-paint`: 72.0 ms from navigation start.
-- content-free `riff:panel_render` measures: 0.1 ms and 0.0 ms.
+- `first-paint`: 36.0 ms from navigation start.
+- `first-contentful-paint`: 36.0 ms from navigation start.
 - twelve local tab clicks measured from click through two animation frames:
-  `7.1, 16.7, 16.8, 16.5, 16.6, 16.6, 16.7, 16.6, 16.6, 16.7, 16.6, 16.7 ms`.
+  `11.4, 12.6, 14.0, 14.6, 15.3, 15.3, 13.4, 15.2, 15.7, 15.0, 13.5, 13.6 ms`.
 
 The click sample exercises already-loaded local state only; it performs no MCP,
 database, or provider call.
@@ -87,6 +87,23 @@ small and the environment is not production, so no p50/p95/p99 claim is made.
 emitted one schema-version-1 report with `sample_class=fixture` and
 `proof_surface=local-process`. The command has no network/operator dependency,
 made no provider or hosted-database call, and performed no deployment.
+
+The final combined local gate also passed on the same source revision:
+
+- `npm run check`: typecheck, 514 Node tests, dry-run Worker build, local
+  workerd smoke, and 77 real-browser tests.
+- `npm run test:db`: 13/13 migration and database tests in PGlite.
+- `git diff --check`: clean.
+
+These commands did not deploy, contact providers, provision/refill an allowance,
+or access hosted Supabase. The guarded `--live` benchmark remains intentionally
+unavailable until a pre-provisioned development allocation, approved canonical
+inputs, and a trusted operator endpoint are separately authorized.
+
+The final local MCP wire audit serialized the all-capabilities `tools/list` at
+246,160 bytes. All 22 output schemas compiled as JSON Schema 2020-12 and all
+1,313 local `$ref` values resolved within their owning schema. This is local
+compatibility evidence, not a hosted ChatGPT submission result.
 
 The authored fixture contains 57 observations. Ten exact timing groups have five
 successful observations each, so the nearest-rank implementation reports fixture
@@ -147,9 +164,9 @@ stable attempt keys, reservation receipts, exact replay, and zero automatic
 provider retry behavior.
 
 Hosted Worker fingerprint proof and ChatGPT proof are also absent. In particular,
-a fresh and an existing conversation have not both verified install/onboarding;
-the UI submission still lacks a dedicated `_meta.ui.domain`; and there is no
-reproducible complete official manifest/MCP schema validation record. These are
+a fresh and an existing conversation have not both verified install/onboarding,
+the UI submission still lacks a dedicated `_meta.ui.domain`, and the local MCP
+wire/schema audit is not an official hosted submission validation. These are
 submission gates, not failures that this fixture benchmark fixes.
 
 ## Instrumented boundaries

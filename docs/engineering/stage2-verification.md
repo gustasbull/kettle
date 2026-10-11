@@ -177,16 +177,24 @@ remain product inputs. Billing and public distribution remain separate later wor
 
 ## Fixture browsing benchmark — 2026-10-11
 
-Task 9 added a strict, import-safe creator-latency benchmark. The following local
-commands passed:
+Task 9 added a strict, import-safe creator-latency benchmark. The final combined
+source revision passed these local commands:
 
-- `node --import tsx --test tests/creator-latency-benchmark.test.ts`: 11/11.
-- `tsc --noEmit --pretty false`: Task 9 passed before Task 6 landed; a final
-  shared-checkout rerun then exposed two Task 6 test-fixture literal-typing
-  errors in `tests/riff-videos-application.test.ts`. Task 9's focused tests
-  remained green; the shared typecheck is therefore not recorded as a final pass.
-- `npm run benchmark:creator -- --fixture`: emitted one validated fixture/local-
-  process report and exited successfully.
+- `npm run check`: TypeScript, 514 Node tests, the dry-run Worker build, local
+  workerd smoke, and 77 real-browser tests.
+- `npm run test:db`: 13/13 tests against the actual migrations in PGlite.
+- `npm run benchmark:creator -- --fixture`: one validated fixture/local-process
+  report with 57 observations and exact zero durable deltas for all six
+  provider-free read scenarios.
+- `git diff --check`: clean.
+
+The final generated resource fingerprints were
+`sha256:e8cc7e2b2d14d451619484c2927feb66be7bea8f1ae9a8366515d7237576a450`
+for Riff Home (142,850 raw / 40,454 gzip),
+`sha256:fc6bbf1be1a5556fe398d7e137ee69dfb1bcff7e8ff8d964ea176a5d23dae120`
+for the creator pipeline (114,785 / 31,949), and
+`sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0`
+for onboarding (382,496 / 80,543). All remain inside their local budgets.
 
 The fixture report uses current local manifest fingerprints, retains raw synthetic
 observations, and applies nearest-rank thresholds of five observations for p50,
@@ -196,12 +204,14 @@ trial units, and cash reservations. This is fixture/reporting evidence only; it 
 not hosted counter evidence.
 
 No network request, provider call, hosted Supabase call, deployment, allocation,
-refill, canary, ChatGPT session, or remote database operation was performed by this
-Task 9 run. The full `npm run check` was intentionally not run while Task 6 shared
-files were being edited. No current-live p50/p95/p99, provider permission, billing,
-production-readiness, or SLA claim follows from this result. The local controller
-evidence covers terminal-status-observed-to-render scheduling only, not persisted-
-result-to-visible-paint under three seconds.
+refill, canary, ChatGPT session, or remote database operation was performed by
+these final verification runs. No current-live p50/p95/p99, provider permission,
+billing, production-readiness, or SLA claim follows from them. The local
+controller evidence covers terminal-status-observed-to-render scheduling only,
+not persisted-result-to-visible-paint under three seconds. The guarded `--live`
+benchmark correctly remains unavailable until a pre-provisioned development
+allocation, approved canonical inputs, and a trusted operator endpoint are
+separately authorized.
 
 | External proof or action | Status |
 | --- | --- |
@@ -210,5 +220,6 @@ result-to-visible-paint under three seconds.
 | Hosted development deployment and served fingerprint | Not performed; a local or dry-run fingerprint is not hosted evidence. |
 | ChatGPT install/onboarding in both fresh and existing conversations | Unverified. |
 | Dedicated `_meta.ui.domain` for UI submission | Missing; remains a submission gate outside Task 9. |
-| Reproducible complete official manifest/MCP schema validation | Unverified; selected local tests are not a substitute. |
+| Local manifest/MCP wire and schema validation | Complete: all-capability `tools/list` is 246,160 bytes; 22 output schemas compiled as JSON Schema 2020-12 and all 1,313 local `$ref` values resolved. |
+| Official hosted/submission validation | Unverified; the local compatibility audit is not a hosted ChatGPT submission result. |
 | Development canary or production promotion | Not authorized; O01, O05, and O06 remain open gates. |
