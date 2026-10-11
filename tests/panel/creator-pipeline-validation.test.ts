@@ -281,14 +281,23 @@ test('full and status parsers enforce the complete MCP result envelope for succe
     {name:'status',parse:creatorJobStatusStructuredOutput,success:status},
   ];
   const malformed=(inner:unknown)=>{
+    const innerObject=inner as Record<string,unknown>;
     const hidden:any={structuredContent:inner};Object.defineProperty(hidden,'isError',{value:false,enumerable:false});
     const accessorContent:any[]=[];Object.defineProperty(accessorContent,'0',{get(){return {type:'text',text:'spoof'};},enumerable:true});
     const sparseContent=new Array(1);
     const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
     const symbol:any={structuredContent:inner};symbol[Symbol('secret')]=true;
     const custom=Object.assign(Object.create({spoof:true}),{structuredContent:inner});
+    const topProxy=new Proxy({structuredContent:inner},{});
+    const nestedProxy={structuredContent:new Proxy(innerObject,{})};
+    const topNull=Object.assign(Object.create(null),{structuredContent:inner});
+    const nestedNull={structuredContent:Object.assign(Object.create(null),innerObject)};
     return [
       inner,
+      topProxy,
+      nestedProxy,
+      topNull,
+      nestedNull,
       {structuredContent:inner,content:{}},
       {structuredContent:inner,content:undefined},
       {structuredContent:inner,isError:'false'},
@@ -302,6 +311,7 @@ test('full and status parsers enforce the complete MCP result envelope for succe
       hidden,
       symbol,
       custom,
+      {structuredContent:inner,isError:innerObject.ok===true},
     ];
   };
   for(const {name,parse,success} of parsers){

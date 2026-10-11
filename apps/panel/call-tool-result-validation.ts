@@ -1,11 +1,14 @@
 export type StrictJsonObject = Record<string, unknown>;
+export type StrictCallToolResult = {
+  structuredContent: StrictJsonObject;
+  isError?: boolean;
+};
 
 function strictObject(value: unknown): StrictJsonObject | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype) return;
   const descriptors = Object.getOwnPropertyDescriptors(value);
-  if (Object.values(descriptors).some(descriptor => !('value' in descriptor))) return;
+  if (Object.values(descriptors).some(descriptor => !('value' in descriptor) || !descriptor.enumerable)) return;
   return value as StrictJsonObject;
 }
 
@@ -17,11 +20,11 @@ export function strictObjectShape(
   try {
     const item = strictObject(value); if (!item) return;
     const allowed = new Set([...required, ...optional]);
-    const keys = Reflect.ownKeys(item);
+    const descriptors = Object.getOwnPropertyDescriptors(item);
+    const keys = Reflect.ownKeys(descriptors);
     if (keys.some(key => typeof key !== 'string' || !allowed.has(key))) return;
-    if (keys.some(key => Object.getOwnPropertyDescriptor(item, key)?.enumerable !== true)) return;
-    if (!required.every(key => Object.hasOwn(item, key))) return;
-    if (optional.some(key => Object.hasOwn(item, key) && item[key] === undefined)) return;
+    if (!required.every(key => Object.hasOwn(descriptors, key))) return;
+    if (optional.some(key => Object.hasOwn(descriptors, key) && descriptors[key]?.value === undefined)) return;
     return item;
   } catch { return; }
 }
@@ -48,7 +51,7 @@ function strictArrayValues(value: unknown): unknown[] | undefined {
   return sawLength ? result : undefined;
 }
 
-function jsonValue(value: unknown, ancestors: Set<object>, depth = 0): boolean {
+function strictJsonValue(value: unknown, ancestors: Set<object>, depth = 0): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object' || depth > 100 || ancestors.has(value)) return false;
@@ -56,19 +59,31 @@ function jsonValue(value: unknown, ancestors: Set<object>, depth = 0): boolean {
   try {
     if (Array.isArray(value)) {
       const entries = strictArrayValues(value); if (!entries) return false;
-      return entries.every(entry => jsonValue(entry, ancestors, depth + 1));
+      return entries.every(entry => strictJsonValue(entry, ancestors, depth + 1));
     }
     const item = strictObject(value); if (!item) return false;
-    const keys = Reflect.ownKeys(item);
-    return keys.every(key => typeof key === 'string'
-      && Object.getOwnPropertyDescriptor(item, key)?.enumerable === true
-      && item[key] !== undefined && jsonValue(item[key], ancestors, depth + 1));
+    const descriptors = Object.getOwnPropertyDescriptors(item);
+    return Reflect.ownKeys(descriptors).every(key => typeof key === 'string'
+      && descriptors[key]?.value !== undefined
+      && strictJsonValue(descriptors[key]?.value, ancestors, depth + 1));
   } finally { ancestors.delete(value); }
 }
 
-function meta(value: unknown) {
-  return !!strictObject(value) && jsonValue(value, new Set());
+/** Validate the untrusted graph before cloning so accessors are never invoked. */
+export function cloneStrictJsonObject(raw: unknown): StrictJsonObject | undefined {
+  try {
+    if (!strictJsonValue(raw, new Set())) return;
+    // Besides detaching the result, structuredClone rejects transparent Proxy objects.
+    const cloned = structuredClone(raw);
+    return strictObject(cloned);
+  } catch { return; }
 }
+
+function meta(value: unknown) {
+  return !!strictObject(value);
+}
+
+const isoDateTime = /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8])))T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
 function annotations(value: unknown) {
   const item = strictObjectShape(value, [], ['audience', 'priority', 'lastModified']); if (!item) return false;
@@ -76,8 +91,9 @@ function annotations(value: unknown) {
     const audience = strictArrayValues(item.audience); if (!audience) return false;
     if (audience.some(role => role !== 'user' && role !== 'assistant')) return false;
   }
-  if (item.priority !== undefined && (typeof item.priority !== 'number' || !Number.isFinite(item.priority))) return false;
-  return item.lastModified === undefined || typeof item.lastModified === 'string';
+  if (item.priority !== undefined && (typeof item.priority !== 'number' || !Number.isFinite(item.priority)
+    || item.priority < 0 || item.priority > 1)) return false;
+  return item.lastModified === undefined || typeof item.lastModified === 'string' && isoDateTime.test(item.lastModified);
 }
 
 function icons(value: unknown) {
@@ -94,11 +110,16 @@ function icons(value: unknown) {
   return true;
 }
 
+function base64(value: unknown) {
+  if (typeof value !== 'string') return false;
+  try { atob(value); return true; } catch { return false; }
+}
+
 function resourceContents(value: unknown) {
   const source = strictObject(value); if (!source) return false;
   const blob = Object.hasOwn(source, 'blob');
   const item = strictObjectShape(source, blob ? ['uri', 'blob'] : ['uri', 'text'], ['mimeType', '_meta']);
-  return !!item && typeof item.uri === 'string' && typeof (blob ? item.blob : item.text) === 'string'
+  return !!item && typeof item.uri === 'string' && (blob ? base64(item.blob) : typeof item.text === 'string')
     && (item.mimeType === undefined || typeof item.mimeType === 'string')
     && (item._meta === undefined || meta(item._meta));
 }
@@ -114,7 +135,7 @@ function contentBlock(value: unknown) {
   }
   if (source.type === 'image' || source.type === 'audio') {
     const item = strictObjectShape(source, ['type', 'data', 'mimeType'], ['annotations', '_meta']);
-    return !!item && typeof item.data === 'string' && typeof item.mimeType === 'string' && shared(item);
+    return !!item && base64(item.data) && typeof item.mimeType === 'string' && shared(item);
   }
   if (source.type === 'resource_link') {
     const item = strictObjectShape(source, ['type', 'name', 'uri'],
@@ -123,7 +144,7 @@ function contentBlock(value: unknown) {
       && (item.title === undefined || typeof item.title === 'string')
       && (item.description === undefined || typeof item.description === 'string')
       && (item.mimeType === undefined || typeof item.mimeType === 'string')
-      && (item.size === undefined || Number.isInteger(item.size) && Number(item.size) >= 0)
+      && (item.size === undefined || typeof item.size === 'number' && Number.isFinite(item.size))
       && (item.icons === undefined || icons(item.icons)) && shared(item);
   }
   if (source.type === 'resource') {
@@ -133,10 +154,14 @@ function contentBlock(value: unknown) {
   return false;
 }
 
-export function parseStrictCallToolResult(raw: unknown):
-  { structuredContent: StrictJsonObject; isError: boolean } | undefined {
+export function isBusinessResultFlagCoherent(result: StrictCallToolResult, succeeded: boolean) {
+  return result.isError === undefined || result.isError === !succeeded;
+}
+
+export function parseStrictCallToolResult(raw: unknown): StrictCallToolResult | undefined {
   try {
-    const outer = strictObjectShape(raw, ['structuredContent'], ['content', 'isError', '_meta']);
+    const canonical = cloneStrictJsonObject(raw); if (!canonical) return;
+    const outer = strictObjectShape(canonical, ['structuredContent'], ['content', 'isError', '_meta']);
     if (!outer || Object.hasOwn(outer, 'isError') && typeof outer.isError !== 'boolean'
       || Object.hasOwn(outer, '_meta') && !meta(outer._meta)) return;
     if (Object.hasOwn(outer, 'content')) {
@@ -144,6 +169,8 @@ export function parseStrictCallToolResult(raw: unknown):
       if (content.some(block => !contentBlock(block))) return;
     }
     const structuredContent = strictObject(outer.structuredContent); if (!structuredContent) return;
-    return { structuredContent, isError: outer.isError === true };
+    return Object.hasOwn(outer, 'isError')
+      ? { structuredContent, isError: outer.isError as boolean }
+      : { structuredContent };
   } catch { return; }
 }

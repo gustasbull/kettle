@@ -1,5 +1,5 @@
 import type { RiffWorkState,RiffWorkStateValue,SetRiffWorkStateInput } from '../../packages/contracts/riff-work-state.ts';
-import { parseStrictCallToolResult } from './call-tool-result-validation.ts';
+import { isBusinessResultFlagCoherent,parseStrictCallToolResult } from './call-tool-result-validation.ts';
 
 type JobSnapshot={id:string;work_states:RiffWorkState[]};
 type Failure={ok:false;error:{code:string;message:string;retryable:boolean;recovery:string}};
@@ -10,7 +10,7 @@ export type WorkStateClientResult<T extends JobSnapshot=JobSnapshot>=
 
 const object=(value:unknown):Record<string,unknown>|undefined=>{
   if(value===null||typeof value!=='object'||Array.isArray(value))return;
-  const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype&&prototype!==null)return;
+  const prototype=Object.getPrototypeOf(value);if(prototype!==Object.prototype)return;
   if(Object.values(Object.getOwnPropertyDescriptors(value)).some(descriptor=>!('value' in descriptor)||!descriptor.enumerable))return;
   return value as Record<string,unknown>;
 };
@@ -18,10 +18,6 @@ const exact=(value:Record<string,unknown>,keys:string[])=>{
   const own=Reflect.ownKeys(value);
   return own.length===keys.length&&own.every(key=>typeof key==='string'&&keys.includes(key))
     &&keys.every(key=>Object.hasOwn(value,key));
-};
-const envelope=(raw:unknown):{value:unknown;isError:boolean}|undefined=>{
-  const outer=parseStrictCallToolResult(raw);if(!outer)return;
-  return {value:outer.structuredContent,isError:outer.isError};
 };
 const uuid=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i;
 const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();
@@ -36,18 +32,20 @@ export const parseRiffWorkState=(raw:unknown):RiffWorkState|undefined=>{
 };
 const success=(raw:unknown):RiffWorkState|undefined=>{
   try{
-    const wrapped=envelope(raw);if(!wrapped||wrapped.isError)return;
-    const value=object(wrapped.value),data=object(value?.data),state=object(data?.work_state);
-    return value?.ok===true&&value&&exact(value,['ok','data'])&&data&&exact(data,['work_state'])&&state?parseRiffWorkState(state):undefined;
+    const wrapped=parseStrictCallToolResult(raw);if(!wrapped)return;
+    const value=object(wrapped.structuredContent),data=object(value?.data),state=object(data?.work_state);
+    return value?.ok===true&&isBusinessResultFlagCoherent(wrapped,true)&&value&&exact(value,['ok','data'])
+      &&data&&exact(data,['work_state'])&&state?parseRiffWorkState(state):undefined;
   }catch{return;}
 };
 const failure=(raw:unknown):Failure|undefined=>{
   try{
-    const wrapped=envelope(raw);if(!wrapped)return;
-    const value=object(wrapped.value),error=object(value?.error);
+    const wrapped=parseStrictCallToolResult(raw);if(!wrapped)return;
+    const value=object(wrapped.structuredContent),error=object(value?.error);
     const codes=['UNAUTHENTICATED','FORBIDDEN','VALIDATION_ERROR','NOT_FOUND','VERSION_CONFLICT','IDEMPOTENCY_CONFLICT','UNAVAILABLE'];
     const recoveries=['reauthorize','correct_input','reload','retry_same_request','contact_support'];
-    if(value?.ok!==false||!exact(value,['ok','error'])||!error||!exact(error,['code','message','retryable','recovery'])
+    if(value?.ok!==false||!isBusinessResultFlagCoherent(wrapped,false)||!exact(value,['ok','error'])
+      ||!error||!exact(error,['code','message','retryable','recovery'])
       ||typeof error.code!=='string'||!codes.includes(error.code)||typeof error.message!=='string'||!error.message.trim()
       ||error.message.length>500||typeof error.retryable!=='boolean'||typeof error.recovery!=='string'||!recoveries.includes(error.recovery))return;
     return {ok:false,error:{code:error.code,message:error.message,retryable:error.retryable,recovery:error.recovery}};

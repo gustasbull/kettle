@@ -1,4 +1,5 @@
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
+import { isBusinessResultFlagCoherent,parseStrictCallToolResult } from './call-tool-result-validation.ts';
 
 export type ProductDraft = {
   product: string;
@@ -92,8 +93,9 @@ type JsonObject = Record<string, unknown>;
 const object = (value: unknown): JsonObject | undefined => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
   const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return;
-  if (Object.values(Object.getOwnPropertyDescriptors(value)).some(descriptor => !('value' in descriptor))) return;
+  if (prototype !== Object.prototype) return;
+  if (Object.values(Object.getOwnPropertyDescriptors(value))
+    .some(descriptor => !('value' in descriptor) || !descriptor.enumerable)) return;
   return value as JsonObject;
 };
 const shape = (value: unknown, required: readonly string[], optional: readonly string[] = []) => {
@@ -196,102 +198,9 @@ function strictArrayValues(value: unknown): unknown[] | undefined {
   }
   return sawLength ? result : undefined;
 }
-function jsonValue(value: unknown): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) {
-    const values = strictArrayValues(value);
-    if (!values) return false;
-    for (const entry of values) if (!jsonValue(entry)) return false;
-    return true;
-  }
-  const item = object(value); if (!item) return false;
-  const keys = Reflect.ownKeys(item);
-  return keys.every(key => typeof key === 'string'
-    && Object.getOwnPropertyDescriptor(item, key)?.enumerable === true
-    && item[key] !== undefined && jsonValue(item[key]));
-}
-function annotations(value: unknown) {
-  const item = shape(value, [], ['audience', 'priority', 'lastModified']);
-  if (!item) return false;
-  if (item.audience !== undefined) {
-    const audience = strictArrayValues(item.audience);
-    if (!audience) return false;
-    for (const role of audience) if (role !== 'user' && role !== 'assistant') return false;
-  }
-  if (item.priority !== undefined && (typeof item.priority !== 'number' || !Number.isFinite(item.priority))) return false;
-  return item.lastModified === undefined || typeof item.lastModified === 'string';
-}
-function meta(value: unknown) {
-  return !!object(value) && jsonValue(value);
-}
-function icons(value: unknown) {
-  const values = strictArrayValues(value);
-  if (!values) return false;
-  for (const icon of values) {
-    const item = shape(icon, ['src'], ['mimeType', 'sizes', 'theme']);
-    if (!item || typeof item.src !== 'string') return false;
-    if (item.mimeType !== undefined && typeof item.mimeType !== 'string') return false;
-    if (item.theme !== undefined && item.theme !== 'light' && item.theme !== 'dark') return false;
-    if (item.sizes !== undefined) {
-      const sizes = strictArrayValues(item.sizes);
-      if (!sizes) return false;
-      for (const size of sizes) if (typeof size !== 'string') return false;
-    }
-  }
-  return true;
-}
-function resourceContents(value: unknown) {
-  const item = object(value); if (!item) return false;
-  const blob = Object.hasOwn(item, 'blob');
-  const parsed = shape(item, blob ? ['uri', 'blob'] : ['uri', 'text'], ['mimeType', '_meta']);
-  return !!parsed && typeof parsed.uri === 'string'
-    && typeof (blob ? parsed.blob : parsed.text) === 'string'
-    && (parsed.mimeType === undefined || typeof parsed.mimeType === 'string')
-    && (parsed._meta === undefined || meta(parsed._meta));
-}
-function contentBlock(value: unknown) {
-  const source = object(value); if (!source || typeof source.type !== 'string') return false;
-  const shared = (item: Record<string, unknown>) =>
-    (item.annotations === undefined || annotations(item.annotations))
-    && (item._meta === undefined || meta(item._meta));
-  if (source.type === 'text') {
-    const item = shape(source, ['type', 'text'], ['annotations', '_meta']);
-    return !!item && typeof item.text === 'string' && shared(item);
-  }
-  if (source.type === 'image' || source.type === 'audio') {
-    const payload = source.type === 'image' ? 'data' : 'data';
-    const item = shape(source, ['type', payload, 'mimeType'], ['annotations', '_meta']);
-    return !!item && typeof item[payload] === 'string' && typeof item.mimeType === 'string' && shared(item);
-  }
-  if (source.type === 'resource_link') {
-    const item = shape(source, ['type', 'name', 'uri'],
-      ['title', 'description', 'mimeType', 'annotations', 'size', 'icons', '_meta']);
-    return !!item && typeof item.name === 'string' && typeof item.uri === 'string'
-      && (item.title === undefined || typeof item.title === 'string')
-      && (item.description === undefined || typeof item.description === 'string')
-      && (item.mimeType === undefined || typeof item.mimeType === 'string')
-      && (item.size === undefined || (Number.isInteger(item.size) && Number(item.size) >= 0))
-      && (item.icons === undefined || icons(item.icons)) && shared(item);
-  }
-  if (source.type === 'resource') {
-    const item = shape(source, ['type', 'resource'], ['annotations', '_meta']);
-    return !!item && resourceContents(item.resource) && shared(item);
-  }
-  return false;
-}
 function structured(raw: unknown) {
-  const outer = shape(raw, ['structuredContent'], ['content', 'isError', '_meta']);
-  if (!outer || (outer.isError !== undefined && typeof outer.isError !== 'boolean')
-    || (outer._meta !== undefined && !meta(outer._meta))) return;
-  if (outer.content !== undefined) {
-    const content = strictArrayValues(outer.content);
-    if (!content) return;
-    for (const block of content) if (!contentBlock(block)) return;
-  }
-  const result = object(outer.structuredContent);
-  if (!result) return;
-  return { outer, result };
+  const outer = parseStrictCallToolResult(raw);
+  return outer ? { outer, result: outer.structuredContent } : undefined;
 }
 function canonicalJson(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -314,11 +223,13 @@ export function parseProductSaveResult(raw: unknown, input: SaveProjectInput):
   if (!envelope) return { status: 'malformed' };
   const { outer, result } = envelope;
   const parsedFailure = failure(result);
-  if (parsedFailure) return { status: 'failure', failure: parsedFailure };
+  if (parsedFailure) return isBusinessResultFlagCoherent(outer, false)
+    ? { status: 'failure', failure: parsedFailure }
+    : { status: 'malformed' };
   const success = shape(result, ['ok', 'data']);
   const data = shape(success?.data, ['project', 'request_id']);
   const saved = projectSnapshot(data?.project);
-  if (!success || success.ok !== true || !data || !saved || outer?.isError === true
+  if (!success || success.ok !== true || !isBusinessResultFlagCoherent(outer, true) || !data || !saved
     || data.request_id !== input.request_id || saved.current_version !== input.expected_version + 1
     || (input.project_id !== null && saved.id !== input.project_id) || saved.name !== input.name
     || saved.project_type !== input.project_type
@@ -336,11 +247,14 @@ export function parseProductGetResult(raw: unknown, projectId: string):
   if (!envelope) return { status: 'malformed' };
   const { outer, result } = envelope;
   const parsedFailure = failure(result);
-  if (parsedFailure) return { status: 'failure', failure: parsedFailure };
+  if (parsedFailure) return isBusinessResultFlagCoherent(outer, false)
+    ? { status: 'failure', failure: parsedFailure }
+    : { status: 'malformed' };
   const success = shape(result, ['ok', 'data']);
   const data = shape(success?.data, ['project']);
   const loaded = projectSnapshot(data?.project);
-  if (!success || success.ok !== true || !data || !loaded || outer?.isError === true || loaded.id !== projectId) {
+  if (!success || success.ok !== true || !isBusinessResultFlagCoherent(outer, true)
+    || !data || !loaded || loaded.id !== projectId) {
     return { status: 'malformed' };
   }
   return { status: 'loaded', project: loaded };

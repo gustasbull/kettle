@@ -1,7 +1,9 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import type { RiffVideoCard } from '../../packages/contracts/riff-videos.ts';
 import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
-import { parseStrictCallToolResult } from './call-tool-result-validation.ts';
+import {
+  cloneStrictJsonObject,isBusinessResultFlagCoherent,parseStrictCallToolResult,
+} from './call-tool-result-validation.ts';
 import { isCreatorJobStatusView, parseCreatorJobView } from './riff-home-validation.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -20,10 +22,10 @@ const timestamp=(value:unknown):value is string=>typeof value==='string'
 const positiveInteger=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>0;
 function record(value:unknown,keys:readonly string[]):JsonObject|undefined {
   if(value===null||typeof value!=='object'||Array.isArray(value))return;
-  const proto=Object.getPrototypeOf(value);if(proto!==Object.prototype&&proto!==null)return;
+  const proto=Object.getPrototypeOf(value);if(proto!==Object.prototype)return;
   const own=Reflect.ownKeys(value);if(own.some(key=>typeof key!=='string')||own.length!==keys.length||keys.some(key=>!own.includes(key)))return;
   const descriptors=Object.getOwnPropertyDescriptors(value);
-  if(Object.values(descriptors).some(descriptor=>!('value' in descriptor)))return;
+  if(Object.values(descriptors).some(descriptor=>!('value' in descriptor)||!descriptor.enumerable))return;
   return value as JsonObject;
 }
 function safeTree(value:unknown,maxBytes=1_500_000):boolean {
@@ -33,10 +35,22 @@ function safeTree(value:unknown,maxBytes=1_500_000):boolean {
     if(typeof item==='number')return Number.isFinite(item);
     if(typeof item==='string'){bytes+=item.length*3;return bytes<=maxBytes;}
     if(typeof item!=='object'||seen.has(item))return false;seen.add(item);
-    if(Array.isArray(item)){if(item.length>1_000)return false;return item.every(visit);}
-    const proto=Object.getPrototypeOf(item);if(proto!==Object.prototype&&proto!==null)return false;
+    if(Array.isArray(item)){
+      if(Object.getPrototypeOf(item)!==Array.prototype)return false;
+      const descriptors=Object.getOwnPropertyDescriptors(item);
+      const lengthDescriptor=Object.getOwnPropertyDescriptor(item,'length'),length=lengthDescriptor?.value;
+      if(!lengthDescriptor||!('value' in lengthDescriptor)||lengthDescriptor.enumerable
+        ||!Number.isSafeInteger(length)||Number(length)>1_000||Reflect.ownKeys(descriptors).length!==Number(length)+1)return false;
+      for(let index=0;index<Number(length);index++){
+        const descriptor=Object.getOwnPropertyDescriptor(item,String(index));
+        if(!descriptor||!descriptor.enumerable||!('value' in descriptor)||!visit(descriptor.value))return false;
+      }
+      return true;
+    }
+    const proto=Object.getPrototypeOf(item);if(proto!==Object.prototype)return false;
     const descriptors=Object.getOwnPropertyDescriptors(item);
-    if(Reflect.ownKeys(item).some(key=>typeof key!=='string')||Object.values(descriptors).some(d=>!('value' in d)))return false;
+    if(Reflect.ownKeys(item).some(key=>typeof key!=='string')
+      ||Object.values(descriptors).some(d=>!('value' in d)||!d.enumerable))return false;
     return Object.entries(descriptors).every(([key,d])=>{bytes+=key.length*3;return bytes<=maxBytes&&visit(d.value);});
   };return visit(value);
 }
@@ -144,17 +158,23 @@ function videosOutput(value:unknown):RiffVideosPublicOutput|undefined {
   return {ok:true,data:structuredClone(data) as RiffVideoCatalogPage};
 }
 
-function structuredOutput<T>(raw:unknown,parse:(value:unknown)=>T|undefined):T|undefined {
+function structuredOutput<T extends {ok:boolean}>(raw:unknown,parse:(value:unknown)=>T|undefined):T|undefined {
   try{
     const envelope=parseStrictCallToolResult(raw);if(!envelope)return;
     const parsed=parse(envelope.structuredContent);if(!parsed)return;
-    return envelope.isError&&(parsed as {ok?:unknown}).ok===true?undefined:parsed;
+    return isBusinessResultFlagCoherent(envelope,parsed.ok)?parsed:undefined;
   }catch{return;}
 }
 
-export function parseCreatorJobOutput(value:unknown):CreatorJobPublicOutput|undefined { try{return jobOutput(value);}catch{return;} }
-export function parseCreatorJobStatusOutput(value:unknown):CreatorJobStatusPublicOutput|undefined { try{return statusOutput(value);}catch{return;} }
-export function parseRiffVideosOutput(value:unknown):RiffVideosPublicOutput|undefined { try{return videosOutput(value);}catch{return;} }
+export function parseCreatorJobOutput(value:unknown):CreatorJobPublicOutput|undefined {
+  try{const canonical=cloneStrictJsonObject(value);return canonical?jobOutput(canonical):undefined;}catch{return;}
+}
+export function parseCreatorJobStatusOutput(value:unknown):CreatorJobStatusPublicOutput|undefined {
+  try{const canonical=cloneStrictJsonObject(value);return canonical?statusOutput(canonical):undefined;}catch{return;}
+}
+export function parseRiffVideosOutput(value:unknown):RiffVideosPublicOutput|undefined {
+  try{const canonical=cloneStrictJsonObject(value);return canonical?videosOutput(canonical):undefined;}catch{return;}
+}
 export function creatorJobStatusStructuredOutput(raw:unknown):CreatorJobStatusPublicOutput|undefined {
   return structuredOutput(raw,statusOutput);
 }
@@ -171,8 +191,10 @@ export function riffDiscoveryCatalogStructuredOutput(raw:unknown):RiffVideosPubl
 export function creatorJobStructuredOutput(raw:unknown):CreatorJobPublicOutput|undefined {
   try {
     const envelope=parseStrictCallToolResult(raw);if(!envelope)return;
-    const direct=jobOutput(envelope.structuredContent);if(direct)return envelope.isError&&direct.ok?undefined:direct;
-    const started=record(envelope.structuredContent,['ok','data']);if(!started||started.ok!==true||envelope.isError)return;
+    const direct=jobOutput(envelope.structuredContent);
+    if(direct)return isBusinessResultFlagCoherent(envelope,direct.ok)?direct:undefined;
+    const started=record(envelope.structuredContent,['ok','data']);
+    if(!started||started.ok!==true||!isBusinessResultFlagCoherent(envelope,true))return;
     const data=record(started.data,['project','job','source']);if(!data)return;
     const publicJob=jobOutput({ok:true,data:{job:data.job}});const savedProject=project(data.project),source=canonicalSource(data.source);
     if(!publicJob?.ok||!savedProject||!source||publicJob.data.job.kind!=='scan'

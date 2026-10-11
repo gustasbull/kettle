@@ -162,10 +162,15 @@ test('strict save parsing requires a matching successful receipt and complete sa
     { structuredContent: { ok: true, data: {} } },
   ]) assert.equal(parseProductSaveResult(raw, input).status, 'malformed');
 
-  const failure = parseProductSaveResult({ structuredContent: { ok: false, error: {
+  const failureContent = { ok: false as const, error: {
     code: 'UNAVAILABLE', message: 'private transport detail', retryable: true, recovery: 'retry_same_request',
-  } } }, input);
+  } };
+  const failure = parseProductSaveResult({ structuredContent: failureContent }, input);
   assert.deepEqual(failure, { status: 'failure', failure: { code: 'UNAVAILABLE', recovery: 'retry_same_request' } });
+  assert.deepEqual(parseProductSaveResult({structuredContent:failureContent,isError:true},input),failure,
+    'a coherent explicit error flag remains compatible');
+  assert.equal(parseProductSaveResult({structuredContent:failureContent,isError:false},input).status,'malformed',
+    'an explicit success flag cannot carry a business failure');
 });
 
 test('save and get require a strict CallToolResult envelope', () => {
@@ -173,6 +178,7 @@ test('save and get require a strict CallToolResult envelope', () => {
   const saved = project(input);
   const saveContent = { ok: true, data: { project: saved, request_id: requestId } };
   const getContent = { ok: true, data: { project: saved } };
+  const conflict={ok:false as const,error:{code:'VERSION_CONFLICT',message:'private',retryable:false,recovery:'reload'}};
   assert.equal(parseProductSaveResult({
     content: [{ type: 'text', text: 'Product context saved.', annotations: { audience: ['assistant'], priority: 1 } }],
     structuredContent: saveContent, isError: false, _meta: { trace: { sampled: false } },
@@ -181,6 +187,9 @@ test('save and get require a strict CallToolResult envelope', () => {
     content: [{ type: 'resource_link', name: 'project', uri: 'ui://riff/project', mimeType: 'application/json' }],
     structuredContent: getContent, isError: false, _meta: {},
   }, projectId).status, 'loaded');
+  assert.equal(parseProductGetResult({ structuredContent: conflict }, projectId).status, 'failure');
+  assert.equal(parseProductGetResult({ structuredContent: conflict, isError: true }, projectId).status, 'failure',
+    'a coherent explicit error flag remains compatible');
 
   const accessor = Object.defineProperty({}, 'structuredContent', { get: () => saveContent, enumerable: true });
   const inherited = Object.assign(Object.create({ inherited: true }), { structuredContent: saveContent });
@@ -203,6 +212,12 @@ test('save and get require a strict CallToolResult envelope', () => {
     { structuredContent: saveContent, _meta: [] },
     { structuredContent: saveContent, _meta: undefined },
     { structuredContent: saveContent, _meta: Object.create({ inherited: true }) },
+    new Proxy({structuredContent:saveContent},{}),
+    {structuredContent:new Proxy(saveContent,{})},
+    Object.assign(Object.create(null),{structuredContent:saveContent}),
+    {structuredContent:Object.assign(Object.create(null),saveContent)},
+    {structuredContent:saveContent,isError:true},
+    {structuredContent:conflict,isError:false},
     accessor,
     inherited,
     hiddenOuter,
@@ -223,6 +238,12 @@ test('save and get require a strict CallToolResult envelope', () => {
     { structuredContent: getContent, isError: 0 },
     { structuredContent: getContent, isError: undefined },
     { structuredContent: getContent, content: [Object.defineProperty({ type: 'text', text: 'read' }, 'hidden', { value: true })] },
+    new Proxy({structuredContent:getContent},{}),
+    {structuredContent:new Proxy(getContent,{})},
+    Object.assign(Object.create(null),{structuredContent:getContent}),
+    {structuredContent:Object.assign(Object.create(null),getContent)},
+    {structuredContent:getContent,isError:true},
+    {structuredContent:conflict,isError:false},
     getAccessor,
     getSymbol,
     getHidden,

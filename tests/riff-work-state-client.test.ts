@@ -75,6 +75,7 @@ test('work-state client rejects hostile and direct envelopes before rereading au
   const innerHidden=structuredClone(success) as any;Object.defineProperty(innerHidden.data.work_state,'secret',{value:true});
   const innerFailure=structuredClone(conflict) as any;Object.defineProperty(innerFailure.error,'secret',{value:true});
   const hostileEnvelopes=(inner:unknown)=>{
+    const innerObject=inner as Record<string,unknown>;
     const hidden=wrapped(inner) as any;Object.defineProperty(hidden,'secret',{value:true});
     const symbol=wrapped(inner) as any;symbol[Symbol('secret')]=true;
     const accessor:any={content:[]};Object.defineProperty(accessor,'structuredContent',{get(){return inner;},enumerable:true});
@@ -83,8 +84,16 @@ test('work-state client rejects hostile and direct envelopes before rereading au
     const customContent:any[]=[];Object.setPrototypeOf(customContent,null);
     const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
     const metaAccessor:any={};Object.defineProperty(metaAccessor,'trace',{get(){return 'spoof';},enumerable:true});
+    const topProxy=new Proxy(wrapped(inner),{});
+    const nestedProxy=wrapped(new Proxy(innerObject,{}));
+    const topNull=Object.assign(Object.create(null),wrapped(inner));
+    const nestedNull=wrapped(Object.assign(Object.create(null),innerObject));
     return [
       inner,
+      topProxy,
+      nestedProxy,
+      topNull,
+      nestedNull,
       hidden,
       symbol,
       accessor,
@@ -98,6 +107,7 @@ test('work-state client rejects hostile and direct envelopes before rereading au
       {structuredContent:inner,content:accessorContent},
       {structuredContent:inner,content:customContent},
       {structuredContent:inner,content:proxyContent},
+      {structuredContent:inner,isError:innerObject.ok===true},
     ];
   };
   for(const raw of [...hostileEnvelopes(success),...hostileEnvelopes(conflict),wrapped(innerHidden),wrapped(innerFailure)]){

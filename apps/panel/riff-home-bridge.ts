@@ -19,7 +19,9 @@ import {
 import { riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
 import { createRiffWorkStateClient,parseRiffWorkState } from './riff-work-state-client.ts';
-import { parseStrictCallToolResult, strictObjectShape } from './call-tool-result-validation.ts';
+import {
+  cloneStrictJsonObject,isBusinessResultFlagCoherent,parseStrictCallToolResult,strictObjectShape,
+} from './call-tool-result-validation.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -55,8 +57,6 @@ const uuidKey=(value:string)=>value.toLowerCase();
 const sameUuid=(left:string,right:string)=>uuidKey(left)===uuidKey(right);
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-const envelope = (raw: unknown) => parseStrictCallToolResult(raw)?.structuredContent;
-
 function readJob(raw: unknown): CreatorJobView | undefined {
   const result=creatorJobStructuredOutput(raw);
   return result?.ok?result.data.job:undefined;
@@ -71,7 +71,8 @@ function readFailure(raw: unknown): CompleteSafeFailure | undefined {
   const envelope = parseStrictCallToolResult(raw);
   const result = strictObjectShape(envelope?.structuredContent, ['ok', 'error']);
   const error = strictObjectShape(result?.error, ['code', 'message', 'retryable', 'recovery']);
-  if (!result || result.ok !== false || !error || typeof error.code !== 'string' || !failureCodes.has(error.code)
+  if (!envelope || !result || result.ok !== false || !isBusinessResultFlagCoherent(envelope, false)
+    || !error || typeof error.code !== 'string' || !failureCodes.has(error.code)
     || typeof error.recovery !== 'string' || !recoveryKinds.has(error.recovery)
     || typeof error.message !== 'string' || !error.message.trim() || error.message.length > 500
     || typeof error.retryable !== 'boolean') return undefined;
@@ -98,7 +99,7 @@ function rejectedFailure(error: unknown) {
     if (error === null || typeof error !== 'object') return;
     const descriptor = Object.getOwnPropertyDescriptor(error, 'data');
     if (!descriptor || !('value' in descriptor)) return;
-    const data = descriptor.value;
+    const data = cloneStrictJsonObject(descriptor.value); if (!data) return;
     const nested = strictObjectShape(data, ['result']);
     return readFailure(data) ?? readFailure(nested?.result);
   } catch { return; }
@@ -580,8 +581,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       view.setRecentsState({ status: 'error', message: 'Recent work is temporarily unavailable. Your saved jobs were not changed.' });
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
-    const result = envelope(outcome.value); const data = object(result?.data);
-    if (result?.ok !== true || !Array.isArray(data?.work) || data.work.length > 20) {
+    const envelope = parseStrictCallToolResult(outcome.value);
+    const result = envelope?.structuredContent; const data = object(result?.data);
+    if (!envelope || result?.ok !== true || !isBusinessResultFlagCoherent(envelope, true)
+      || !Array.isArray(data?.work) || data.work.length > 20) {
       view.setRecentsState({ status: 'error', message: 'Recent work is temporarily unavailable.' });
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
