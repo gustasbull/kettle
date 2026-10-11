@@ -66,7 +66,8 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     const tool=listing.result.tools.find(t=>t.name===name);assert.ok(tool,name);
     const contract=pipelineContracts[name==='render_creator_job'?'get_creator_job':name as keyof typeof pipelineContracts];
     assert.deepEqual(tool.inputSchema,{...z.toJSONSchema(contract.input),type:'object'});
-    assert.deepEqual(tool.outputSchema,{...z.toJSONSchema(contract.output),type:'object'});
+    assert.deepEqual(tool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
+      [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
   }
   assert.ok(!listing.result.tools.some(t=>t.name==='start_creator_scripts'),'API model generation hidden during trial');

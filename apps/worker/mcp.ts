@@ -15,6 +15,7 @@ import type { OpenAIUiToolMetadata } from '@openai/mcp-extensions/server';
 import { registerProjectReviewResource, PROJECT_REVIEW_URI } from './project-review-resource.ts';
 import { registerRiffOnboardingResource, RIFF_ONBOARDING_URI } from './riff-onboarding-resource.ts';
 import { registerRiffHomeResource, RIFF_HOME_URI } from './riff-home-resource.ts';
+import { PUBLISHED_RESULT_OUTPUT_SCHEMA } from './mcp-published-schema.ts';
 
 import type { createOperations, IdentityVerifier } from '../../packages/application/operations.ts';
 import { bearer, challenge, oauthScopes, type AuthConfig } from '../../packages/auth/index.ts';
@@ -187,7 +188,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
         // SDK 1.32 validates successful results as object schemas and skips
         // validation for isError results. A discriminated union crashes its
         // object normalizer. The application still validates the full v1 union;
-        // tools/list below publishes that unchanged union for clients.
+        // tools/list publishes a compact, truthful envelope for discovery.
         outputSchema: contract.output.options[0],
         annotations: tool.annotations, _meta: tool._meta,
       }, async (input: unknown) => {
@@ -261,21 +262,21 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
   if (auth) for (const tool of productTools) {
     descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
       annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
     });
   }
   if (auth?.creatorOperations) for (const tool of creatorTools) {
     descriptors.push({ name: tool.name, title: tool.title, description: tool.description,
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(tool.contract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(tool.contract.output), type: 'object' }),
+      outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
       annotations: tool.annotations, securitySchemes: tool.securitySchemes, _meta: tool._meta,
     });
   }
   if(auth?.pipelineOperations)for(const tool of pipelineTools){
     descriptors.push({name:tool.name,title:tool.title,description:tool.description,
       inputSchema:ToolSchema.shape.inputSchema.parse({...z.toJSONSchema(tool.contract.input),type:'object'}),
-      outputSchema:ToolSchema.shape.outputSchema.parse({...z.toJSONSchema(tool.contract.output),type:'object'}),
+      outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
       annotations:tool.annotations,securitySchemes:tool.securitySchemes,_meta:tool._meta});
   }
   if (auth) {
@@ -290,7 +291,7 @@ export async function handleMcp(request: Request, auth?: McpAuth): Promise<Respo
       name: 'open_riff', title: 'Riff Home',
       description: 'Open Riff Home for creator input, idea discovery, and continuing into video creation. Reads account state only.',
       inputSchema: ToolSchema.shape.inputSchema.parse({ ...z.toJSONSchema(accountContract.input), type: 'object' }),
-      outputSchema: ToolSchema.shape.outputSchema.parse({ ...z.toJSONSchema(accountContract.output), type: 'object' }),
+      outputSchema: PUBLISHED_RESULT_OUTPUT_SCHEMA,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       securitySchemes: riffSecurity, _meta: homeMeta,
     });
