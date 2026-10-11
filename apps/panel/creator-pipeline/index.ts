@@ -48,6 +48,15 @@ export type CreatorPipelineOptions = {
 };
 export type CreatorPipelinePresentation={status?:CreatorJobStatusView;sourceUrl?:string};
 
+export const creatorLoadingVariants = {
+  fetchVideo:{title:'Fetching your video',subtitle:'Opening your link and loading the available video details.',activity:'Loading the video and its captions…',done:'Link received',next:'Analyzing next',preview:'video',sourceTitle:'Your video',sourceCopy:'Loading your linked video…'},
+  analyzeVideo:{title:'Analyzing your video',subtitle:'Reviewing the opening, delivery and call to action.',activity:'Analyzing hooks and pacing…',done:'Video fetched',next:'Preparing your analysis',preview:'video',sourceTitle:'Your video',sourceCopy:'Hook · Content · Pacing · Voice · CTA'},
+  profile:{title:'Getting to know your profile',subtitle:'Loading available posts and performance from your profile.',activity:'Fetching your recent videos…',done:'Profile found',next:'Analyzing your content',preview:'profile'},
+  product:{title:'Understanding your product',subtitle:'Turning your description into an editable brief.',activity:'Identifying your audience and key benefit…',done:'Description received',next:'Preparing your brief',preview:'none'},
+  discovery:{title:'Finding videos for your next idea',subtitle:'Looking through relevant creators, videos and formats.',activity:'Comparing hooks and product showcases…',done:'Your brief is ready',next:'Choosing matching references',preview:'references'},
+} as const;
+const scriptLoading={title:'Building your filming variants',subtitle:'Turning your selected direction into a film-ready script.',activity:'Preparing your script…',done:'Direction received',next:'Building Studio',preview:'none'} as const;
+
 const unavailable: RiffPanelAction = async () => ({
   status: 'unsupported', message: 'Continue with this request in the ChatGPT composer.',
 });
@@ -145,7 +154,18 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
   const bulbIcon = () => path(svg(13, 13, '0 0 24 24'), 'M9 18h6M10 21h4M9 15c0-2-3-3-3-7a6 6 0 0 1 12 0c0 4-3 5-3 7v1H9z', {
     fill: 'none', stroke: '#9A762C', 'stroke-width': '1.6', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
   });
-  const tiktokIcon = () => path(svg(12, 12, '0 0 24 24'), 'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z', { fill: '#FFFFFF' });
+  const tiktokIcon = () => {
+    const node=svg(12,12,'0 0 24 24');
+    path(node,'M13 4h3c.5 2.1 1.8 3.5 4 4v3a9 9 0 0 1-4-1v6a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V4Z',{fill:'none',stroke:'#25F4EE','stroke-width':'3'});
+    path(node,'M15 3h3c.4 2.1 1.7 3.5 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z',{fill:'none',stroke:'#FE2C55','stroke-width':'3'});
+    return path(node,'M14 3h3c.4 2.4 1.7 3.8 4 4v3a9 9 0 0 1-4-1v7a6 6 0 1 1-6-6v3a3 3 0 1 0 3 3V3Z',{fill:'#FFFFFF'});
+  };
+  const instagramIcon=()=>{
+    const node=svg(14,14,'0 0 24 24');
+    const rect=doc.createElementNS('http://www.w3.org/2000/svg','rect');rect.setAttribute('x','4');rect.setAttribute('y','4');rect.setAttribute('width','16');rect.setAttribute('height','16');rect.setAttribute('rx','5');rect.setAttribute('fill','none');rect.setAttribute('stroke','#fff');rect.setAttribute('stroke-width','2');node.append(rect);
+    const circle=doc.createElementNS('http://www.w3.org/2000/svg','circle');circle.setAttribute('cx','12');circle.setAttribute('cy','12');circle.setAttribute('r','3.5');circle.setAttribute('fill','none');circle.setAttribute('stroke','#fff');circle.setAttribute('stroke-width','2');node.append(circle);
+    const dot=doc.createElementNS('http://www.w3.org/2000/svg','circle');dot.setAttribute('cx','17.5');dot.setAttribute('cy','6.5');dot.setAttribute('r','1');dot.setAttribute('fill','#fff');node.append(dot);return node;
+  };
 
   const style = el('style'); style.textContent = riffBaseStyles + creatorPipelineStyles;
   const wrapper = el('div', undefined, 'riff-app riff-pipeline riff-menu-scope');
@@ -280,31 +300,17 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const scan = job.kind === 'scan';
     const recommendations = job.kind === 'recommendations';
     const profileScan = scan && job.source_kind === 'profile';
-    const loading = scan && job.source_kind === 'video' ? {
-      title: 'Fetching your video', subtitle: 'Opening your link and loading the available video details.',
-      activity: 'Loading the video and its captions…', done: 'Link received', next: 'Analyzing next',
-      sourceTitle: 'Your video', sourceCopy: 'Loading your linked video…',
-    } : profileScan ? {
-      title: 'Getting to know your profile', subtitle: 'Loading available posts and performance from your profile.',
-      activity: 'Fetching your recent videos…', done: 'Profile found', next: 'Analyzing your content',
-      sourceTitle: undefined, sourceCopy: undefined,
-    } : scan ? {
+    const loading = scan && job.source_kind === 'video'
+      ? (stage==='building_analysis'||stage==='saving'?creatorLoadingVariants.analyzeVideo:creatorLoadingVariants.fetchVideo)
+      : profileScan ? creatorLoadingVariants.profile : scan ? {
       title: 'Fetching your creator content', subtitle: 'Opening your link and loading the available creator details.',
       activity: 'Loading the available creator content…', done: 'Link received', next: 'Analyzing next',
-      sourceTitle: 'Your creator link', sourceCopy: 'Loading your creator content…',
-    } : recommendations ? {
-      title: 'Finding videos for your next idea', subtitle: 'Looking through relevant creators, videos and formats.',
-      activity: 'Comparing hooks and product showcases…', done: 'Your brief is ready', next: 'Choosing matching references',
-      sourceTitle: undefined, sourceCopy: undefined,
-    } : {
-      title: 'Building your filming variants', subtitle: 'Turning your selected direction into a film-ready script.',
-      activity: 'Preparing your script…', done: 'Direction received', next: 'Building Studio',
-      sourceTitle: undefined, sourceCopy: undefined,
-    };
+      preview:'video',sourceTitle: 'Your creator link', sourceCopy: 'Loading your creator content…',
+    } as const : recommendations ? creatorLoadingVariants.discovery : scriptLoading;
     const card = el('section', undefined, 'riff-loading-card');
     const intro = el('div', undefined, 'riff-loading-intro'); const heading = el('h1', loading.title); heading.tabIndex = -1;
     intro.append(heading, el('p', loading.subtitle)); card.append(intro);
-    if (recommendations) {
+    if (loading.preview==='references') {
       const strip = el('div', undefined, 'riff-loading-references'); strip.setAttribute('aria-label', 'Matching reference videos');
       const references=progress.kind==='recommendations'?progress.references:[];
       for (let index = 0; index < 7; index += 1) {
@@ -314,7 +320,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         strip.append(slot);
       }
       card.append(strip);
-    } else if (profileScan) {
+    } else if (loading.preview==='profile') {
       const strip = el('div', undefined, 'riff-loading-references riff-loading-profile');
       strip.setAttribute('aria-label', 'Loading profile and recent videos');
       const scanProgress=progress.kind==='scan'?progress:undefined;
@@ -328,7 +334,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         strip.append(slot);
       }
       card.append(strip);
-    } else if (scan) {
+    } else if (loading.preview==='video') {
       const video = el('div', undefined, 'riff-loading-video');
       const scanProgress=progress.kind==='scan'?progress:undefined;
       const first=scanProgress?.videos[0];
@@ -371,27 +377,22 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     ['Script', 'script', ['structure']], ['CTA', 'cta', ['cta']],
   ];
   const assessmentLabels = {
-    working_well: 'Working well', needs_attention: 'Needs attention', needs_rework: 'Needs rework', unknown: '',
+    working_well: 'Working well', needs_attention: 'Needs attention', needs_rework: 'Needs rework', unknown: 'Limited',
   } as const;
 
-  function analysisRows(dna: CreatorDnaView, suppliedVideo: boolean) {
+  function analysisRows(dna: CreatorDnaView) {
     const stack = el('section', undefined, 'riff-analysis-rows'); stack.setAttribute('aria-label', 'Analysis dimensions');
-    for (const [label, paperDimension, dimensions] of analysisDimensions) {
-      const assessment = suppliedVideo ? dna.seed_review?.dimensions?.find(item => item.dimension === paperDimension) : undefined;
+    for (const [label, paperDimension] of analysisDimensions) {
+      const assessment = dna.seed_review!.dimensions!.find(item => item.dimension === paperDimension)!;
       const row = el('article', undefined, `riff-analysis-row${assessment ? ` riff-analysis-row--${assessment.status.replace('_', '-')}` : ''}`);
       const head = el('div', undefined, 'riff-analysis-row__head'); head.append(el('h2', label));
       const statusLabel = assessment ? assessmentLabels[assessment.status] : '';
       if (statusLabel) head.append(el('span', statusLabel, 'riff-analysis-row__status'));
       row.append(head);
-      const statements = assessment
-        ? [assessment.summary, ...(assessment.recommendation ? [assessment.recommendation] : [])]
-        : suppliedVideo && label === 'Content' && dna.seed_review
-          ? [dna.seed_review.summary]
-          : suppliedVideo ? [] : dna.claims.filter(claim => dimensions.includes(claim.dimension)).map(claim => claim.statement);
-      if (statements.length) {
-        const body = el('div', undefined, 'riff-analysis-row__body');
-        statements.forEach(statement => body.append(el('p', statement))); row.append(body);
-      }
+      const recommendation=assessment.recommendation?.trim();
+      const advice=recommendation&&recommendation.toLocaleLowerCase()!==assessment.summary.trim().toLocaleLowerCase()
+        ? `${assessment.summary.trim()} ${recommendation}`:assessment.summary;
+      const body = el('div', undefined, 'riff-analysis-row__body');body.append(el('p',advice));row.append(body);
       stack.append(row);
     }
     return stack;
@@ -408,10 +409,13 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const evidence = dna.evidence.find(item => item.url === review.url);
     const preview = mediaImage(evidence?.thumbnail_url, 'Video preview', 'riff-media-image'); if (preview) frame.append(preview);
     const play = el('span', undefined, 'riff-play'); play.append(playIcon()); frame.append(play); media.append(frame);
+    if(evidence?.duration_seconds!==null&&evidence?.duration_seconds!==undefined){
+      const seconds=Math.round(evidence.duration_seconds);const duration=el('span',`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`,'riff-analysis-duration');frame.append(duration);
+    }
     if (evidence?.metrics?.views !== null && evidence?.metrics?.views !== undefined) media.append(metric('Views', evidence.metrics.views));
     if (evidence?.metrics?.likes !== null && evidence?.metrics?.likes !== undefined) media.append(metric('Likes', evidence.metrics.likes, 'likes'));
     if (evidence?.metrics?.saves !== null && evidence?.metrics?.saves !== undefined) media.append(metric('Saves', evidence.metrics.saves, 'saves'));
-    const detail = el('div', undefined, 'riff-analysis-detail'); detail.append(analysisRows(dna, true));
+    const detail = el('div', undefined, 'riff-analysis-detail'); detail.append(analysisRows(dna));
     const explore = () => void run(() => options.startRecommendations
       ? options.startRecommendations({ job, dna })
       : sendPrompt('Use the completed Riff analysis to explore viral formats that fit this creator. Do not start new provider work without my explicit confirmation.'));
@@ -444,37 +448,50 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     content.append(card); setStatus('Script feedback available.'); return heading;
   }
 
+  function renderLimitedVideoAnalysis() {
+    screen('partial-analysis');
+    const card=el('section',undefined,'riff-partial-analysis-card');const copy=el('div',undefined,'riff-partial-analysis-copy');
+    const heading=el('h1','This video analysis is limited.');heading.tabIndex=-1;
+    copy.append(heading,el('p','A complete visual review is not available for this video. Try another link or upload the video in chat.'));
+    card.append(copy);content.append(card);setStatus('Complete video analysis unavailable.');return heading;
+  }
+
   function renderProfileAnalysis(job: CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } }) {
     const dna = job.result.dna;
     const summary = dna.profile_summary;
+    const platform=dna.profile.platform;
+    const instagram=platform==='instagram';
+    const profileAnalysis=dna.profile_analysis;
     screen('profile');
-    const { group, heading } = title('Turn what’s working into your next breakout.', 'riff-analysis-title'); content.append(group);
+    const { group, heading } = title(instagram?'Turn your best results into more reach.':'Turn what’s working into your next breakout.', 'riff-analysis-title'); content.append(group);
     const shell = el('section', undefined, 'riff-profile-shell');
     const profile = el('section', undefined, 'riff-profile-card');
     const portrait = el('div', undefined, 'riff-profile-portrait');
     const avatar = el('div', undefined, 'riff-profile-avatar');
     const avatarImage = mediaImage(summary?.avatar_url, summary?.display_name ? `${summary.display_name} profile photo` : 'Creator profile photo', 'riff-media-image');
-    if (avatarImage) {
-      avatar.append(avatarImage);
-      const platform = el('span', undefined, 'riff-profile-platform'); platform.append(tiktokIcon()); avatar.append(platform);
-    } else avatar.append(tiktokIcon());
+    if (avatarImage) avatar.append(avatarImage); else avatar.append(instagram?instagramIcon():tiktokIcon());
+    const badge = el('span', undefined, `riff-profile-platform riff-profile-platform--${platform}`); badge.append(instagram?instagramIcon():tiktokIcon()); avatar.append(badge);
     portrait.append(avatar);
-    const profileMetric = (label: string, value: number) => {
-      const chip = el('div', undefined, 'riff-profile-metric riff-profile-metric--followers');
-      const icon = el('span', undefined, 'riff-profile-metric__icon'); icon.append(peopleIcon());
-      const copy = el('span', undefined, 'riff-profile-metric__copy'); copy.append(el('strong', formatMetric(value)), el('small', label));
+    const profileMetric = (label: string, value: string|number, kind:'followers'|'views'|'engagement') => {
+      const chip = el('div', undefined, `riff-profile-metric riff-profile-metric--${kind}`);
+      const icon = el('span', undefined, 'riff-profile-metric__icon'); icon.append(kind==='followers'?peopleIcon():kind==='views'?eyeIcon('#3567DB'):heartIcon());
+      const copy = el('span', undefined, 'riff-profile-metric__copy'); copy.append(el('strong', typeof value==='number'?formatMetric(value):value), el('small', label));
       chip.append(icon, copy); return chip;
     };
-    if (summary?.follower_count !== null && summary?.follower_count !== undefined) portrait.append(profileMetric('Followers', summary.follower_count));
+    if (summary?.follower_count !== null && summary?.follower_count !== undefined) portrait.append(profileMetric('Followers', summary.follower_count,'followers'));
+    const observed=profileAnalysis?.performance?.observed_views;
+    if(observed)portrait.append(profileMetric('Views',observed.value,'views'));
+    const engagement=profileAnalysis?.performance?.engagement_rate;
+    if(engagement)portrait.append(profileMetric('Engagement',`${new Intl.NumberFormat('en',{maximumFractionDigits:1}).format(engagement.percent)}%`,'engagement'));
     const identityBlock = el('div', undefined, 'riff-profile-identity');
     identityBlock.append(el('strong', summary?.display_name ?? dna.profile.native_id));
     if (summary?.handle) identityBlock.append(el('span', `@${summary.handle.replace(/^@/, '')}`));
     portrait.append(identityBlock);
     profile.append(portrait);
-    const top = dna.evidence.filter(item => item.metrics?.views !== null && item.metrics?.views !== undefined)
-      .sort((a, b) => b.metrics!.views! - a.metrics!.views!).slice(0, 3);
+    const evidenceById=new Map(dna.evidence.map(item=>[item.observation_id,item]));
+    const top=(profileAnalysis?.top_content??[]).map(item=>evidenceById.get(item.observation_id)).filter((item):item is CreatorDnaView['evidence'][number]=>Boolean(item));
     if (top.length) {
-      const group = el('section', undefined, 'riff-profile-top'); group.append(el('h2', 'Top videos'));
+      const group = el('section', undefined, 'riff-profile-top'); group.append(el('h2', instagram?'Top Reels':'Top videos'));
       const videos = el('div', undefined, 'riff-profile-videos');
       top.forEach(item => {
         const media = safeLink(item.url, 'Open top video', 'riff-profile-video');
@@ -484,25 +501,36 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       });
       group.append(videos); profile.append(group);
     }
-    profile.append(el('p', `${dna.coverage.unique_videos} TikTok ${dna.coverage.unique_videos === 1 ? 'video' : 'videos'} reviewed`, 'riff-profile-reviewed'));
+    const noun=instagram?(dna.coverage.unique_videos===1?'Instagram Reel':'Instagram Reels'):(dna.coverage.unique_videos===1?'TikTok video':'TikTok videos');
+    profile.append(el('p', `${dna.coverage.unique_videos} ${noun} reviewed`, 'riff-profile-reviewed'));
     const analysis = el('section', undefined, 'riff-profile-analysis');
-    for (const claim of dna.claims) {
-      const insight = el('article', undefined, 'riff-profile-insight'); insight.append(el('p', claim.statement)); analysis.append(insight);
+    const findings=profileAnalysis?.findings;
+    if(findings){
+      const claims=new Map(dna.claims.map(claim=>[claim.id,claim.statement]));
+      const findingBand=(kind:'working'|'improvement',label:string,statusText:string)=>{
+        const finding=findings[kind];const insight=el('article',undefined,`riff-profile-insight riff-profile-insight--${kind}`);
+        const head=el('header');head.append(el('h2',label),el('span',statusText));const body=el('div',undefined,'riff-profile-insight__body');
+        body.append(el('p',claims.get(finding.claim_id)!),el('p',finding.evidence_summary),el('p',finding.recommendation));insight.append(head,body);return insight;
+      };
+      analysis.append(findingBand('working','What’s working','Working well'),findingBand('improvement','What to improve','Needs attention'));
+      const next = el('article', undefined, 'riff-profile-next');const nextHead=el('header');nextHead.append(el('h2', 'Your next move'));
+      const nextBody=el('div',undefined,'riff-profile-next__body');nextBody.append(el('strong',findings.next_move.title),el('p',findings.next_move.rationale));
+      nextBody.append(button('Find my next breakout idea', 'riff-button riff-button--primary', () => void run(() => options.startRecommendations
+        ? options.startRecommendations({ job, dna })
+        : sendPrompt('Use the completed Riff analysis to explore viral formats that fit this creator. Do not start new provider work without my explicit confirmation.')), 'explore-formats'));
+      next.append(nextHead,nextBody);analysis.append(next);
     }
-    const next = el('article', undefined, 'riff-profile-next'); next.append(el('h2', 'Your next move'));
-    next.append(button('Find my next breakout idea', 'riff-button riff-button--primary', () => void run(() => options.startRecommendations
-      ? options.startRecommendations({ job, dna })
-      : sendPrompt('Use the completed Riff analysis to explore viral formats that fit this creator. Do not start new provider work without my explicit confirmation.')), 'explore-formats'));
-    analysis.append(next); shell.append(profile, analysis); content.append(shell);
+    shell.append(profile, analysis); content.append(shell);
     setStatus('Creator analysis shown.'); return heading;
   }
 
   function renderAnalysis(job: CreatorJobView & { result: { kind: 'scan'; dna: CreatorDnaView } }) {
     const dna = job.result.dna;
-    if (dna.seed_review?.access_basis === 'transcript_or_caption_only') return renderPartialVideoAnalysis(job);
+    const isVideo=job.source_kind==='video';
+    if (isVideo&&dna.seed_review?.access_basis === 'transcript_or_caption_only') return renderPartialVideoAnalysis(job);
     if (mode === 'inline') {
       content.className = 'riff-pipeline__content riff-inline-result';
-      const headingText = dna.seed_review ? 'Video analysis' : 'Creator analysis';
+      const headingText = isVideo ? 'Video analysis' : 'Creator analysis';
       const { group, heading } = title(headingText); content.append(group, actions(
         button('Open analysis', 'riff-button riff-button--primary', () => void run(requestFullscreen), 'open-analysis'),
         button('Explore viral formats', 'riff-button', () => void run(() => options.startRecommendations
@@ -511,7 +539,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       ));
       setStatus(`${headingText} ready.`); return heading;
     }
-    return dna.seed_review ? renderVideoAnalysis(job) : renderProfileAnalysis(job);
+    if(!isVideo)return renderProfileAnalysis(job);
+    const dimensions=dna.seed_review?.dimensions;
+    const complete=dna.seed_review?.access_basis==='video_access_reported'&&dimensions?.length===6&&new Set(dimensions.map(item=>item.dimension)).size===6;
+    return complete?renderVideoAnalysis(job):renderLimitedVideoAnalysis();
   }
 
   const referenceFor = (idea: RecommendationResult['batch']['ideas'][number], references: Map<string, PipelineReference>) =>

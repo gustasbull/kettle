@@ -105,6 +105,20 @@ test('display validator rejects the remaining bounded DNA mutations accepted by 
   }
 });
 
+test('display validator accepts a strict profile analysis projection and rejects broken lineage',()=>{
+  const valid=structuredClone(envelope('scan'));
+  assert.ok(parseCreatorJobOutput(valid));
+  const unknownEvidence=structuredClone(valid) as any;
+  unknownEvidence.data.job.result.dna.profile_analysis.top_content[0].observation_id=id(999);
+  assert.equal(parseCreatorJobOutput(unknownEvidence),undefined);
+  const rankGap=structuredClone(valid) as any;
+  rankGap.data.job.result.dna.profile_analysis.top_content[0].rank=2;
+  assert.equal(parseCreatorJobOutput(rankGap),undefined);
+  const extra=structuredClone(valid) as any;
+  extra.data.job.result.dna.profile_analysis.performance.observed_views.secret='private';
+  assert.equal(parseCreatorJobOutput(extra),undefined);
+});
+
 test('recommendation reference pairing, identity, lineage and fixture disclosure match the server contract',()=>{
   const cases:Array<[string,(job:any)=>void]>=[
     ['multiplier without basis',job=>{job.result.batch.references[0].view_multiplier=2;}],

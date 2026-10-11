@@ -16,5 +16,6 @@ export function creatorScriptsFixture(){
 export function creatorJobFixture(kind:'scan'|'recommendations'|'scripts'='recommendations'){
  const dna=creatorDnaViewFixture();
  return CreatorJobView.parse({id:id(620),project_id:dna.project_id,revision:2,kind,state:'succeeded',stage:'saving',progress:emptyCreatorJobProgress(kind),created_at:dna.created_at,updated_at:dna.created_at,message:null,
+ ...(kind==='scan'?{source_kind:'profile' as const}:{}),
  result:kind==='scan'?{kind,dna}:kind==='recommendations'?{kind,batch:recommendationBatchFixture()}:{kind,scripts:creatorScriptsFixture()}});
 }

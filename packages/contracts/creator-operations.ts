@@ -20,6 +20,28 @@ export const CreatorEvidenceView = z.strictObject({
     comments: z.number().int().nonnegative().nullable(), shares: z.number().int().nonnegative().nullable(),
     saves: z.number().int().nonnegative().nullable().optional() }).nullable(),
 });
+const ProfileAnalysisMetric = z.strictObject({
+  value: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  sample_size: z.number().int().positive().max(50),
+  basis: z.literal('sum_observed_post_views'),
+});
+const ProfileEngagementMetric = z.strictObject({
+  percent: z.number().finite().nonnegative(), sample_size: z.number().int().positive().max(50),
+  basis: z.literal('engagements_divided_by_views'),
+});
+const ProfileFinding = z.strictObject({
+  claim_id: Id, evidence_summary: z.string().trim().min(1).max(3000), recommendation: z.string().trim().min(1).max(3000),
+});
+const ProfileAnalysis = z.strictObject({
+  performance: z.strictObject({ observed_views: ProfileAnalysisMetric.optional(), engagement_rate: ProfileEngagementMetric.optional() }).optional(),
+  top_content: z.array(z.strictObject({
+    observation_id: Id, rank: z.union([z.literal(1), z.literal(2), z.literal(3)]), basis: z.literal('observed_views'),
+  })).min(1).max(3).optional(),
+  findings: z.strictObject({
+    working: ProfileFinding, improvement: ProfileFinding,
+    next_move: z.strictObject({ title: z.string().trim().min(1).max(3000), rationale: z.string().trim().min(1).max(3000), claim_ids: z.array(Id).min(1).max(100) }),
+  }).optional(),
+});
 export const CreatorDnaView = z.strictObject({
   dna_id: Id, project_id: Id, snapshot_id: Id, profile: CreatorIdentity,
   version: z.number().int().positive(), created_at: Timestamp,
@@ -30,6 +52,7 @@ export const CreatorDnaView = z.strictObject({
     handle: z.string().trim().min(1).max(100), display_name: z.string().max(500).nullable(),
     follower_count: z.number().int().nonnegative().nullable(), avatar_url: TikTokImageUrl.optional(),
   }).optional(),
+  profile_analysis: ProfileAnalysis.optional(),
   requested_videos: z.number().int().positive(), coverage_limited: z.boolean(),
   claims: CreatorDnaSnapshot.shape.claims,
   seed_review: z.strictObject({url:LightreelSeedReview.shape.url,provider:LightreelSeedReview.shape.provider,
@@ -39,6 +62,26 @@ export const CreatorDnaView = z.strictObject({
   evidence: z.array(CreatorEvidenceView).max(170),
   withheld_claim_count: z.number().int().nonnegative(),
   limitations: z.array(z.string().max(1000)).max(61),
+}).superRefine((view, ctx) => {
+  const analysis = view.profile_analysis; if (!analysis) return;
+  for (const sample of [analysis.performance?.observed_views, analysis.performance?.engagement_rate]) {
+    if (sample && sample.sample_size > view.coverage.unique_videos) ctx.addIssue({ code: 'custom', message: 'Profile analysis sample exceeds coverage' });
+  }
+  if (analysis.top_content) {
+    const evidence = new Map(view.evidence.map(item => [item.observation_id, item]));
+    if (new Set(analysis.top_content.map(item => item.observation_id)).size !== analysis.top_content.length ||
+      analysis.top_content.some((item, index) => item.rank !== index + 1 || evidence.get(item.observation_id)?.metrics?.views == null)) {
+      ctx.addIssue({ code: 'custom', message: 'Top content must be contiguous observed public evidence' });
+    }
+  }
+  if (analysis.findings) {
+    const claimIds = new Set(view.claims.map(claim => claim.id));
+    const nextIds = analysis.findings.next_move.claim_ids;
+    if (!claimIds.has(analysis.findings.working.claim_id) || !claimIds.has(analysis.findings.improvement.claim_id) ||
+      new Set(nextIds).size !== nextIds.length || nextIds.some(id => !claimIds.has(id))) {
+      ctx.addIssue({ code: 'custom', message: 'Profile findings must cite public claims' });
+    }
+  }
 });
 export const GetCreatorDnaOutput = result(z.strictObject({ dna: CreatorDnaView }));
 export const CorrectCreatorDnaOutput = result(z.strictObject({ dna: CreatorDnaView, request_id: Id }));

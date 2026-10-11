@@ -29,6 +29,28 @@ export function projectCreatorDna(stored: StoredCreatorAnalysis): CreatorDnaView
     const seedObservation=scan.video_observations.find(observation=>observation.canonical_url===review.url&&allowed.has(observation.id));
     if(seedObservation)referenced.add(seedObservation.id);
   }
+  // A supplied-video result exposes only its matching seed evidence. Profile-wide
+  // aggregates are projected only for a profile analysis, never as a side effect.
+  const measuredVideos=review?[]:scan.video_observations.filter(observation=>allowed.has(observation.id)&&observation.metrics.views!==null);
+  const ranked=[...measuredVideos].sort((left,right)=>right.metrics.views!-left.metrics.views!||left.id.localeCompare(right.id)).slice(0,3);
+  ranked.forEach(observation=>referenced.add(observation.id));
+  const observedViews=measuredVideos.reduce<number|undefined>((total,observation)=>{
+    if(total===undefined)return undefined;
+    const next=total+observation.metrics.views!;return Number.isSafeInteger(next)?next:undefined;
+  },0);
+  const engagementVideos=measuredVideos.filter(observation=>observation.metrics.likes!==null&&observation.metrics.comments!==null&&observation.metrics.shares!==null);
+  const engagementViews=engagementVideos.reduce((total,observation)=>total+observation.metrics.views!,0);
+  const engagements=engagementVideos.reduce((total,observation)=>total+observation.metrics.likes!+observation.metrics.comments!+observation.metrics.shares!,0);
+  const engagementPercent=Number.isSafeInteger(engagementViews)&&Number.isSafeInteger(engagements)&&engagementViews>0
+    ? engagements/engagementViews*100:undefined;
+  const performance={
+    ...(measuredVideos.length&&observedViews!==undefined?{observed_views:{value:observedViews,sample_size:measuredVideos.length,basis:'sum_observed_post_views' as const}}:{}),
+    ...(engagementVideos.length&&engagementPercent!==undefined&&Number.isFinite(engagementPercent)?{engagement_rate:{percent:engagementPercent,sample_size:engagementVideos.length,basis:'engagements_divided_by_views' as const}}:{}),
+  };
+  const profileAnalysis=Object.keys(performance).length||ranked.length?{
+    ...(Object.keys(performance).length?{performance}:{}),
+    ...(ranked.length?{top_content:ranked.map((observation,index)=>({observation_id:observation.id,rank:(index+1) as 1|2|3,basis:'observed_views' as const}))}:{}),
+  }:undefined;
   return CreatorDnaView.parse({
     dna_id: stored.dna_id, project_id: stored.project_id, snapshot_id: dna.id, profile: dna.profile,
     version: dna.version, created_at: dna.created_at, source_scan_id: scan.id, scan_status: scan.status,
@@ -36,6 +58,7 @@ export function projectCreatorDna(stored: StoredCreatorAnalysis): CreatorDnaView
     contains_fixture_data: observations.some(o => o.provenance.origin === 'fixture') || review?.provenance.origin==='fixture',
     ...(profileObservation?{profile_summary:{handle:profileObservation.handle,display_name:profileObservation.display_name,
       follower_count:profileObservation.follower_count,...(profileObservation.avatar_url?{avatar_url:profileObservation.avatar_url}:{})}}:{}),
+    ...(profileAnalysis?{profile_analysis:profileAnalysis}:{}),
     ...(reviewVisible?{seed_review:{url:review.url,provider:review.provider,summary:review.summary,access_basis:review.access_basis,
       ...(review.dimensions?{dimensions:review.dimensions}:{}),
       limitations:review.limitations,retrieved_at:review.provenance.retrieved_at,origin:review.provenance.origin}}:{}),

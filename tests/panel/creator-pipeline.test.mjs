@@ -8,9 +8,10 @@ const internalWorkflowLanguage = /\b(?:creator job|recommendation batch|DNA(?: I
 
 test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted data only', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
-    import { mountCreatorPipeline } from './apps/panel/creator-pipeline/index.ts';
+    import { mountCreatorPipeline, creatorLoadingVariants } from './apps/panel/creator-pipeline/index.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.actions=[]; window.fullscreen=[]; window.connectedActions=[]; window.discoveryLoads=[];
+    window.creatorLoadingVariants=creatorLoadingVariants;
     window.boot=(scenario='scan',mode='fullscreen')=>{
       window.view?.dispose();
       window.view=mountCreatorPipeline(document.getElementById('root'),{
@@ -91,12 +92,25 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('heading', { name: 'Fetching your video' }).count(), 1);
     assert.match(await root.textContent(), /Opening your link and loading the available video details\.|Your video|Loading your linked video…|Link received|Analyzing next/);
     assert.equal(await root.locator('.riff-loading-video').count(), 1);
+    await page.evaluate(() => { window.job.stage='building_analysis'; window.view.render(window.job); });
+    assert.equal(await root.getByRole('heading', { name: 'Analyzing your video' }).count(), 1);
+    assert.match(await root.textContent(), /Reviewing the opening, delivery and call to action\.|Hook · Content · Pacing · Voice · CTA|Analyzing hooks and pacing…|Video fetched|Preparing your analysis/);
+    assert.equal(await page.evaluate(() => window.creatorLoadingVariants.product.title), 'Understanding your product');
+    assert.equal(await page.evaluate(() => window.creatorLoadingVariants.product.preview), 'none');
     await page.evaluate(() => { window.job.source_kind = 'profile'; window.view.render(window.job); });
     assert.equal(await root.getByRole('heading', { name: 'Getting to know your profile' }).count(), 1);
     assert.match(await root.textContent(), /Loading available posts and performance from your profile\.|Fetching your recent videos…|Profile found|Analyzing your content/);
     assert.equal(await root.locator('.riff-loading-profile__avatar').count(), 1);
     assert.equal(await root.locator('.riff-loading-profile .riff-loading-reference').count(), 6);
     assert.equal(await root.locator('.riff-loading-video').count(), 0);
+    assert.deepEqual(await root.locator('.riff-loading-card').evaluate(node=>{const style=getComputedStyle(node);return {width:style.width,padding:style.padding,radius:style.borderRadius,gap:style.gap};}),
+      {width:'540px',padding:'22px',radius:'20px',gap:'18px'});
+    assert.equal(await root.locator('.riff-loading-activity').evaluate(node=>getComputedStyle(node).color),'rgb(105, 51, 161)');
+    assert.equal(await root.locator('.riff-progress').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 243, 247)');
+    await page.emulateMedia({reducedMotion:'reduce'});
+    assert.equal(await root.locator('.riff-loading-spinner').evaluate(node=>getComputedStyle(node).animationName),'none');
+    assert.equal(await root.locator('.riff-progress').evaluate(node=>getComputedStyle(node,'::after').animationName),'none');
+    await page.emulateMedia({reducedMotion:'no-preference'});
     await page.evaluate(() => show('failed'));
     assert.equal(await root.getByRole('button', { name: /retry|refresh/i }).count(), 0);
     await page.evaluate(() => show('needs_reconciliation'));
@@ -223,6 +237,8 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.getByRole('button', { name: 'Explore viral formats' }).count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Create a video' }).count(), 0);
     assert.ok(await root.locator('svg path[d="M3 1 11 6 3 11Z"]').count() >= 1, 'Paper play icon is present');
+    assert.equal(await root.locator('.riff-analysis-duration').textContent(),'0:12');
+    assert.equal(await root.getByText('Limited',{exact:true}).count(),1);
 
     await page.evaluate(() => {
       const dimensions = [
@@ -246,6 +262,9 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(await root.getByRole('heading', { name: 'Hook', exact: true }).locator('xpath=../..').textContent(), /Open with the result/);
     assert.match(await root.locator('.riff-analysis-media').textContent(), /Saves/);
     assert.doesNotMatch(await root.locator('.riff-analysis-media').textContent(), /Shares/);
+    await page.evaluate(()=>show('video-analysis-incomplete'));
+    assert.equal(await root.locator('.riff-analysis-row').count(),0);
+    assert.equal(await root.getByRole('heading',{name:'This video analysis is limited.'}).count(),1);
   });
 
   await t.test('transcript-only video analysis uses the exact Paper partial-analysis card and safe handoff', async () => {
@@ -274,7 +293,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
         minHeight: style.minHeight, fontSize: style.fontSize, lineHeight: style.lineHeight,
         backgroundImage: style.backgroundImage, borderWidth: style.borderWidth,
       };
-    }), { minHeight: '44px', fontSize: '16px', lineHeight: '24px', backgroundImage: 'none', borderWidth: '0px' });
+    }), { minHeight: '44px', fontSize: '16px', lineHeight: '24px', backgroundImage: 'radial-gradient(circle at 50% 45%, oklab(0.461 0.087 -0.206) 0%, oklab(0.507 0.09 -0.203) 55%, oklab(0.617 0.089 -0.17) 100%), none', borderWidth: '1px' });
     assert.equal(await root.locator('.riff-pipeline__content').getByRole('button').count(), 1);
     assert.equal(await root.locator('.riff-analysis-card, .riff-inline-result').count(), 0);
     assert.doesNotMatch(await card.textContent(), /Partial analysis|transcript only|Provider|Limitations|DNA|Open analysis|Explore viral formats/i);
@@ -292,6 +311,10 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.locator('.riff-profile-card').count(), 1);
     assert.equal(await root.locator('.riff-profile-analysis').count(), 1);
     assert.equal(await root.getByRole('button', { name: 'Find my next breakout idea' }).count(), 1);
+    assert.equal(await root.getByRole('heading',{name:'What’s working',exact:true}).count(),1);
+    assert.equal(await root.getByRole('heading',{name:'What to improve',exact:true}).count(),1);
+    assert.equal(await root.getByRole('heading',{name:'Your next move',exact:true}).count(),1);
+    assert.match(await root.locator('.riff-profile-card').textContent(),/Views/);
     assert.equal(await root.getByRole('button', { name: 'Rework this video' }).count(), 0);
     assert.equal(await root.getByRole('heading', { name: 'Top videos' }).count(), 1,
       'the approved Paper heading is retained');
@@ -316,6 +339,17 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.match(message, /explore viral formats/i);
     assert.doesNotMatch(message, internalUuid);
     assert.doesNotMatch(message, internalWorkflowLanguage);
+
+    await page.evaluate(()=>show('instagram-profile'));
+    assert.equal(await root.getByRole('heading',{name:'Turn your best results into more reach.'}).count(),1);
+    assert.match(await root.locator('.riff-profile-reviewed').textContent(),/^\d+ Instagram Reels? reviewed$/);
+    assert.equal(await root.getByRole('heading',{name:'Top Reels'}).count(),1);
+    assert.equal(await root.locator('.riff-profile-platform--instagram').count(),1);
+
+    await page.evaluate(()=>{window.job.result.dna.profile_analysis=undefined;window.view.render(window.job);});
+    assert.equal(await root.getByRole('heading',{name:'Top Reels'}).count(),0);
+    assert.equal(await root.locator('.riff-profile-insight,.riff-profile-next').count(),0);
+    assert.equal(await root.getByText('Views',{exact:true}).count(),0);
   });
 
   await t.test('inline Analysis remains a compact host handoff without duplicate branding', async () => {

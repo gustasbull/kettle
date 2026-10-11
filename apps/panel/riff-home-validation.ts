@@ -174,8 +174,40 @@ function dnaClaim(value: unknown) {
     || item.evidence.some(entry => object(entry)?.modality === 'video'));
 }
 
+function profileAnalysis(value:unknown,coverageCount:number,claims:JsonObject[],evidenceItems:JsonObject[]){
+  const item=shape(value,[],['performance','top_content','findings']);if(!item)return false;
+  const performance=item.performance===undefined?undefined:shape(item.performance,[],['observed_views','engagement_rate']);
+  if(item.performance!==undefined&&!performance)return false;
+  const observed=performance?.observed_views===undefined?undefined:shape(performance.observed_views,['value','sample_size','basis']);
+  const engagement=performance?.engagement_rate===undefined?undefined:shape(performance.engagement_rate,['percent','sample_size','basis']);
+  if(performance?.observed_views!==undefined&&(!observed||!integer(observed.value)||!Number.isSafeInteger(observed.value)
+    ||!Number.isSafeInteger(observed.sample_size)||Number(observed.sample_size)<=0||Number(observed.sample_size)>coverageCount||observed.basis!=='sum_observed_post_views'))return false;
+  if(performance?.engagement_rate!==undefined&&(!engagement||!number(engagement.percent)
+    ||!Number.isSafeInteger(engagement.sample_size)||Number(engagement.sample_size)<=0||Number(engagement.sample_size)>coverageCount||engagement.basis!=='engagements_divided_by_views'))return false;
+  const evidenceById=new Map(evidenceItems.map(entry=>[entry.observation_id,entry]));
+  if(item.top_content!==undefined){
+    if(!list(item.top_content,3,candidate=>{
+      const rank=shape(candidate,['observation_id','rank','basis']);
+      const evidenceItem=rank&&evidenceById.get(rank.observation_id);
+      const evidenceMetrics=evidenceItem&&object(evidenceItem.metrics);
+      return !!rank&&id(rank.observation_id)&&[1,2,3].includes(Number(rank.rank))&&rank.basis==='observed_views'&&integer(evidenceMetrics?.views);
+    },1))return false;
+    const ranked=item.top_content as JsonObject[];
+    if(!unique(ranked,entry=>entry.observation_id)||ranked.some((entry,index)=>entry.rank!==index+1))return false;
+  }
+  if(item.findings!==undefined){
+    const findings=shape(item.findings,['working','improvement','next_move']);if(!findings)return false;
+    const claimIds=new Set(claims.map(claim=>claim.id));
+    const finding=(candidate:unknown)=>{const entry=shape(candidate,['claim_id','evidence_summary','recommendation']);return !!entry&&id(entry.claim_id)&&claimIds.has(entry.claim_id)&&text(entry.evidence_summary,3000)&&text(entry.recommendation,3000);};
+    const next=shape(findings.next_move,['title','rationale','claim_ids']);
+    if(!finding(findings.working)||!finding(findings.improvement)||!next||!text(next.title,3000)||!text(next.rationale,3000)
+      ||!idList(next.claim_ids,100,1)||!unique(next.claim_ids as unknown[],value=>value)||(next.claim_ids as unknown[]).some(value=>!claimIds.has(value)))return false;
+  }
+  return true;
+}
+
 function creatorDna(value: unknown) {
-  const item = shape(value, ['dna_id','project_id','snapshot_id','profile','version','created_at','source_scan_id','scan_status','coverage','contains_fixture_data','requested_videos','coverage_limited','claims','evidence','withheld_claim_count','limitations'], ['profile_summary','seed_review']); if (!item) return false;
+  const item = shape(value, ['dna_id','project_id','snapshot_id','profile','version','created_at','source_scan_id','scan_status','coverage','contains_fixture_data','requested_videos','coverage_limited','claims','evidence','withheld_claim_count','limitations'], ['profile_summary','profile_analysis','seed_review']); if (!item) return false;
   const coverage = shape(item.coverage, ['unique_videos','oldest_published_at','newest_published_at']); const profile = shape(item.profile, ['platform','native_id']);
   const summary = item.profile_summary === undefined ? undefined : shape(item.profile_summary, ['handle','display_name','follower_count'], ['avatar_url']);
   return id(item.dna_id) && id(item.project_id) && id(item.snapshot_id) && identity(profile)
@@ -190,6 +222,7 @@ function creatorDna(value: unknown) {
     && typeof item.coverage_limited === 'boolean' && list(item.claims, 100, dnaClaim)
     && unique(item.claims, claim => object(claim)?.id)
     && optional(item, 'seed_review', seedReview) && list(item.evidence, 170, evidence)
+    && optional(item,'profile_analysis',candidate=>profileAnalysis(candidate,Number(coverage.unique_videos),item.claims as JsonObject[],item.evidence as JsonObject[]))
     && integer(item.withheld_claim_count) && list(item.limitations, 61,
       candidate => typeof candidate === 'string' && candidate.length <= 1_000);
 }
