@@ -79,6 +79,8 @@ test('owned succeeded script and persisted variant lineage precede receipt inspe
 });
 
 test('v7 and uppercase stored variant IDs reconcile semantically through mutation and full projection',async()=>{
+  const storedVariant=await db.query<{id:string}>("select result#>>'{scripts,variants,2,id}' id from public.creator_jobs where id=$1",[job]);
+  assert.equal(storedVariant.rows[0]?.id,variantV7Upper,'the projection fixture must retain the noncanonical source casing');
   const saved=await rpc(mutation('saved',0,request(32),variantV7));
   assert.equal(saved.ok,true);assert.equal(saved.data.work_state.variant_id,variantV7);
   const full=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_get_creator_job($1::uuid,$2::jsonb) value',[accountA,JSON.stringify({job_id:job})])).rows[0]!.value;});
@@ -102,12 +104,29 @@ test('service role direct DML is denied while owner-level event/receipt rewrites
   await assert.rejects(db.exec('delete from public.riff_work_state_receipts'),/append-only/i);
 });
 
-test('owner-level receipt inserts reject missing or string success booleans',async()=>{
-  const insert=(requestId:string,output:unknown)=>db.query(
+test('owner-level receipt inserts require one exact, typed, correlated successful work-state value',async()=>{
+  const insert=(requestId:string,output:unknown,variantId=variantV7)=>db.query(
     'insert into public.riff_work_state_receipts(account_id,request_id,job_id,variant_id,input,output) values($1,$2,$3,$4,$5::jsonb,$6::jsonb)',
-    [accountA,requestId,job,variantA,'{}',JSON.stringify(output)]);
-  await assert.rejects(insert(request(50),{ok:'true',data:{work_state:{}}}),/check constraint/i);
-  await assert.rejects(insert(request(51),{ok:true}),/check constraint/i);
+    [accountA,requestId,job,variantId,'{}',JSON.stringify(output)]);
+  const valid={job_id:job,variant_id:variantV7Upper,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
+  const receipt=(workState:unknown)=>({ok:true,data:{work_state:workState}});
+  const invalid=[
+    {ok:'true',data:{work_state:valid}},
+    {ok:true},
+    receipt({}),
+    receipt({...valid,secret:'accepted'}),
+    receipt({...valid,job_id:1}),
+    receipt({...valid,variant_id:false}),
+    receipt({...valid,state:'archived'}),
+    receipt({...valid,version:'1'}),
+    receipt({...valid,updated_at:1}),
+    receipt({...valid,updated_at:'not-a-timestamp'}),
+    receipt({...valid,job_id:foreignJob}),
+    receipt({...valid,variant_id:variantB}),
+  ];
+  for(const [index,output] of invalid.entries())
+    await assert.rejects(insert(request(50+index),output),/check constraint/i,JSON.stringify(output));
+  await assert.doesNotReject(insert(request(70),receipt(valid)));
 });
 
 test('full-job and recent reads are additive, ordered, owner-scoped and redacted',async()=>{

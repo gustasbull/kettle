@@ -13,6 +13,7 @@ import { createCreatorPipelineProvider } from '../packages/adapters/creator-pipe
 import { providerHttpFixture } from '../evals/creator-loop/provider-http-fixtures.ts';
 
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const canonicalV7='018f3e12-9abc-7def-8abc-1234567890ab',uppercaseV7=canonicalV7.toUpperCase();
 function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}
 async function waitFor(check:()=>boolean){while(!check())await new Promise<void>(resolve=>setTimeout(resolve,1));}
 const account=id(800), request=id(801);
@@ -168,6 +169,23 @@ test('repository identity, request, project and kind mismatches never dispatch',
     if(field==='kind')job.kind='scripts';else job[field]=id(999);
     const h=harness(job);assert.equal(code(await h.operations.execute(operation,'token',input(operation))),'UNAVAILABLE');assert.equal(h.dispatches.length,0);
   }
+});
+
+test('full creator-job read compares a valid uppercase UUIDv7 semantically and preserves the authoritative ID',async()=>{
+  const job=stored();job.id=canonicalV7;
+  const operations=createPipelineOperations(identity,{async call(){return wrapped(job);}},async()=>assert.fail('read dispatched'));
+  const result=await operations.execute('get_creator_job','token',{job_id:uppercaseV7});
+  if(!result.ok||!('job' in result.data))assert.fail('expected a full creator-job response');
+  assert.equal(result.data.job.id,canonicalV7);
+});
+
+test('creator-job status read compares a valid uppercase UUIDv7 semantically and preserves the authoritative ID',async()=>{
+  const job=stored('recommendations','running');job.id=canonicalV7;
+  const status=publicCreatorJobStatus(job);
+  const operations=createPipelineOperations(identity,{async call(){return {ok:true,data:{status}};}},async()=>assert.fail('read dispatched'));
+  const result=await operations.execute('get_creator_job_status','token',{job_id:uppercaseV7});
+  if(!result.ok||!('status' in result.data))assert.fail('expected a creator-job status response');
+  assert.equal(result.data.status.id,canonicalV7);
 });
 
 test('malformed repository public state fails before dispatch',async()=>{

@@ -22,6 +22,11 @@ The review-hardening round added tests first and observed these additional failu
 - Creator component acceptance passed 16/18 and Home component acceptance passed 3/4 before honest Open vault results and saved-card focus existed. The focused Home bridge lifecycle test passed 0/1 before mutation-driven recent refresh and explicit controller reset/reopen behavior were implemented.
 - The new controller UUIDv7 case-identity test passed 0/1 before UUID identity comparisons were made semantic.
 
+The second review-hardening round also followed RED first:
+
+- The focused application/database run passed 55/58. Both `get_creator_job` and `get_creator_job_status` returned misleading `UNAVAILABLE` results when a valid uppercase UUIDv7 input met the repository's canonical lowercase ID, and a direct PGlite insert accepted an empty successful receipt work state.
+- The receipt regression additionally probes unknown fields, every required field's JSON type, allowed state, integral version bounds, ISO timestamp parsing, job/variant correlation, and one valid semantically correlated uppercase UUIDv7 receipt.
+
 GREEN evidence on the final tree:
 
 - `npx tsx --test tests/riff-work-state-client.test.ts tests/riff-work-state-database.test.ts tests/riff-work-state-mcp.test.ts`: 21/21 passed.
@@ -31,9 +36,10 @@ GREEN evidence on the final tree:
 - `node --test tests/panel/riff-home.test.mjs`: 4/4 passed, including embedded saved-card focus.
 - `node --test tests/panel/riff-home-bridge.test.mjs`: 17/17 passed, including the save/Undo/filmed recent-state lifecycle and failed recent-refresh reporting.
 - The focused review matrix therefore passed 153/153.
+- The second-round application/contracts/database/MCP matrix passed 72/72; its direct application/database RED reproduction then passed 58/58 after the fix.
 - `npm run typecheck`: exit 0.
 - `npm run test:db`: 13/13 passed.
-- `npm run check`: exit 0. TypeScript and browser-safe bundles passed; the main test run passed 562/562; dry-run build and smoke passed; browser run passed 100/100.
+- `npm run check`: exit 0. TypeScript and browser-safe bundles passed; the main test run passed 564/564; dry-run build and smoke passed; browser run passed 100/100.
 - `git diff --check`: exit 0.
 
 The PGlite migration tests exercise the real ordered migration files and transactional rollback, but PGlite does not prove multi-connection contention behavior in hosted Postgres.
@@ -47,7 +53,7 @@ The Task 7 migration, `supabase/migrations/20261011091046_riff_work_state.sql`, 
 - Receipt inspection occurs only after active-account, owned succeeded-script job, valid stored result, and real persisted variant lineage checks. Foreign, guessed, unfinished, non-script, or malformed lineage returns `NOT_FOUND` without receipt disclosure.
 - Initial `active` is rejected. First `saved`/`filmed` creates version 1; later distinct transitions require the exact current version. Exact receipt replay remains byte-semantically equal after later transitions. A different valid-owned payload using the request ID returns `IDEMPOTENCY_CONFLICT`.
 - Projection, event, and receipt writes occur inside one security-definer call. An injected receipt trigger failure returns `UNAVAILABLE`, rolls back projection/event, and permits an exact same-ID retry.
-- Events and receipts have complete account/job/projection relationships, state/version checks, request uniqueness, strict JSON object/size/boolean-success/nested-work-state checks, RLS, and append-only owner-level triggers. The complete receipt predicate must evaluate `TRUE`, so missing paths cannot pass through SQL `NULL`. Client roles receive no access. `service_role` receives projection SELECT plus RPC EXECUTE only and is separately proven unable to perform direct DML.
+- Events and receipts have complete account/job/projection relationships, state/version checks, request uniqueness, RLS, and append-only owner-level triggers. A dedicated immutable receipt predicate requires exact `{ok,data}` / `{work_state}` / five-field work-state keys, boolean success, explicit non-null JSON types, allowed state, bounded integral version, a parseable ISO offset timestamp, and UUID-semantic correlation to the receipt's job/variant columns. The predicate must evaluate `TRUE`, so missing paths cannot pass through SQL `NULL`. Client roles receive no access. `service_role` receives projection SELECT plus RPC EXECUTE only and is separately proven unable to perform direct DML.
 - Public/application projections expose only strict `work_states`; account IDs, event rows, receipt input/output, request IDs, and the service credential are not forwarded to public creator-job or recent-work views.
 - Stored UUID variants are compared as UUID values after syntax validation, and full-job projections emit the canonical persisted UUID from the work-state row. Uppercase stored UUIDv7 values therefore reconcile without weakening lineage checks.
 - Account identity is derived solely by the trusted verifier. The repository calls one fixed service-role RPC and never accepts account ownership from tool input.
@@ -55,6 +61,7 @@ The Task 7 migration, `supabase/migrations/20261011091046_riff_work_state.sql`, 
 ## Application, MCP, and UI
 
 - Added cycle-free work-state contracts, verified application operation, and fixed Supabase adapter.
+- Creator full/status reads retain strict Zod UUID validation, compare validated repository identities semantically across UUID casing, and return the repository's authoritative ID unchanged. Adjacent account/project/request and loaded-job identity checks use the same semantic comparison without accepting malformed identifiers.
 - Added `riffWorkStateOperations` to runtime composition, capability-keyed descriptor catalogs, registration, listing, and dispatch. Advertisement and handler availability share the same capability bit.
 - `StoredCreatorJob` and `CreatorJobView` default historical `work_states` to `[]`; `publicCreatorJob` forwards the field explicitly. Recent work defaults `variant_id` and `work_state` to null. Both browser validators enforce exact public keys and semantic UUID job/variant lineage. The shared legacy display parser now clones and normalizes an omitted historical `work_states` field to `[]` without mutating transport input or accepting extra keys.
 - Both bridges use one strict browser-safe mutation client. It accepts only a real `CallToolResult` wrapper, rejects direct inner values plus accessor, symbol, hidden, and extra properties, and requires the complete public success or failure shape. It retains the complete input and request ID across ambiguous retry, discards intent on conflict and rereads truth, accepts success only after a strict receipt and matching full `get_creator_job`, refreshes newer truth on an old successful replay, and invalidates late work across account/job/variant/teardown boundaries.
@@ -87,4 +94,4 @@ Updated the creator-job/recent contracts and projections, worker auth/MCP catalo
 - Hosted multi-connection contention remains unproved by PGlite and should be exercised in Stage 2 Postgres verification.
 - Exact Paper node inspection was blocked by file permissions; the supplied audited node evidence is recorded above.
 
-Initial commit: `feat: persist Riff work state`. Review hardening commit: `fix: harden Riff work state lifecycle` (hashes recorded in the integration handoff).
+Initial commit: `feat: persist Riff work state`. Review hardening commits: `fix: harden Riff work state lifecycle` and `fix: canonicalize creator job identifiers` (hashes recorded in the integration handoff).

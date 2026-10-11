@@ -28,16 +28,41 @@ create table public.riff_work_state_events (
     or (version>1 and from_state is not null and from_state<>to_state))
 );
 
+create function public.kettle_riff_work_state_receipt_valid(p_output jsonb,p_job_id uuid,p_variant_id uuid)
+returns boolean language plpgsql immutable security invoker set search_path='' as $$
+declare v_work_state jsonb:=p_output#>'{data,work_state}';v_version numeric;
+begin
+  if octet_length(p_output::text)>16384
+    or public.kettle_jsonb_exact_keys(p_output,array['ok','data']) is not true
+    or p_output->'ok' is distinct from 'true'::jsonb
+    or public.kettle_jsonb_exact_keys(p_output->'data',array['work_state']) is not true
+    or public.kettle_jsonb_exact_keys(v_work_state,array['job_id','variant_id','state','version','updated_at']) is not true
+    or jsonb_typeof(v_work_state->'job_id') is distinct from 'string'
+    or jsonb_typeof(v_work_state->'variant_id') is distinct from 'string'
+    or jsonb_typeof(v_work_state->'state') is distinct from 'string'
+    or jsonb_typeof(v_work_state->'version') is distinct from 'number'
+    or jsonb_typeof(v_work_state->'updated_at') is distinct from 'string'
+    or v_work_state->>'job_id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+    or v_work_state->>'variant_id' !~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+    or v_work_state->>'state' not in ('active','saved','filmed')
+    or v_work_state->>'updated_at' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+  then return false; end if;
+  v_version:=(v_work_state->>'version')::numeric;
+  perform (v_work_state->>'updated_at')::timestamptz;
+  return (v_work_state->>'job_id')::uuid=p_job_id
+    and (v_work_state->>'variant_id')::uuid=p_variant_id
+    and v_version between 1 and 2147483647 and trunc(v_version)=v_version;
+exception when others then return false;
+end;
+$$;
+
 create table public.riff_work_state_receipts (
   account_id uuid not null references public.accounts(id),
   request_id uuid not null,
   job_id uuid not null,
   variant_id uuid not null,
   input jsonb not null check (jsonb_typeof(input)='object' and octet_length(input::text)<=16384),
-  output jsonb not null check ((jsonb_typeof(output)='object' and octet_length(output::text)<=16384
-    and jsonb_typeof(output->'ok')='boolean' and output->'ok'='true'::jsonb
-    and jsonb_typeof(output->'data')='object'
-    and jsonb_typeof(output#>'{data,work_state}')='object') is true),
+  output jsonb not null check (public.kettle_riff_work_state_receipt_valid(output,job_id,variant_id) is true),
   created_at timestamptz not null default now(),
   primary key (account_id,request_id),
   foreign key (job_id,variant_id,account_id) references public.riff_work_states(job_id,variant_id,account_id)
@@ -177,7 +202,10 @@ begin
     into v_states from jsonb_array_elements(case when v_job.kind='scripts' and v_job.state='succeeded'
       and jsonb_typeof(v_job.result#>'{scripts,variants}')='array' then v_job.result#>'{scripts,variants}' else '[]'::jsonb end)
       with ordinality variant(value,ordinality)
-    join public.riff_work_states ws on ws.job_id=v_job.id and ws.variant_id::text=lower(variant.value->>'id') and ws.account_id=p_account_id;
+    join public.riff_work_states ws on ws.job_id=v_job.id and ws.account_id=p_account_id and case
+      when jsonb_typeof(variant.value)='object' and jsonb_typeof(variant.value->'id')='string'
+        and variant.value->>'id' ~* '^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
+      then ws.variant_id=(variant.value->>'id')::uuid else false end;
   return jsonb_build_object('ok',true,'data',jsonb_build_object('job',to_jsonb(v_job)||jsonb_build_object('work_states',v_states)));
 end;
 $$;
@@ -205,6 +233,7 @@ begin
 end;
 $$;
 
-revoke all on function public.kettle_riff_work_state_append_only(),public.kettle_set_riff_work_state(uuid,jsonb)
+revoke all on function public.kettle_riff_work_state_receipt_valid(jsonb,uuid,uuid),
+  public.kettle_riff_work_state_append_only(),public.kettle_set_riff_work_state(uuid,jsonb)
   from public,anon,authenticated,service_role;
 grant execute on function public.kettle_set_riff_work_state(uuid,jsonb) to service_role;

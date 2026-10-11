@@ -14,6 +14,8 @@ import { observed, type CreatorLatencyObserver } from './creator-observability.t
 import { parseRiffVideoIngestReceipt, riffVideoCatalogInput, type RiffVideoRepository } from './riff-videos.ts';
 import { RiffWorkState } from '../contracts/riff-work-state.ts';
 
+const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();
+
 export type PipelineRepositoryOperation = PipelineOperation | 'run_creator_job' | 'finish_creator_job'
   | 'reserve_creator_attempt' | 'complete_creator_attempt' | 'record_creator_attempt_outcome'
   | 'checkpoint_creator_job' | 'list_creator_dispatches' | 'reconcile_creator_job';
@@ -80,7 +82,7 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
           {stage:'application_operation',clock:'monotonic',operation:'read'},
           ()=>repository.call(operation,identity.account_id,parsed.data,operationTelemetry)));
         if(!response.ok)return failure(response.error.code);
-        if(response.data.status.id!==parsed.data.job_id)return failure('UNAVAILABLE');
+        if(!sameUuid(response.data.status.id,parsed.data.job_id))return failure('UNAVAILABLE');
         return response;
       }
       const response=StoredCreatorJobOutput.parse(await observed(operationTelemetry,
@@ -88,9 +90,9 @@ export function createPipelineOperations(verifier:IdentityVerifier, repository:P
         ()=>repository.call(operation,identity.account_id,parsed.data,operationTelemetry)));
       if(!response.ok)return failure(response.error.code);
       const job=response.data.job;
-      if(job.account_id!==identity.account_id || ('job_id' in parsed.data && job.id!==parsed.data.job_id)
-        || ('project_id' in parsed.data && job.project_id!==parsed.data.project_id)
-        || ('request_id' in parsed.data && job.request_id!==parsed.data.request_id))return failure('UNAVAILABLE');
+      if(!sameUuid(job.account_id,identity.account_id) || ('job_id' in parsed.data && !sameUuid(job.id,parsed.data.job_id))
+        || ('project_id' in parsed.data && !sameUuid(job.project_id,parsed.data.project_id))
+        || ('request_id' in parsed.data && !sameUuid(job.request_id,parsed.data.request_id)))return failure('UNAVAILABLE');
       if(!contract.readOnly&&job.kind!==(operation==='save_creator_scripts'?'scripts':operation.replace('start_creator_','')))return failure('UNAVAILABLE');
       const publicOutput=CreatorJobOutput.parse({ok:true,data:{job:publicCreatorJob(job)}});
       const jobTelemetry=operationTelemetry?.scope?.({job_id:job.id})??operationTelemetry;
@@ -276,7 +278,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
   const loaded=StoredCreatorJobOutput.parse(await durableStep('load-job',()=>repository.call('run_creator_job',accountId,{job_id:jobId})));
   if(!loaded.ok)return;
   const job=loaded.data.job;
-  if(job.id!==jobId||job.account_id!==accountId)throw new PipelineRunError('failed');
+  if(!sameUuid(job.id,jobId)||!sameUuid(job.account_id,accountId))throw new PipelineRunError('failed');
   if(job.state!=='running')return;
   telemetry?.record({stage:'queue_to_running',clock:'wall',status:'ok',
     duration_ms:Math.max(0,Date.now()-Date.parse(job.created_at))});
@@ -293,7 +295,7 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
       output={kind:'scan',dna:projectCreatorDna(stored.data)};
     } else {
       const captured=z.object({stored:StoredCreatorAnalysis,batch:RecommendationBatch.optional(),idea_id:Id.optional(),variants:z.array(SavableFilmingVariant).min(2).max(3).optional()}).parse(job.captured);
-      if(captured.stored.project_id!==job.project_id)throw new PipelineRunError('failed');
+      if(!sameUuid(captured.stored.project_id,job.project_id))throw new PipelineRunError('failed');
       const dna=projectCreatorDna(captured.stored);
       if(!canProcessCapturedDna(captured.stored,dna))throw new PipelineRunError('failed');
       if(job.kind==='recommendations') {
