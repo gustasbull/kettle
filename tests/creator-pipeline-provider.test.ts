@@ -31,6 +31,11 @@ async function setup() {
     project_id: '00000000-0000-4000-8000-000000000100', analysis });
   return { f, provider, guard, analysis, dna };
 }
+function recommendationReuse(analysis:Awaited<ReturnType<typeof setup>>['analysis'],
+  dna:Awaited<ReturnType<typeof setup>>['dna'],observations=analysis.scan.video_observations) {
+  return {project_id:dna.project_id,dna_id:dna.dna_id,snapshot_id:dna.snapshot_id,dna_version:dna.version,
+    video_observations:observations};
+}
 test('provider errors expose only the closed definite and ambiguous outcome taxonomy',()=>{
   const cases=[
     [new CreatorProviderError('transport',429,'http'),{terminal_state:'failed',failure_code:'http_4xx',http_status:429}],
@@ -124,6 +129,63 @@ test('recommendation detail uses seven-day cache and keeps transcript and media 
   assert.equal(detail.searchParams.get('download_media'), 'false');
   assert.deepEqual(guard.calls.map(({ key }) => key), ['research', 'video:9000000000000000011']);
   assert.equal(f.http.filter(({ url }) => new URL(url).pathname === '/v2/tiktok/video').length, 1);
+});
+test('recommendation reuses the latest valid fresh captured feed observation without a detail reservation',async()=>{
+  const {analysis,dna}=await setup(),f=providerHttpFixture();
+  const base=structuredClone(analysis.scan.video_observations[0]!);
+  const older={...structuredClone(base),id:'00000000-0000-4000-8000-000000007001',caption:'Older valid feed caption',
+    provenance:{...structuredClone(base.provenance),source_observed_at:'2026-10-07T12:00:00.000Z'}};
+  const latest={...structuredClone(base),id:'00000000-0000-4000-8000-000000007002',caption:'Latest valid feed caption',
+    metrics:{...base.metrics,views:null,likes:null},
+    provenance:{...structuredClone(base.provenance),source_observed_at:'2026-10-08T12:00:00.000Z'}};
+  const newerButForbidden={...structuredClone(base),id:'00000000-0000-4000-8000-000000007003',caption:'Forbidden newer caption',
+    provenance:{...structuredClone(base.provenance),source_observed_at:'2026-10-09T11:00:00.000Z',
+      permission:{...structuredClone(base.provenance.permission),
+        permitted_uses:['store','display'] as Array<'store'|'display'|'model_processing'|'media_analysis'>}}};
+  const provider=createCreatorPipelineProvider({...f.options,
+    recommendationReuse:recommendationReuse(analysis,dna,[newerButForbidden,older,latest])});
+  const guard=fakeGuard(),batch=await provider.recommend(dna,guard.context);
+  assert.deepEqual(guard.calls.map(call=>call.key),['research']);
+  assert.equal(f.http.filter(({url})=>new URL(url).pathname==='/v2/tiktok/video').length,0);
+  assert.equal(batch.references[0]!.id,latest.id);
+  assert.equal(batch.references[0]!.caption,'Latest valid feed caption');
+  assert.equal(batch.references[0]!.source_observed_at,'2026-10-08T12:00:00.000Z');
+  assert.equal(batch.references[0]!.views,null);assert.equal(batch.references[0]!.likes,null);
+  assert.deepEqual(guard.catalogs,[],'an already-cataloged captured observation is not inserted again');
+});
+test('stale, incomplete, foreign-lineage, mismatched, or permission-incompatible feed data takes the guarded detail path',async()=>{
+  const {analysis,dna}=await setup(),base=structuredClone(analysis.scan.video_observations[0]!);
+  base.provenance.source_observed_at='2026-10-08T12:00:00.000Z';
+  const cases:Array<[string,unknown]>=[
+    ['stale',{...base,provenance:{...base.provenance,source_observed_at:'2026-10-02T11:59:59.999Z'}}],
+    ['future source time',{...base,provenance:{...base.provenance,source_observed_at:'2026-10-09T12:00:00.001Z'}}],
+    ['unknown source time',{...base,provenance:{...base.provenance,source_observed_at:null,retrieved_at:'2026-10-09T11:59:59.000Z'}}],
+    ['incomplete',((value:any)=>{delete value.caption;return value;})(structuredClone(base))],
+    ['different native ID',{...base,video:{...base.video,native_id:'9000000000000000099'}}],
+    ['fixture origin',{...base,provenance:{...base.provenance,origin:'fixture'}}],
+    ['non-approved permission',{...base,provenance:{...base.provenance,permission:{...base.provenance.permission,status:'needs_review'}}}],
+    ['missing model permission',{...base,provenance:{...base.provenance,permission:{...base.provenance.permission,permitted_uses:['store','display']}}}],
+    ['different permission basis',{...base,provenance:{...base.provenance,permission:{...base.provenance.permission,basis:'Different approved source basis'}}}],
+    ['different retention',{...base,provenance:{...base.provenance,permission:{...base.provenance.permission,retention:'Different retention policy'}}}],
+  ];
+  for(const [name,observation] of cases){
+    const f=providerHttpFixture(),guard=fakeGuard();
+    const provider=createCreatorPipelineProvider({...f.options,
+      recommendationReuse:recommendationReuse(analysis,dna,[observation as any])});
+    await provider.recommend(dna,guard.context);
+    assert.deepEqual(guard.calls.map(call=>call.key),['research','video:9000000000000000011'],name);
+    assert.equal(f.http.filter(({url})=>new URL(url).pathname==='/v2/tiktok/video').length,1,name);
+  }
+  for(const [name,source] of [
+    ['project',{...recommendationReuse(analysis,dna),project_id:'00000000-0000-4000-8000-000000009999'}],
+    ['dna',{...recommendationReuse(analysis,dna),dna_id:'00000000-0000-4000-8000-000000009999'}],
+    ['snapshot',{...recommendationReuse(analysis,dna),snapshot_id:'00000000-0000-4000-8000-000000009999'}],
+    ['version',{...recommendationReuse(analysis,dna),dna_version:dna.version+1}],
+  ] as const){
+    const f=providerHttpFixture(),guard=fakeGuard();
+    await createCreatorPipelineProvider({...f.options,recommendationReuse:source}).recommend(dna,guard.context);
+    assert.deepEqual(guard.calls.map(call=>call.key),['research','video:9000000000000000011'],`foreign ${name}`);
+  }
 });
 test('provider rejects invalid cache configuration before guard reservation or HTTP', () => {
   for (const cacheMaxAge of [undefined, null, { profile: '2d', detail: '7d' },

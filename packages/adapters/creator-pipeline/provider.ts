@@ -4,9 +4,10 @@ import { CreatorDnaView } from '../../contracts/creator-operations.ts';
 import { CreatorAnalysis, ProfileScanRequest, ObservationProvenance, LightreelSeedReview,
   type ProfileObservation, type VideoObservation } from '../../contracts/creator-profile.ts';
 import { RecommendationBatch, CreatorScriptSet, FilmingVariant, TimedFilmingSegment, CreatorJobProgress,
-  CreatorAttemptError,
+  CreatorAttemptError, CreatorRecommendationReuseSource, PipelineReference,
   type CreatorProgressProfile, type CreatorProgressVideoCard,
-  type CreatorPipelineProvider, type CreatorProviderContext } from '../../contracts/creator-pipeline.ts';
+  type CreatorPipelineProvider, type CreatorProviderContext,
+  type CreatorRecommendationReuseSource as CreatorRecommendationReuseSourceType } from '../../contracts/creator-pipeline.ts';
 import { buildGroundedCreatorDna } from '../creator-scan/dna.ts';
 import { characterizeFeed, characterizeProfile } from '../creator-scan/scrapecreators-characterization.ts';
 import { boundedJson, type Fetch, type HttpEvidence } from './http.ts';
@@ -55,6 +56,8 @@ export type CreatorPipelineAdapterOptions = {
   seedUrl?: string;
   model: string; maxOutputTokens: number; region: string;
   cacheMaxAge: ScrapeCreatorsCachePolicyType;
+  /** Server-only observations from this immutable recommendation job capture. */
+  recommendationReuse?:CreatorRecommendationReuseSourceType;
   permission: z.infer<typeof ObservationProvenance>['permission'];
   /** Trusted server checks underlying source/model rights; the display view alone cannot establish them. */
   canProcessDna(dna: CreatorDnaView): boolean;
@@ -105,11 +108,15 @@ const generatedVariant = FilmingVariant.omit({ id: true }).extend({
 });
 const modelOutput = z.strictObject({ variants: z.array(generatedVariant).min(2).max(3) });
 const modelSchema = z.toJSONSchema(modelOutput) as Record<string, unknown>;
+const RECOMMENDATION_FEED_REUSE_MAX_AGE_MS=7*24*60*60*1000;
 
 export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOptions): CreatorPipelineProvider {
   const parsedCachePolicy = ScrapeCreatorsCachePolicy.safeParse(options.cacheMaxAge);
   if (!parsedCachePolicy.success) throw new Error('Invalid ScrapeCreators cache policy');
   const cacheMaxAge = parsedCachePolicy.data;
+  const parsedReuse=options.recommendationReuse===undefined?undefined:
+    CreatorRecommendationReuseSource.safeParse(options.recommendationReuse);
+  const recommendationReuse=parsedReuse?.success?parsedReuse.data:undefined;
   const permission = ObservationProvenance.shape.permission.parse(options.permission);
   const credentials = { ...options.credentials };
   if (typeof options.canProcessDna !== 'function') throw new CreatorProviderError('permission');
@@ -301,7 +308,50 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
       const medianViews = observedViews.length === 0 ? undefined : observedViews.length % 2 === 1
         ? observedViews[Math.floor(observedViews.length / 2)]!
         : (observedViews[observedViews.length / 2 - 1]! + observedViews[observedViews.length / 2]!) / 2;
+      const referenceFromObservation=(o:VideoObservation)=>{
+        const multiplier = medianViews !== undefined && o.metrics.views !== null
+          ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
+        return PipelineReference.parse({id:o.id,platform:'tiktok',native_id:o.video.native_id,url:o.canonical_url,
+          retrieved_at:o.provenance.retrieved_at,source_observed_at:o.provenance.source_observed_at,
+          published_at:o.published_at,caption:o.caption,views:o.metrics.views,
+          ...(o.thumbnail_url?{thumbnail_url:o.thumbnail_url}:{}),duration_seconds:o.duration_seconds,
+          likes:o.metrics.likes,...(o.metrics.saves!==undefined?{saves:o.metrics.saves}:{}),
+          ...(multiplier!==undefined&&medianViews!==undefined?{view_multiplier:multiplier,
+            view_multiplier_basis:{method:'median_observed_profile_views' as const,
+              baseline_views:medianViews,sample_size:observedViews.length}}:{}),
+          origin:o.provenance.origin,permission_basis:o.provenance.permission.basis,
+          limitations:['Caption and metadata only; no visual or pacing analysis.',
+            'Views are an observation, not evidence of causal success or expected results.',
+            ...(multiplier!==undefined?[`View multiplier compares observed views with the median of ${observedViews.length} displayed profile observation${observedViews.length===1?'':'s'}; it is not a performance prediction.`]:[]),
+            o.provenance.source_observed_at?`Provider cache observation time: ${o.provenance.source_observed_at}.`:
+              'Source observation time is unknown; retrieval time does not establish metric freshness.']});
+      };
+      const reusableObservation=(nativeId:string)=>{
+        if(!recommendationReuse||cacheMaxAge.detail!=='7d'||recommendationReuse.project_id!==dna.project_id||
+          recommendationReuse.dna_id!==dna.dna_id||recommendationReuse.snapshot_id!==dna.snapshot_id||
+          recommendationReuse.dna_version!==dna.version)return undefined;
+        const now=Date.parse(context.now());if(!Number.isFinite(now))return undefined;
+        return [...recommendationReuse.video_observations].filter(observation=>{
+          const observedAt=observation.provenance.source_observed_at;
+          if(observation.video.platform!=='tiktok'||observation.video.native_id!==nativeId||
+            observation.creator.platform!==dna.profile.platform||observation.creator.native_id!==dna.profile.native_id||
+            observation.provenance.provider!=='scrapecreators'||observation.provenance.endpoint!=='/v3/tiktok/profile/videos'||
+            observation.provenance.origin!=='live'||observation.provenance.permission.status!=='approved'||
+            observation.provenance.permission.basis!==permission.basis||
+            observation.provenance.permission.retention!==permission.retention||
+            !['store','display','model_processing'].every(use=>observation.provenance.permission.permitted_uses.includes(use as 'store'|'display'|'model_processing'))||!observedAt)return false;
+          const observed=Date.parse(observedAt),age=now-observed;
+          if(!Number.isFinite(observed)||age<0||age>RECOMMENDATION_FEED_REUSE_MAX_AGE_MS)return false;
+          try{const parsed=parseTikTokUrl(observation.canonical_url);
+            return parsed.videoId===nativeId&&parsed.canonicalUrl===observation.canonical_url&&
+              PipelineReference.safeParse(referenceFromObservation(observation)).success;
+          }catch{return false;}
+        }).sort((a,b)=>b.provenance.source_observed_at!.localeCompare(a.provenance.source_observed_at!)||
+          b.provenance.retrieved_at.localeCompare(a.provenance.retrieved_at)||b.id.localeCompare(a.id))[0];
+      };
       const settled=await Promise.allSettled(candidates.map(async({url,nativeId})=>{
+        const reused=reusableObservation(nativeId);
+        if(reused)return {observation:reused,reference:referenceFromObservation(reused),reused:true};
         const r = await call(context, `video:${nativeId}`, 'scrapecreators', 'video',
           detailRequest(url, options.region, cacheMaxAge.detail), undefined,
           body => {
@@ -314,24 +364,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         let o:ReturnType<typeof readTikTokDetail>['observation'];
         try{o=readTikTokDetail(r.body, url, r.id, provenance(r, '/v2/tiktok/video', url)).observation;}
         catch{return context.recordOutcome(`video:${nativeId}`,{terminal_state:'failed',failure_code:'schema_invalid',http_status:r.status});}
-        const multiplier = medianViews !== undefined && o.metrics.views !== null
-          ? Math.round((o.metrics.views / medianViews) * 10) / 10 : undefined;
-        const reference:RecommendationBatch['references'][number]={ id: o.id, platform: 'tiktok', native_id: o.video.native_id, url: o.canonical_url,
-          retrieved_at: o.provenance.retrieved_at,
-          source_observed_at: o.provenance.source_observed_at, published_at: o.published_at,
-          caption: o.caption, views: o.metrics.views,
-          ...(o.thumbnail_url ? { thumbnail_url: o.thumbnail_url } : {}),
-          duration_seconds: o.duration_seconds, likes: o.metrics.likes,
-          ...(o.metrics.saves !== undefined ? { saves: o.metrics.saves } : {}),
-          ...(multiplier !== undefined && medianViews !== undefined ? { view_multiplier: multiplier,
-            view_multiplier_basis: { method: 'median_observed_profile_views' as const,
-              baseline_views: medianViews, sample_size: observedViews.length } } : {}),
-          origin: 'live', permission_basis: permission.basis,
-          limitations: ['Caption and metadata only; no visual or pacing analysis.',
-            'Views are an observation, not evidence of causal success or expected results.',
-            ...(multiplier !== undefined ? [`View multiplier compares observed views with the median of ${observedViews.length} displayed profile observation${observedViews.length === 1 ? '' : 's'}; it is not a performance prediction.`] : []),
-            o.provenance.source_observed_at ? `Provider cache observation time: ${o.provenance.source_observed_at}.` : 'Source observation time is unknown; retrieval time does not establish metric freshness.'] };
-        return {observation:o,reference};
+        return {observation:o,reference:referenceFromObservation(o),reused:false};
       }));
       const firstAmbiguous=settled.find(result=>result.status==='rejected'&&isAmbiguousAttempt(result.reason));
       const firstDefinite=settled.find(result=>result.status==='rejected');
@@ -343,7 +376,7 @@ export function createCreatorPipelineProvider(options: CreatorPipelineAdapterOpt
         recommendationProgress={...recommendationProgress,references:[...recommendationProgress.references,progressVideo(result.value.observation)]};
         try {const checkpointKey=`recommend:detail:${candidates[index]!.nativeId}`;
           await context.checkpoint(checkpointKey,'enriching_references',recommendationProgress);
-          await context.ingestCatalog(checkpointKey,'discovered_reference',[
+          if(!result.value.reused)await context.ingestCatalog(checkpointKey,'discovered_reference',[
             trustedCatalogObservation(result.value.observation,result.value.reference.limitations)]);}
         catch(error){checkpointFailure=error;break;}
       }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Id, Timestamp, result } from './index.ts';
-import { ProfileScanRequest, CreatorAnalysis, CreatorUrl, TikTokImageUrl } from './creator-profile.ts';
+import { ProfileScanRequest, CreatorAnalysis, CreatorUrl, TikTokImageUrl, VideoObservation } from './creator-profile.ts';
 import { CreatorDnaView } from './creator-operations.ts';
 import type { RiffVideoRole, TrustedCatalogObservation } from './riff-videos.ts';
 
@@ -213,6 +213,14 @@ export type CreatorProgressProfile=z.infer<typeof CreatorProgressProfile>;
 export type CreatorProgressVideoCard=z.infer<typeof CreatorProgressVideoCard>;
 export type CreatorProgressReferenceIdentity=z.infer<typeof CreatorProgressReferenceIdentity>;
 export type PipelineReference=z.infer<typeof PipelineReference>;
+
+/** Trusted same-job recommendation input. The application derives this only from
+ * the immutable owned analysis captured when the job was created. */
+export const CreatorRecommendationReuseSource=z.strictObject({
+  project_id:Id,dna_id:Id,snapshot_id:Id,dna_version:z.number().int().positive(),
+  video_observations:z.array(VideoObservation).max(150),
+});
+export type CreatorRecommendationReuseSource=z.infer<typeof CreatorRecommendationReuseSource>;
 
 export const AttemptFailureCode=z.enum(['http_4xx','http_5xx','http_other','malformed_response',
   'schema_invalid','oversized_response','permission','unavailable','timeout','network',

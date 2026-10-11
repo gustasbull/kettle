@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { RecommendationBatch, CreatorScriptSet, CreatorJobView, PipelineReference,
-  CreatorJobProgress, CreatorJobStatusView, CreatorJobStage, CreatorAttemptOutcomeInput, pipelineContracts } from '../packages/contracts/creator-pipeline.ts';
+  CreatorJobProgress, CreatorJobStatusView, CreatorJobStage, CreatorAttemptOutcomeInput,
+  StartCreatorRecommendationsInput, pipelineContracts } from '../packages/contracts/creator-pipeline.ts';
 import { recommendationBatchFixture, creatorScriptsFixture, creatorJobFixture } from '../evals/creator-loop/pipeline-fixtures.ts';
 test('pipeline contracts retain reference lineage and fictional origin without padding',()=>{
  const batch=recommendationBatchFixture(); assert.equal(batch.ideas.length,1);
@@ -26,6 +27,13 @@ test('attempt outcomes use a strict internal taxonomy and never become public pi
   assert.equal(CreatorAttemptOutcomeInput.safeParse(value).success,false);
  assert.ok(!Object.keys(pipelineContracts).some(name=>/outcome|reconcil|usage|attempt/.test(name)));
  assert.doesNotMatch(JSON.stringify(Object.values(pipelineContracts).map(contract=>({input:z.toJSONSchema(contract.input),output:z.toJSONSchema(contract.output)}))),/failure_code|http_status|terminal_state/);
+});
+test('recommendation reuse observations cannot be supplied through public input',()=>{
+ const input={dna_id:'00000000-0000-4000-8000-000000000004',expected_version:1,
+  request_id:'00000000-0000-4000-8000-000000000801'};
+ assert.ok(StartCreatorRecommendationsInput.safeParse(input).success);
+ assert.equal(StartCreatorRecommendationsInput.safeParse({...input,video_observations:[]}).success,false);
+ assert.equal(StartCreatorRecommendationsInput.safeParse({...input,recommendation_reuse:{video_observations:[]}}).success,false);
 });
 test('Paper discovery and Studio facts are optional for saved legacy results but strictly validated when present', () => {
  const legacyBatch=recommendationBatchFixture();

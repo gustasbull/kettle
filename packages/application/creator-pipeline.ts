@@ -3,7 +3,9 @@ import { Id, Timestamp, result } from '../contracts/index.ts';
 import { CreatorJobView, CreatorJobOutput, CreatorJobStatusView, CreatorJobStatusOutput, CreatorJobProgress,
   CreatorJobStage, pipelineContracts, RecommendationBatch, CreatorScriptSet, emptyCreatorJobProgress,
   FilmingVariant, CreatorAttemptOutcomeInput, CreatorAttemptOutcome, CreatorAttemptError,
-  type AttemptFailureCode, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider } from '../contracts/creator-pipeline.ts';
+  CreatorRecommendationReuseSource,
+  type AttemptFailureCode, type PipelineOperation, type CreatorProviderContext, type CreatorPipelineProvider,
+  type CreatorRecommendationReuseSource as CreatorRecommendationReuseSourceType } from '../contracts/creator-pipeline.ts';
 import { CreatorAnalysis, CreatorUrl, ProfileScanRequest } from '../contracts/creator-profile.ts';
 import { StoredCreatorAnalysis } from '../contracts/creator-operations.ts';
 import { failure, type IdentityVerifier } from './operations.ts';
@@ -266,7 +268,7 @@ export function canProcessCapturedDna(stored:z.infer<typeof StoredCreatorAnalysi
   }));
 }
 export async function runCreatorPipelineJob(repository:PipelineRepository,creatorRepository:CreatorRepository,
-  accountId:string,jobId:string,providerFor:(job:StoredCreatorJob)=>CreatorPipelineProvider,
+  accountId:string,jobId:string,providerFor:(job:StoredCreatorJob,reuse?:CreatorRecommendationReuseSourceType)=>CreatorPipelineProvider,
   ceilings:AttemptCeilings,durableStep:DurableStep,telemetry?:CreatorLatencyObserver,catalogRepository?:RiffVideoRepository) {
   const loaded=StoredCreatorJobOutput.parse(await durableStep('load-job',()=>repository.call('run_creator_job',accountId,{job_id:jobId})));
   if(!loaded.ok)return;
@@ -292,7 +294,11 @@ export async function runCreatorPipelineJob(repository:PipelineRepository,creato
       const dna=projectCreatorDna(captured.stored);
       if(!canProcessCapturedDna(captured.stored,dna))throw new PipelineRunError('failed');
       if(job.kind==='recommendations') {
-        const batch=RecommendationBatch.parse(await providerFor(job).recommend(dna,context));
+        const reuse=CreatorRecommendationReuseSource.parse({project_id:captured.stored.project_id,
+          dna_id:captured.stored.dna_id,snapshot_id:captured.stored.analysis.dna.id,
+          dna_version:captured.stored.analysis.dna.version,
+          video_observations:captured.stored.analysis.scan.video_observations});
+        const batch=RecommendationBatch.parse(await providerFor(job,reuse).recommend(dna,context));
         if(batch.dna_id!==dna.dna_id||batch.dna_version!==dna.version||batch.contains_fixture_data)throw new PipelineRunError('failed');
         output={kind:'recommendations',batch};
       }else{

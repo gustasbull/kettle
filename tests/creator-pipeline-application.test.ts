@@ -418,8 +418,11 @@ function runner(kind:StoredCreatorJob['kind']='recommendations') {
     if(op==='finish_creator_job'){finishes.push(raw);return wrapped({...job,...raw as object});}throw Error(op);}};
   const creatorRepository:CreatorRepository={async call(_op,_account,raw){ingests.push(raw);return {ok:true,data:saved};}};
   const provider:CreatorPipelineProvider={async scan(){providerCalls.push('scan');return saved.analysis;},async recommend(){providerCalls.push('recommend');return batch;},async generate(){providerCalls.push('generate');return scripts;}};
-  const run=()=>runCreatorPipelineJob(repository,creatorRepository,account,job.id,()=>provider,ceilings,async(name,fn)=>{steps.push(name);return fn();});
-  return {saved,batch,scripts,job,finishes,providerCalls,steps,ingests,repository,creatorRepository,provider,run};
+  const factoryCalls:unknown[]=[];
+  const run=()=>runCreatorPipelineJob(repository,creatorRepository,account,job.id,(loaded,reuse)=>{
+    factoryCalls.push({loaded,reuse});return provider;
+  },ceilings,async(name,fn)=>{steps.push(name);return fn();});
+  return {saved,batch,scripts,job,finishes,providerCalls,steps,ingests,factoryCalls,repository,creatorRepository,provider,run};
 }
 
 test('runner stages save immutable captured lineage and scan ingestion receipt',async()=>{
@@ -428,7 +431,19 @@ test('runner stages save immutable captured lineage and scan ingestion receipt',
 });
 
 test('runner rejects captured project and processing rights before provider calls',async()=>{
-  for(const mode of ['project','permission']){const r=runner();if(mode==='project')r.saved.project_id=id(999);else r.saved.analysis.scan.video_observations[0]!.provenance.permission.permitted_uses=['store','display'];await r.run();assert.deepEqual(r.providerCalls,[]);assert.equal(r.finishes.at(-1).state,'failed');}
+  for(const mode of ['project','permission']){const r=runner();if(mode==='project')r.saved.project_id=id(999);else r.saved.analysis.scan.video_observations[0]!.provenance.permission.permitted_uses=['store','display'];await r.run();assert.deepEqual(r.providerCalls,[]);assert.deepEqual(r.factoryCalls,[]);assert.equal(r.finishes.at(-1).state,'failed');}
+});
+
+test('runner derives recommendation reuse only from the owned immutable captured analysis',async()=>{
+  const r=runner();
+  r.job.input={...input(),video_observations:[{caller_supplied:'must never be used'}],recommendation_reuse:{foreign:true}};
+  await r.run();
+  assert.equal(r.factoryCalls.length,1);
+  const supplied=(r.factoryCalls[0] as any).reuse;
+  assert.deepEqual(supplied,{project_id:r.saved.project_id,dna_id:r.saved.dna_id,
+    snapshot_id:r.saved.analysis.dna.id,dna_version:r.saved.analysis.dna.version,
+    video_observations:r.saved.analysis.scan.video_observations});
+  assert.doesNotMatch(JSON.stringify(supplied),/caller_supplied|foreign/);
 });
 
 test('runner rejects recommendation and script output lineage mismatches',async()=>{
@@ -576,7 +591,9 @@ test('runner keeps timeout and network recommendation fan-out outcomes typed and
 
 test('runner ignores terminal jobs and rejects wrong loaded identity without providers',async()=>{
   for(const mode of ['terminal','account','id']){const r=runner();if(mode==='terminal')r.job.state='failed';else if(mode==='account')r.job.account_id=id(999);else r.job.id=id(999);
-    if(mode==='terminal')await r.run();else await assert.rejects(runCreatorPipelineJob(r.repository,r.creatorRepository,account,id(620),()=>r.provider,ceilings,step),PipelineRunError);
+    let constructions=0;
+    if(mode==='terminal')await r.run();else await assert.rejects(runCreatorPipelineJob(r.repository,r.creatorRepository,account,id(620),()=>{constructions++;return r.provider;},ceilings,step),PipelineRunError);
+    assert.equal(constructions,0);assert.deepEqual(r.factoryCalls,[]);
     assert.deepEqual(r.providerCalls,[]);assert.deepEqual(r.finishes,[]);
   }
 });

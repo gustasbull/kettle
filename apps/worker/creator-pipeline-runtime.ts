@@ -2,6 +2,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { z } from 'zod';
 import { Id } from '../../packages/contracts/index.ts';
 import { StoredCreatorAnalysis } from '../../packages/contracts/creator-operations.ts';
+import type { CreatorRecommendationReuseSource } from '../../packages/contracts/creator-pipeline.ts';
 import { runCreatorPipelineJob, canProcessCapturedDna, type DurableStep, type AttemptCeilings, type StoredCreatorJob } from '../../packages/application/creator-pipeline.ts';
 import { createPipelineSupabaseRepository } from '../../packages/database/creator-pipeline-supabase.ts';
 import { createCreatorSupabaseRepository } from '../../packages/database/creator-supabase.ts';
@@ -58,12 +59,13 @@ export class CreatorPipelineWorkflow extends WorkflowEntrypoint<Env,{job_id:stri
     const creators=createCreatorSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
     const catalog=createRiffVideoSupabaseRepository(this.env.SUPABASE_URL!,this.env.SUPABASE_SERVICE_ROLE_KEY!,fetch,telemetry);
     const durableStep:DurableStep=createCreatorWorkflowDurableStep(step);
-    const factory=(job:StoredCreatorJob)=>{
+    const factory=(job:StoredCreatorJob,recommendationReuse?:CreatorRecommendationReuseSource)=>{
       const captured=z.object({stored:StoredCreatorAnalysis.optional(),seed_url:z.string().optional()}).parse(job.captured);
       return createCreatorPipelineProvider({fetch:(url,init)=>fetch(url,init),
         credentials:{scrapeCreators:this.env.SCRAPECREATORS_API_KEY!,lightreel:this.env.LIGHTREEL_API_KEY!},
         model:this.env.CREATOR_MODEL!,maxOutputTokens:6000,region:'US',maxHistoryReads:0,
         cacheMaxAge:CREATOR_CACHE_MAX_AGE,
+        ...(recommendationReuse?{recommendationReuse}:{}),
         ...(captured.seed_url?{seedUrl:captured.seed_url}:{}),
         permission:{status:'approved',basis:this.env.CREATOR_SOURCE_PERMISSION_BASIS!,permitted_uses:['store','display','model_processing'],retention:'Development proof only; source records are restricted to the allocated test account and require explicit retention review before production.'},
         canProcessDna:view=>Boolean(captured.stored&&canProcessCapturedDna(captured.stored,view)),
