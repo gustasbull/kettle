@@ -21,6 +21,7 @@
     "db:reset": "node scripts/database.mjs reset",
     "db:status": "node scripts/database.mjs status",
     "eval:generation": "tsx evals/run.ts",
+    "benchmark:creator": "tsx scripts/creator-latency-benchmark.ts",
     "db:migrate": "node scripts/database.mjs migrate",
     "db:test": "tsx scripts/supabase-local-smoke.ts",
     "build:development": "wrangler deploy --env development --dry-run --outdir dist/development",

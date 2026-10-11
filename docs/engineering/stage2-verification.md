@@ -174,3 +174,41 @@ are not measured or included in the reported zero provider spend.
 
 Release audience, Paper exports, quality thresholds and good/bad script examples
 remain product inputs. Billing and public distribution remain separate later work.
+
+## Fixture browsing benchmark — 2026-10-11
+
+Task 9 added a strict, import-safe creator-latency benchmark. The following local
+commands passed:
+
+- `node --import tsx --test tests/creator-latency-benchmark.test.ts`: 11/11.
+- `tsc --noEmit --pretty false`: Task 9 passed before Task 6 landed; a final
+  shared-checkout rerun then exposed two Task 6 test-fixture literal-typing
+  errors in `tests/riff-videos-application.test.ts`. Task 9's focused tests
+  remained green; the shared typecheck is therefore not recorded as a final pass.
+- `npm run benchmark:creator -- --fixture`: emitted one validated fixture/local-
+  process report and exited successfully.
+
+The fixture report uses current local manifest fingerprints, retains raw synthetic
+observations, and applies nearest-rank thresholds of five observations for p50,
+twenty for p95, and one hundred for p99. Its six catalog/reopen/status/result/render
+scenarios have exact synthetic zero deltas for provider calls, attempts, provider-
+trial units, and cash reservations. This is fixture/reporting evidence only; it is
+not hosted counter evidence.
+
+No network request, provider call, hosted Supabase call, deployment, allocation,
+refill, canary, ChatGPT session, or remote database operation was performed by this
+Task 9 run. The full `npm run check` was intentionally not run while Task 6 shared
+files were being edited. No current-live p50/p95/p99, provider permission, billing,
+production-readiness, or SLA claim follows from this result. The local controller
+evidence covers terminal-status-observed-to-render scheduling only, not persisted-
+result-to-visible-paint under three seconds.
+
+| External proof or action | Status |
+| --- | --- |
+| Fresh current-live development sample | Blocked pending an available account-bound allocation, approved canonical inputs, trusted operator preflight/readback, and explicit maximum-call approval. |
+| Provision or refill | Not authorized; the benchmark has no provisioning dependency. |
+| Hosted development deployment and served fingerprint | Not performed; a local or dry-run fingerprint is not hosted evidence. |
+| ChatGPT install/onboarding in both fresh and existing conversations | Unverified. |
+| Dedicated `_meta.ui.domain` for UI submission | Missing; remains a submission gate outside Task 9. |
+| Reproducible complete official manifest/MCP schema validation | Unverified; selected local tests are not a substitute. |
+| Development canary or production promotion | Not authorized; O01, O05, and O06 remain open gates. |

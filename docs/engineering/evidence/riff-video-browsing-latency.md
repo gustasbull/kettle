@@ -43,13 +43,13 @@ entry can be tied to deployed bytes.
 
 | Panel/resource | SHA-256 bundle version | Raw bytes / budget | Gzip bytes / budget |
 | --- | --- | ---: | ---: |
-| Riff Home `riff-home-v3` | `sha256:f7b4c0005d8ed1a2e245f58f0351e58dc7b677454e811f1097d59066fbbae308` | 471,831 / 500,000 | 104,697 / 110,000 |
+| Riff Home `riff-home-v3` | `sha256:27179e56c65cfe9977ada9f98a799adbfb23928c461b6760764751ee0ec29ecc` | 479,678 / 500,000 | 107,010 / 110,000 |
 | Onboarding `riff-onboarding-v1` | `sha256:3e74416bc97a27b3f64d62650a16700e93ab50ac8428696ba40449a42aef02a0` | 382,496 / 400,000 | 80,543 / 85,000 |
-| Pipeline `creator-pipeline-v3` | `sha256:acf3780c96e37f1a845df594ca7eb460f71255e75848dfee85ff3cbebcfac248` | 611,493 / 650,000 | 135,947 / 145,000 |
+| Pipeline `creator-pipeline-v3` | `sha256:44db778cf6b6f697884f94e1be1aae7dc57c62c0034d595b175a8404aeac6b40` | 94,037 / 250,000 | 26,630 / 75,000 |
 
-Evidence class: `fixture` (local deterministic production build). Rebuilding
-unchanged inputs produced identical hashes; changing only Home source changed
-only the Home hash in the build test.
+Evidence class: `fixture`; proof surface: `local-process`. These are the values
+consumed from the generated local manifest by the Task 9 fixture benchmark. They
+have not been observed on a deployed Worker or in ChatGPT.
 
 ## Local fixture observations
 
@@ -78,8 +78,48 @@ One local workerd process, with no auth/provider configuration, produced:
 - `tools/list`: `9.4, 3.5, 3.1, 2.7, 2.9 ms`.
 - `kettle_diagnostic`: `4.0, 2.7, 2.4, 2.4, 2.1 ms`.
 
-Evidence class: `fixture-local-workerd`. Sample sizes are too small and the
-environment is not production, so no p50/p95/p99 claim is made.
+Sample class: `fixture`; proof surface: `local-workerd`. Sample sizes are too
+small and the environment is not production, so no p50/p95/p99 claim is made.
+
+## Task 9 fixture report
+
+`npm run benchmark:creator -- --fixture` passed locally on 11 October 2026. It
+emitted one schema-version-1 report with `sample_class=fixture` and
+`proof_surface=local-process`. The command has no network/operator dependency,
+made no provider or hosted-database call, and performed no deployment.
+
+The authored fixture contains 57 observations. Ten exact timing groups have five
+successful observations each, so the nearest-rank implementation reports fixture
+p50 values only:
+
+| Synthetic timing group | n | Fixture p50 | p95 / p99 |
+| --- | ---: | ---: | --- |
+| shell | 5 | 10 ms | insufficient / insufficient |
+| durable acknowledgement | 5 | 40 ms | insufficient / insufficient |
+| queue delay | 5 | 165 ms | insufficient / insufficient |
+| first safe partial | 5 | 405 ms | insufficient / insufficient |
+| profile/feed | 5 | 705 ms | insufficient / insufficient |
+| seed review | 5 | 525 ms | insufficient / insufficient |
+| research | 5 | 825 ms | insufficient / insufficient |
+| detail enrichment | 5 | 600 ms | insufficient / insufficient |
+| terminal persistence | 5 | 33 ms | insufficient / insufficient |
+| terminal observed to render | 5 | 16 ms | insufficient / insufficient |
+
+These authored numbers validate aggregation and threshold behavior; they are not
+observed product latency and are not an SLA. p50 requires five complete values,
+p95 requires twenty, and p99 requires one hundred. The report retains raw values
+and uses `insufficient_for_percentile` below each threshold.
+
+Six synthetic provider-free scenarios—catalog first page, catalog repeat, reopen,
+status read, completed-result read, and render-only—each have exact fixture deltas
+of zero provider calls, attempts, provider-trial units, and cash reservations.
+This proves the fixture/report invariant only. Hosted zero-delta proof still needs
+trusted service-only before/after counters.
+
+The local report establishes only terminal-status-observed-to-render timing and
+the local controller schedule. It does **not** establish persisted-result-to-visible-
+paint under three seconds: the Worker and browser clocks are separate and the
+unchanged-stage polling cap is fifteen seconds.
 
 ## Retained historical live provider sample
 
@@ -105,6 +145,12 @@ no newly authorized provider completion for this task. Collecting current-live
 samples requires a separately approved allowance and must preserve the existing
 stable attempt keys, reservation receipts, exact replay, and zero automatic
 provider retry behavior.
+
+Hosted Worker fingerprint proof and ChatGPT proof are also absent. In particular,
+a fresh and an existing conversation have not both verified install/onboarding;
+the UI submission still lacks a dedicated `_meta.ui.domain`; and there is no
+reproducible complete official manifest/MCP schema validation record. These are
+submission gates, not failures that this fixture benchmark fixes.
 
 ## Instrumented boundaries
 
