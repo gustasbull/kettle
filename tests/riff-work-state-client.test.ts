@@ -72,20 +72,49 @@ test('work-state client rejects hostile and direct envelopes before rereading au
   const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
   const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
   const success={ok:true,data:{work_state:state}},conflict={ok:false,error:{code:'VERSION_CONFLICT',message:'Changed.',retryable:false,recovery:'reload'}};
-  const hidden=wrapped(success) as any;Object.defineProperty(hidden,'secret',{value:true});
-  const symbol=wrapped(success) as any;symbol[Symbol('secret')]=true;
-  const accessor:any={content:[]};Object.defineProperty(accessor,'structuredContent',{get(){return success;},enumerable:true});
-  const hiddenFailure=wrapped(conflict) as any;Object.defineProperty(hiddenFailure,'secret',{value:true});
-  const symbolFailure=wrapped(conflict) as any;symbolFailure[Symbol('secret')]=true;
-  const accessorFailure:any={content:[]};Object.defineProperty(accessorFailure,'structuredContent',{get(){return conflict;},enumerable:true});
   const innerHidden=structuredClone(success) as any;Object.defineProperty(innerHidden.data.work_state,'secret',{value:true});
   const innerFailure=structuredClone(conflict) as any;Object.defineProperty(innerFailure.error,'secret',{value:true});
-  for(const raw of [success,conflict,hidden,symbol,accessor,hiddenFailure,symbolFailure,accessorFailure,wrapped(innerHidden),wrapped(innerFailure)]){
+  const hostileEnvelopes=(inner:unknown)=>{
+    const hidden=wrapped(inner) as any;Object.defineProperty(hidden,'secret',{value:true});
+    const symbol=wrapped(inner) as any;symbol[Symbol('secret')]=true;
+    const accessor:any={content:[]};Object.defineProperty(accessor,'structuredContent',{get(){return inner;},enumerable:true});
+    const hiddenOptional:any={structuredContent:inner};Object.defineProperty(hiddenOptional,'content',{value:[],enumerable:false});
+    const accessorContent:any[]=[];Object.defineProperty(accessorContent,'0',{get(){return {type:'text',text:'spoof'};},enumerable:true});
+    const customContent:any[]=[];Object.setPrototypeOf(customContent,null);
+    const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
+    const metaAccessor:any={};Object.defineProperty(metaAccessor,'trace',{get(){return 'spoof';},enumerable:true});
+    return [
+      inner,
+      hidden,
+      symbol,
+      accessor,
+      hiddenOptional,
+      {structuredContent:inner,isError:undefined},
+      {structuredContent:inner,content:undefined},
+      {structuredContent:inner,isError:'false'},
+      {structuredContent:inner,_meta:1},
+      {structuredContent:inner,_meta:metaAccessor},
+      {structuredContent:inner,content:[{type:'text',text:'spoof',secret:true}]},
+      {structuredContent:inner,content:accessorContent},
+      {structuredContent:inner,content:customContent},
+      {structuredContent:inner,content:proxyContent},
+    ];
+  };
+  for(const raw of [...hostileEnvelopes(success),...hostileEnvelopes(conflict),wrapped(innerHidden),wrapped(innerFailure)]){
     let reads=0;
     const client=module.createRiffWorkStateClient(async()=>raw,async()=>{reads++;return {...job,work_states:[state]};});
     assert.equal((await client.set(job,variantId,'saved')).status,'failed');
     assert.equal(reads,0,'untrusted envelope must fail before confirmation or conflict reread');
   }
+});
+
+test('work-state client accepts a complete valid MCP result envelope',async()=>{
+  const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
+  const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
+  const raw={structuredContent:{ok:true,data:{work_state:state}},isError:false,
+    content:[{type:'text',text:'Saved.',annotations:{audience:['user'],priority:1}}],_meta:{trace:['ok']}};
+  const client=module.createRiffWorkStateClient(async()=>raw,async()=>({...job,work_states:[state]}));
+  assert.equal((await client.set(job,variantId,'saved')).status,'confirmed');
 });
 
 test('an old successful replay refreshes newer truth and clears the stale retry intent',async()=>{

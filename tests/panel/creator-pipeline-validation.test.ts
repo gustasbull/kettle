@@ -4,7 +4,7 @@ import { creatorJobFixture, recommendationBatchFixture } from '../../evals/creat
 import { creatorFailure } from '../../packages/application/creator-operations.ts';
 import { CreatorJobOutput, emptyCreatorJobProgress } from '../../packages/contracts/creator-pipeline.ts';
 import { StartRiffCreatorOutput } from '../../packages/contracts/riff-creator.ts';
-import { creatorJobStructuredOutput, parseCreatorJobOutput, parseGetCreatorJobInput, parseStartRiffCreatorInput } from '../../apps/panel/creator-pipeline-validation.ts';
+import { creatorJobStatusStructuredOutput, creatorJobStructuredOutput, parseCreatorJobOutput, parseGetCreatorJobInput, parseStartRiffCreatorInput } from '../../apps/panel/creator-pipeline-validation.ts';
 
 const id=(value:number)=>`00000000-0000-4000-8000-${String(value).padStart(12,'0')}`;
 const envelope=(kind:'scan'|'recommendations'|'scripts')=>({ok:true as const,data:{job:creatorJobFixture(kind)}});
@@ -267,6 +267,52 @@ test('structured results alone are accepted and Riff start output projects only 
   assert.deepEqual(creatorJobStructuredOutput({structuredContent:started}),{ok:true,data:{job:started.data.job}});
   for(const raw of [started,{content:[{type:'text',text:JSON.stringify(started)}]},{_meta:started},{structuredContent:started,isError:true}])
     assert.equal(creatorJobStructuredOutput(raw),undefined);
+});
+
+test('full and status parsers enforce the complete MCP result envelope for successes and failures',()=>{
+  const job=creatorJobFixture('scripts');
+  const full={ok:true as const,data:{job}};
+  const status={ok:true as const,data:{status:{id:job.id,kind:job.kind,state:job.state,stage:job.stage,
+    revision:job.revision,created_at:job.created_at,updated_at:job.updated_at,progress:job.progress,
+    terminal_result_available:job.state==='succeeded'}}};
+  const denied=creatorFailure('VERSION_CONFLICT');
+  const parsers=[
+    {name:'full',parse:creatorJobStructuredOutput,success:full},
+    {name:'status',parse:creatorJobStatusStructuredOutput,success:status},
+  ];
+  const malformed=(inner:unknown)=>{
+    const hidden:any={structuredContent:inner};Object.defineProperty(hidden,'isError',{value:false,enumerable:false});
+    const accessorContent:any[]=[];Object.defineProperty(accessorContent,'0',{get(){return {type:'text',text:'spoof'};},enumerable:true});
+    const sparseContent=new Array(1);
+    const proxyContent=new Proxy([],{ownKeys(){throw new Error('proxy trap');}});
+    const symbol:any={structuredContent:inner};symbol[Symbol('secret')]=true;
+    const custom=Object.assign(Object.create({spoof:true}),{structuredContent:inner});
+    return [
+      inner,
+      {structuredContent:inner,content:{}},
+      {structuredContent:inner,content:undefined},
+      {structuredContent:inner,isError:'false'},
+      {structuredContent:inner,isError:undefined},
+      {structuredContent:inner,_meta:1},
+      {structuredContent:inner,content:[{type:'text',text:'spoof',secret:true}]},
+      {structuredContent:inner,content:accessorContent},
+      {structuredContent:inner,content:sparseContent},
+      {structuredContent:inner,content:proxyContent},
+      {structuredContent:inner,unknown:true},
+      hidden,
+      symbol,
+      custom,
+    ];
+  };
+  for(const {name,parse,success} of parsers){
+    const successEnvelope={structuredContent:success,isError:false,
+      content:[{type:'text',text:'Ready.',annotations:{audience:['assistant'],priority:0}}],_meta:{trace:['ok']}};
+    const failureEnvelope={structuredContent:denied,isError:true,content:[],_meta:{trace:{sampled:false}}};
+    assert.deepEqual(parse(successEnvelope),success,`${name}: valid success envelope`);
+    assert.deepEqual(parse(failureEnvelope),denied,`${name}: valid failure envelope`);
+    for(const [index,raw] of [...malformed(success),...malformed(denied)].entries())
+      assert.equal(parse(raw),undefined,`${name}: malformed success/failure envelope ${index}`);
+  }
 });
 
 test('Riff start projection validates the complete project, canonical source and cross-object lineage',()=>{

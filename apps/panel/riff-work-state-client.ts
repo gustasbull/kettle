@@ -1,4 +1,5 @@
 import type { RiffWorkState,RiffWorkStateValue,SetRiffWorkStateInput } from '../../packages/contracts/riff-work-state.ts';
+import { parseStrictCallToolResult } from './call-tool-result-validation.ts';
 
 type JobSnapshot={id:string;work_states:RiffWorkState[]};
 type Failure={ok:false;error:{code:string;message:string;retryable:boolean;recovery:string}};
@@ -19,11 +20,8 @@ const exact=(value:Record<string,unknown>,keys:string[])=>{
     &&keys.every(key=>Object.hasOwn(value,key));
 };
 const envelope=(raw:unknown):{value:unknown;isError:boolean}|undefined=>{
-  const outer=object(raw);if(!outer)return;
-  const keys=Reflect.ownKeys(outer),allowed=['structuredContent','isError','content','_meta'];
-  if(keys.some(key=>typeof key!=='string'||!allowed.includes(key))||!Object.hasOwn(outer,'structuredContent')
-    ||outer.isError!==undefined&&typeof outer.isError!=='boolean'||outer.content!==undefined&&!Array.isArray(outer.content))return;
-  return {value:outer.structuredContent,isError:outer.isError===true};
+  const outer=parseStrictCallToolResult(raw);if(!outer)return;
+  return {value:outer.structuredContent,isError:outer.isError};
 };
 const uuid=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i;
 const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();

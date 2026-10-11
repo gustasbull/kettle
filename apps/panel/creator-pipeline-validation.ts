@@ -1,6 +1,7 @@
 import type { CreatorJobStatusView, CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 import type { RiffVideoCard } from '../../packages/contracts/riff-videos.ts';
 import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
+import { parseStrictCallToolResult } from './call-tool-result-validation.ts';
 import { isCreatorJobStatusView, parseCreatorJobView } from './riff-home-validation.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -145,11 +146,9 @@ function videosOutput(value:unknown):RiffVideosPublicOutput|undefined {
 
 function structuredOutput<T>(raw:unknown,parse:(value:unknown)=>T|undefined):T|undefined {
   try{
-    if(!safeTree(raw)||raw===null||typeof raw!=='object'||Array.isArray(raw))return;
-    const keys=Reflect.ownKeys(raw);if(keys.some(key=>typeof key!=='string'||!['structuredContent','isError','content','_meta'].includes(key)))return;
-    const envelope=raw as JsonObject;if(!Object.hasOwn(envelope,'structuredContent'))return;
+    const envelope=parseStrictCallToolResult(raw);if(!envelope)return;
     const parsed=parse(envelope.structuredContent);if(!parsed)return;
-    return envelope.isError===true&&(parsed as {ok?:unknown}).ok===true?undefined:parsed;
+    return envelope.isError&&(parsed as {ok?:unknown}).ok===true?undefined:parsed;
   }catch{return;}
 }
 
@@ -171,11 +170,9 @@ export function riffDiscoveryCatalogStructuredOutput(raw:unknown):RiffVideosPubl
 }
 export function creatorJobStructuredOutput(raw:unknown):CreatorJobPublicOutput|undefined {
   try {
-    if(!safeTree(raw)||raw===null||typeof raw!=='object'||Array.isArray(raw))return;
-    const keys=Reflect.ownKeys(raw);if(keys.some(key=>typeof key!=='string'||!['structuredContent','isError','content','_meta'].includes(key)))return;
-    const envelope=raw as JsonObject;if(!Object.hasOwn(envelope,'structuredContent'))return;
-    const direct=jobOutput(envelope.structuredContent);if(direct)return envelope.isError===true&&direct.ok?undefined:direct;
-    const started=record(envelope.structuredContent,['ok','data']);if(!started||started.ok!==true||envelope.isError===true)return;
+    const envelope=parseStrictCallToolResult(raw);if(!envelope)return;
+    const direct=jobOutput(envelope.structuredContent);if(direct)return envelope.isError&&direct.ok?undefined:direct;
+    const started=record(envelope.structuredContent,['ok','data']);if(!started||started.ok!==true||envelope.isError)return;
     const data=record(started.data,['project','job','source']);if(!data)return;
     const publicJob=jobOutput({ok:true,data:{job:data.job}});const savedProject=project(data.project),source=canonicalSource(data.source);
     if(!publicJob?.ok||!savedProject||!source||publicJob.data.job.kind!=='scan'

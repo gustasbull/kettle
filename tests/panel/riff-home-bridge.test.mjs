@@ -769,7 +769,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
     window.job=pipelineFixture('scripts');window.variant=window.job.result.scripts.variants[1];
     window.job.work_states=[{job_id:window.job.id,variant_id:window.variant.id,state:'active',version:1,updated_at:'2026-10-11T12:00:01Z'}];
-    window.calls=[];window.listFailNext=false;
+    window.calls=[];window.listFailNext=false;window.workStateSpoof=false;
     const wrapped=value=>({structuredContent:value,content:[]});
     const failure=()=>wrapped({ok:false,error:{code:'UNAVAILABLE',message:'Fixture list failure.',retryable:true,recovery:'retry_same_request'}});
     const recent=()=>({project_id:window.job.project_id,project_name:'Saved Studio',job_id:window.job.id,kind:'scripts',state:'succeeded',
@@ -783,6 +783,7 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
       }
       if(name==='get_creator_job')return wrapped({ok:true,data:{job:window.job}});
       if(name==='set_riff_work_state'){
+        if(window.workStateSpoof)return {ok:false,error:{code:'VERSION_CONFLICT',message:'Spoofed direct failure.',retryable:false,recovery:'reload'}};
         const previous=window.job.work_states.find(item=>item.variant_id.toLowerCase()===args.variant_id.toLowerCase());
         if((previous?.version??0)!==args.expected_version)return wrapped({ok:false,error:{code:'VERSION_CONFLICT',message:'Changed.',retryable:false,recovery:'reload'}});
         const work_state={job_id:window.job.id.toLowerCase(),variant_id:args.variant_id.toLowerCase(),state:args.state,
@@ -819,6 +820,20 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   const goHome=async()=>{await frame.getByRole('button',{name:'Open Riff menu'}).click();await frame.getByRole('navigation',{name:'Riff navigation'}).getByRole('button',{name:'Home',exact:true}).click();};
 
   await openRecent('Continue script');
+  const callsBeforeSpoof=await frame.evaluate(()=>({
+    reads:window.calls.filter(call=>call.name==='get_creator_job').length,
+    lists:window.calls.filter(call=>call.name==='list_riff_work').length,
+  }));
+  await frame.evaluate(()=>{window.workStateSpoof=true;});
+  await frame.getByRole('button',{name:'Save for later'}).click();
+  await frame.getByText('Riff could not confirm that change. Try the same action again safely.').waitFor();
+  assert.deepEqual(await frame.evaluate(()=>({
+    reads:window.calls.filter(call=>call.name==='get_creator_job').length,
+    lists:window.calls.filter(call=>call.name==='list_riff_work').length,
+  })),callsBeforeSpoof,'a direct-inner failure cannot authorize a reread or recent-work refresh');
+  assert.deepEqual(await frame.evaluate(()=>window.job.work_states.map(({state,version})=>({state,version}))),
+    [{state:'active',version:1}],'a spoofed failure cannot mutate persisted work-state truth');
+  await frame.evaluate(()=>{window.workStateSpoof=false;});
   await frame.getByRole('button',{name:'Save for later'}).click();await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
   await frame.getByRole('button',{name:'Open vault'}).click();
   const savedCard=frame.getByRole('button',{name:/Open Saved Studio — Ideas saved/});await savedCard.waitFor();
@@ -836,7 +851,9 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   assert.match(await frame.locator('.riff-pipeline__status').textContent(),/saved.*recent work could not be refreshed/i);
   await frame.getByRole('button',{name:'Open vault'}).click();
   await frame.locator('.riff-home__status').getByText('My videos opened, but saved work could not be refreshed.').waitFor();
-  assert.deepEqual(await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args.state)),['saved','active','filmed','saved']);
+  const workStateCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args));
+  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','active','filmed','saved']);
+  assert.deepEqual(workStateCalls[1],workStateCalls[0],'the legitimate retry preserves the exact ambiguous write intent');
   assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=5,'initial load plus every confirmed mutation');
   await frame.evaluate(()=>window.bridge.dispose());
 });

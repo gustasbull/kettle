@@ -19,6 +19,7 @@ import {
 import { riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
 import { createRiffWorkStateClient,parseRiffWorkState } from './riff-work-state-client.ts';
+import { parseStrictCallToolResult, strictObjectShape } from './call-tool-result-validation.ts';
 
 type OpenAIFile = { fileId: string; fileName?: string; mimeType?: string };
 type OpenAIHost = {
@@ -54,10 +55,7 @@ const uuidKey=(value:string)=>value.toLowerCase();
 const sameUuid=(left:string,right:string)=>uuidKey(left)===uuidKey(right);
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-const envelope = (raw: unknown) => {
-  const outer = object(raw);
-  return object(outer?.structuredContent) ?? outer;
-};
+const envelope = (raw: unknown) => parseStrictCallToolResult(raw)?.structuredContent;
 
 function readJob(raw: unknown): CreatorJobView | undefined {
   const result=creatorJobStructuredOutput(raw);
@@ -70,10 +68,13 @@ const failureCodes = new Set([
 ]);
 const recoveryKinds = new Set(['reauthorize', 'contact_support', 'correct_input', 'reload', 'retry_same_request']);
 function readFailure(raw: unknown): CompleteSafeFailure | undefined {
-  const result = envelope(raw); const error = object(result?.error);
-  if (result?.ok !== false || !error || typeof error.code !== 'string' || !failureCodes.has(error.code)
+  const envelope = parseStrictCallToolResult(raw);
+  const result = strictObjectShape(envelope?.structuredContent, ['ok', 'error']);
+  const error = strictObjectShape(result?.error, ['code', 'message', 'retryable', 'recovery']);
+  if (!result || result.ok !== false || !error || typeof error.code !== 'string' || !failureCodes.has(error.code)
     || typeof error.recovery !== 'string' || !recoveryKinds.has(error.recovery)
-    || typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return undefined;
+    || typeof error.message !== 'string' || !error.message.trim() || error.message.length > 500
+    || typeof error.retryable !== 'boolean') return undefined;
   return { code: error.code, message:error.message, retryable:error.retryable, recovery: error.recovery };
 }
 
@@ -93,8 +94,14 @@ function retainRequestId(failure: SafeFailure | undefined) {
 }
 
 function rejectedFailure(error: unknown) {
-  const data = object(error)?.data;
-  return readFailure(data) ?? readFailure(object(data)?.result);
+  try {
+    if (error === null || typeof error !== 'object') return;
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'data');
+    if (!descriptor || !('value' in descriptor)) return;
+    const data = descriptor.value;
+    const nested = strictObjectShape(data, ['result']);
+    return readFailure(data) ?? readFailure(nested?.result);
+  } catch { return; }
 }
 
 function creatorIntent(rawSource: string) {
@@ -270,9 +277,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   };
 
   const workStateClient=createRiffWorkStateClient<CreatorJobView>(async input=>{
-    const outcome=await callTool('set_riff_work_state',input);
+    const outcome=await callTool('set_riff_work_state',input,toolTimeoutMs,false);
     if(outcome.status==='response')return outcome.value;
-    if(outcome.status==='application_error')return {structuredContent:{ok:false,error:outcome.failure},isError:true,content:[]};
     throw new Error('Ambiguous work-state write');
   },async jobId=>{
     const outcome=await callTool('get_creator_job',{job_id:jobId});
