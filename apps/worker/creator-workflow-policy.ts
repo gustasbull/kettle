@@ -9,10 +9,8 @@ type CreatorWorkflowStepLike={do<T>(name:string,options:ReturnType<typeof creato
 export function createCreatorWorkflowDurableStep(step:CreatorWorkflowStepLike){
   return async <T>(name:string,run:()=>Promise<T>):Promise<T>=>{
     // Values crossing step boundaries are JSON receipts, never credentials or fetch handles.
-    const value=await step.do(name,creatorWorkflowStepOptions(name),async()=>{
-      const result=await run();
-      return result===undefined?result:JSON.parse(JSON.stringify(result)) as T;
-    });
+    const value=await step.do(name,creatorWorkflowStepOptions(name),
+      async()=>JSON.parse(JSON.stringify(await run())) as T);
     return value as T;
   };
 }

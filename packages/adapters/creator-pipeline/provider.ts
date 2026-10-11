@@ -36,7 +36,7 @@ export class CreatorProviderError extends Error {
   }
 }
 const safeProviderDiagnosticPattern='creator_provider_(?:transport|malformed|permission|unavailable)(?:_(?:timeout|network|oversized|malformed|http))?(?:_[1-5]\\d\\d)?';
-const ambiguousAttemptPattern=new RegExp(`^creator_attempt_needs_reconciliation(?::${safeProviderDiagnosticPattern})?$`);
+const ambiguousAttemptPattern=new RegExp(`(?:^|[\\s:(])creator_attempt_needs_reconciliation(?::${safeProviderDiagnosticPattern})?(?=$|[\\s)'\",])`);
 const blockedAttemptPattern=new RegExp(`^creator_job_blocked(?::${safeProviderDiagnosticPattern})?$`);
 const isAmbiguousAttempt=(error:unknown)=>error instanceof Error&&ambiguousAttemptPattern.test(error.message);
 export type CreatorPipelineAdapterOptions = {

@@ -27,9 +27,13 @@ test('three provider durable steps use separate zero-retry boundaries while chec
  assert.deepEqual(calls.map(call=>[call.name,call.options.retries.limit]),[
   ['provider:video:901',0],['provider:video:902',0],['provider:video:903',0],
  ]);
- await durable('checkpoint:recommend:detail:901',async()=>undefined);
+ const receipt={native_id:'904',nested:{status:'received'}};
+ const normalized=await durable('provider:video:904',async()=>receipt);
+ assert.deepEqual(normalized,receipt);assert.notEqual(normalized,receipt);assert.notEqual(normalized.nested,receipt.nested);
+ await assert.rejects(durable('checkpoint:recommend:detail:901',async()=>undefined),SyntaxError);
  assert.deepEqual(calls.at(-1),{name:'checkpoint:recommend:detail:901',options:creatorWorkflowStepOptions('checkpoint:recommend:detail:901')});
  assert.equal(calls.at(-1)!.options.retries.limit,2);
+ await assert.rejects(durable('checkpoint:recommend:detail:902',async()=>1n),TypeError);
 });
 
 function deferred<T>(){let resolve!:(value?:T)=>void;const promise=new Promise<T>(done=>{resolve=value=>done(value as T);});return {promise,resolve};}

@@ -343,7 +343,26 @@ test('ambiguous fan-out dominates definite failures; otherwise first definite fa
   });
  }
 });
-test('ambiguous prefix checkpoint dominates a definite detail failure',async()=>{
+test('wrapped ambiguous detail uses safe delimiters and dominates a definite failure',async()=>{
+ const {dna}=await setup();
+ for(const validDelimiter of [true,false]){
+  const f=providerHttpFixture(),fallback=f.options.fetch,ids=['951','952','953'];
+  f.options.fetch=async(url,init)=>new URL(url).hostname==='api.lightreel.ai'
+   ?Response.json({conversationId:'wrapped-detail-ambiguity',answer:{urls:ids.map(id=>`https://www.tiktok.com/@fictional_kettle_creator/video/${id}`)}})
+   :fallback(url,init);
+  const guard=fakeGuard(),base=guard.context.call.bind(guard.context);
+  guard.context.call=async(key,provider,operation,execute)=>{
+   if(key==='video:951')throw new CreatorProviderError('permission');
+   if(key==='video:952')throw new Error(`Workflow step failed: Error: ${validDelimiter?'':'x'}creator_attempt_needs_reconciliation:creator_provider_transport_http_500\n    at private-secret`);
+   return base(key,provider,operation,execute);
+  };
+  await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>{
+   assert.equal((error as Error).message,validDelimiter?'creator_attempt_needs_reconciliation':'creator_provider_permission');
+   assert.doesNotMatch((error as Error).message,/Workflow|private|secret/);return true;
+  });
+ }
+});
+test('bare and wrapped ambiguous prefix checkpoints dominate a definite detail failure',async()=>{
  const {dna}=await setup(),f=providerHttpFixture(),fallback=f.options.fetch,ids=['941','942','943'];
  f.options.fetch=async(url,init)=>{
   const parsed=new URL(url);
@@ -354,16 +373,20 @@ test('ambiguous prefix checkpoint dominates a definite detail failure',async()=>
   }
   return fallback(url,init);
  };
- const guard=fakeGuard(),baseCall=guard.context.call.bind(guard.context),baseCheckpoint=guard.context.checkpoint.bind(guard.context);
- guard.context.call=async(key,provider,operation,execute)=>key==='video:942'
-  ?Promise.reject(new CreatorProviderError('permission')):baseCall(key,provider,operation,execute);
- guard.context.checkpoint=async(key,stage,progress)=>{
-  if(key==='recommend:detail:941')throw new PipelineRunError('needs_reconciliation','creator_provider_transport_http_500');
-  return baseCheckpoint(key,stage,progress);
- };
- await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>
-  error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
- assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
+ for(const wrapped of [false,true]){
+  const guard=fakeGuard(),baseCall=guard.context.call.bind(guard.context),baseCheckpoint=guard.context.checkpoint.bind(guard.context);
+  guard.context.call=async(key,provider,operation,execute)=>key==='video:942'
+   ?Promise.reject(new CreatorProviderError('permission')):baseCall(key,provider,operation,execute);
+  guard.context.checkpoint=async(key,stage,progress)=>{
+   if(key==='recommend:detail:941')throw wrapped
+    ?new Error('Workflow step failed: Error: creator_attempt_needs_reconciliation:creator_provider_transport_http_500\n    at private-secret')
+    :new PipelineRunError('needs_reconciliation','creator_provider_transport_http_500');
+   return baseCheckpoint(key,stage,progress);
+  };
+  await assert.rejects(createCreatorPipelineProvider(f.options).recommend(dna,guard.context),error=>
+   error instanceof Error&&error.message==='creator_attempt_needs_reconciliation');
+  assert.equal(guard.checkpoints.some(entry=>entry.key==='recommend:save'),false);
+ }
 });
 test('missing research ID and HTTP failures stop after one call and keep raw diagnostics out of errors', async () => {
   const { dna } = await setup(); const f = providerHttpFixture();
