@@ -55,6 +55,15 @@ package-host fake: `open_riff` opens usable Home while the welcome can still be
 pending, strict welcome success then permits `mark_riff_onboarding_seen`, and
 failure, malformed output, or timeout stop before the write. This is explicitly a
 package/setup-skill orchestration contract; raw MCP does not run the sequence itself.
+The same packaged guidance now reflects the exposed `set_riff_work_state` tool:
+Save, Undo, or Filmed is claimed only after a strict successful receipt and
+authoritative job reconciliation; every other outcome remains unconfirmed or failed.
+
+A second review also removed an evidence mismatch in the Task 8 host fake. Its
+`settle: never` call now genuinely stays pending while a bounded harness timeout
+requests cancellation and restores the retry UI; the test asserts that the host call
+has started but has not settled. The ignored visual-review README names both the
+initial Task 8 commit and the dark-host hardening/31-capture evidence commit.
 
 ## Fixture and trust boundary
 

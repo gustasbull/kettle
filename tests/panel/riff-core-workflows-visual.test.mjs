@@ -84,7 +84,12 @@ async function browserBundle() {
         window.bootHomeEnvelopeState=state=>{reset();window.view=mountRiffHome(root(),homeActions());if(state==='loading')window.view.render({status:'loading'});else if(state==='error')window.view.render({status:'error',message:'Authored account unavailable.'});else window.view.render(f.accounts.malformedMarker.value.result);window.view.setRecentsState(state==='loading'?f.home.loading.value:state==='error'?f.home.error.value:{status:'ready',items:recents()});};
         window.bootAsyncHome=()=>{reset();window.pending=[];window.view=mountRiffHome(root(),{...homeActions(),start:source=>new Promise(resolve=>window.pending.push({source,resolve}))});window.view.render({status:'ready',account:f.accounts.returning.value});window.view.setRecents([]);};
         window.switchAsyncHomeAccount=()=>{window.view.clearPrivate();window.view.render({status:'ready',account:f.accounts.accountB.value});window.view.setRecents([])};
-        window.bootTimeoutHome=()=>{reset();window.view=mountRiffHome(root(),{...homeActions(),start:async source=>{window.events.push({kind:'timeout-start',source,fixture:f.host.timeout.fixture_id});await new Promise(resolve=>setTimeout(resolve,20));return {status:'failed',message:'Riff could not confirm whether this analysis started. Try the same action again safely.'}}});window.view.render({status:'ready',account:f.accounts.returning.value});window.view.setRecents([]);};
+        window.bootTimeoutHome=()=>{reset();window.timeoutHarness={hostStarted:0,hostSettled:0,harnessTimeouts:0,cancellationRequests:0};
+          const pendingHostCall=signal=>new Promise(()=>{window.timeoutHarness.hostStarted++;signal.addEventListener('abort',()=>{window.timeoutHarness.cancellationRequests++},{once:true})});
+          window.view=mountRiffHome(root(),{...homeActions(),start:async source=>{window.events.push({kind:'timeout-start',source,fixture:f.host.timeout.fixture_id});const controller=new AbortController();
+            const hostCall=pendingHostCall(controller.signal).then(result=>{window.timeoutHarness.hostSettled++;return result},error=>{window.timeoutHarness.hostSettled++;throw error});
+            const harnessTimeout=new Promise(resolve=>setTimeout(()=>{window.timeoutHarness.harnessTimeouts++;controller.abort();resolve({status:'failed',message:'Riff could not confirm whether this analysis started. Try the same action again safely.'})},20));
+            return Promise.race([hostCall,harnessTimeout])}});window.view.render({status:'ready',account:f.accounts.returning.value});window.view.setRecents([]);};
         window.parseHome=value=>riffHomeStructuredOutput(value);
         window.parseCatalog=value=>riffDiscoveryCatalogStructuredOutput(value);
         window.bootProduct=(source='draft',mode='saved')=>{reset();window.productMode=mode;window.productCalls=[];window.productFrames=[];window.productLate=[];
@@ -820,6 +825,10 @@ test('Hostile, malformed, timeout, late, and account-switch inputs fail closed w
   await page.getByText(/could not confirm whether this analysis started/i).waitFor();
   assert.equal(await page.getByRole('button',{name:'Find my next idea'}).isEnabled(),true);
   assert.equal(await page.evaluate(()=>window.events.at(-1).fixture),riffCoreWorkflowFixtures.host.timeout.fixture_id);
+  assert.equal(riffCoreWorkflowFixtures.host.timeout.value.settle,'never');
+  assert.deepEqual(await page.evaluate(()=>window.timeoutHarness),{
+    hostStarted:1,hostSettled:0,harnessTimeouts:1,cancellationRequests:1,
+  },'the host call stays pending while the bounded harness times out and requests cancellation');
 
   await page.evaluate(()=>window.bootPipeline('hostile'));
   assert.match(await page.locator('.riff-pipeline__content').textContent(),/<img src=x onerror=/);

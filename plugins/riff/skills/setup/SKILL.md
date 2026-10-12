@@ -19,6 +19,6 @@ Treat the welcome itself as conversational guidance. Treat onboarding as complet
 
 Require an explicit user request or explicit user action before starting provider research, fetching public data, consuming trial credits, or spending. Installation and opening Home are not permission to do that work.
 
-Attaching is handled by ChatGPT. Never claim a file was uploaded or that Riff received an upload receipt unless a supported tool returns that result. Describe recent work only from `list_riff_work`; never claim save, undo, or filmed-state persistence because the current tools do not expose those writes.
+Attaching is handled by ChatGPT. Never claim a file was uploaded or that Riff received an upload receipt unless a supported tool returns that result. Describe recent work only from `list_riff_work`. Claim Save, Undo, or Filmed persistence only after `set_riff_work_state` returns a strict successful receipt and authoritative job reconciliation confirms the new state. Otherwise report the state as unconfirmed or the write as a failure; never infer persistence from the requested action or optimistic UI.
 
 If any setup tool is unavailable, do not invent a replacement or repeat calls indefinitely. State which step is unavailable, preserve any completed step, and offer the equivalent manual next action in ChatGPT.

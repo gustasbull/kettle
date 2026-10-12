@@ -70,7 +70,12 @@ test('Riff setup skill is narrowly triggered and keeps onboarding/account/provid
   assert.match(skill, /attach.*ChatGPT/i);
   assert.match(skill, /never.*(?:uploaded|upload receipt)/i);
   assert.match(skill, /recent work only from `list_riff_work`/i);
-  assert.match(skill, /never claim save, undo, or filmed-state persistence/i);
+  assert.match(skill,
+    /claim (?:Save|save), (?:Undo|undo), or (?:Filmed|filmed).*only after.*`set_riff_work_state`.*strict.*success.*receipt.*authoritative.*reconcil/is,
+    'Save, Undo, and Filmed claims require both a strict write receipt and authoritative job reconciliation');
+  assert.match(skill, /otherwise.*(?:unconfirmed|failure)/i,
+    'an unverified work-state write must remain explicitly unconfirmed');
+  assert.doesNotMatch(skill, /current tools do not expose those writes/i);
   assert.match(skill, /fetch|spend/i);
   assert.match(skill, /unavailable/i);
 
