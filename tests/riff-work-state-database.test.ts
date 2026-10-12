@@ -137,19 +137,21 @@ test('full-job and recent reads are additive, ordered, owner-scoped and redacted
   assert.equal(full.data.job.work_states.some((state:any)=>'account_id' in state||'request_id' in state),false);
   const historical=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_get_creator_job($1::uuid,$2::jsonb) value',[accountA,JSON.stringify({job_id:scanJob})])).rows[0]!.value;});
   assert.deepEqual(historical.data.job.work_states,[]);
-  await db.query("insert into public.riff_creator_starts(account_id,request_id,input,source,project_id,job_id) values($1,$2,'{}','{\"platform\":\"tiktok\",\"kind\":\"video\",\"handle\":\"fixture\",\"canonical_url\":\"https://www.tiktok.com/@fixture/video/1\",\"profile_url\":\"https://www.tiktok.com/@fixture\",\"video_url\":\"https://www.tiktok.com/@fixture/video/1\"}',$3,$4)",[accountA,crypto.randomUUID(),project,job]);
+  await db.query("update public.riff_work_states set updated_at='2026-11-30T12:00:00Z' where job_id=$1 and variant_id=$2",[job,variantV7]);
+  await db.query("insert into public.riff_creator_starts(account_id,request_id,input,source,project_id,job_id) values($1,$2,'{}','{\"platform\":\"tiktok\",\"kind\":\"video\",\"handle\":\"fixture\",\"canonical_url\":\"https://www.tiktok.com/@fixture/video/1\",\"profile_url\":\"https://www.tiktok.com/@fixture\",\"video_url\":\"https://www.tiktok.com/@fixture/video/1\"}',$3,$4)",[accountA,crypto.randomUUID(),project,scanJob]);
   const recent=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_list_riff_work($1::uuid,$2::jsonb) value',[accountA,'{"limit":4}'])).rows[0]!.value;});
   assert.equal(recent.ok,true);assert.equal(recent.data.work[0].job_id,job);assert.equal(recent.data.work[0].variant_id,variantV7);assert.equal(recent.data.work[0].work_state.variant_id,variantV7);
   assert.equal(JSON.stringify(recent).includes(accountA),false);assert.equal(JSON.stringify(recent).includes(request(20)),false);
 });
 
-test('recent work deduplicates owned projects before limit and ranks jobs by job or work-state activity',async()=>{
+test('recent work follows started project lineage to downstream jobs before applying its global limit',async()=>{
   const promotedProject=await saveProject(accountA,'Promoted filmed work');
   const secondProject=await saveProject(accountA,'Second recent project');
   const tieProject=await saveProject(accountA,'Deterministic tie project');
   const isolatedProject=await saveProject(accountB,'Other owner recent project');
-  const promotedJob=id(721),inactiveJob=id(722),promotedVariant=id(723),tiedVariant=id(733);
+  const promotedJob=id(721),promotedScan=id(722),promotedVariant=id(723),tiedVariant=id(733);
   const secondJob=id(724),tieJobA=id(725),tieJobB=id(726),isolatedJob=id(727);
+  const secondScan=id(728),tieScan=id(729),isolatedScan=id(730),inactiveJob=id(731);
   const insertJob=async(jobId:string,owner:string,projectId:string,kind:'scan'|'scripts',updatedAt:string,variants:string[]=[])=>{
     const result=kind==='scripts'?{kind:'scripts',scripts:{variants:variants.map(variantId=>({id:variantId}))}}:{kind:'scan'};
     await db.query(`insert into public.creator_jobs
@@ -157,11 +159,15 @@ test('recent work deduplicates owned projects before limit and ranks jobs by job
       values($1,$2,$3,$4,'succeeded',1,'accepted',public.kettle_creator_empty_progress($4),'{}','{}',$5::jsonb,null,$6,$7,$7)`,
       [jobId,owner,projectId,kind,JSON.stringify(result),crypto.randomUUID(),updatedAt]);
   };
-  await insertJob(promotedJob,accountA,promotedProject,'scripts','2026-12-01T10:00:00Z',[promotedVariant,tiedVariant]);
+  await insertJob(promotedScan,accountA,promotedProject,'scan','2026-12-01T10:00:00Z');
+  await insertJob(promotedJob,accountA,promotedProject,'scripts','2026-12-01T13:00:00Z',[promotedVariant,tiedVariant]);
   await insertJob(inactiveJob,accountA,promotedProject,'scan','2026-12-01T13:30:00Z');
+  await insertJob(secondScan,accountA,secondProject,'scan','2026-12-01T10:00:00Z');
   await insertJob(secondJob,accountA,secondProject,'scripts','2026-12-01T13:00:00Z',[id(734)]);
+  await insertJob(tieScan,accountA,tieProject,'scan','2026-12-01T10:00:00Z');
   await insertJob(tieJobA,accountA,tieProject,'scripts','2026-12-01T12:30:00Z',[id(735)]);
-  await insertJob(tieJobB,accountA,tieProject,'scan','2026-12-01T12:30:00Z');
+  await insertJob(tieJobB,accountA,tieProject,'scripts','2026-12-01T12:30:00Z',[id(737)]);
+  await insertJob(isolatedScan,accountB,isolatedProject,'scan','2026-12-01T10:00:00Z');
   await insertJob(isolatedJob,accountB,isolatedProject,'scripts','2026-12-01T15:00:00Z',[id(736)]);
   await db.query(`insert into public.riff_work_states(job_id,variant_id,account_id,state,version,created_at,updated_at)
     values($1,$2,$3,'filmed',3,$4,$4),($1,$5,$3,'saved',3,$4,$4)`,
@@ -170,12 +176,10 @@ test('recent work deduplicates owned projects before limit and ranks jobs by job
   const insertStart=(owner:string,requestId:string,projectId:string,jobId:string,nativeId:string,createdAt:string)=>db.query(
     `insert into public.riff_creator_starts(account_id,request_id,input,source,project_id,job_id,created_at) values($1,$2,'{}',$3::jsonb,$4,$5,$6)`,
     [owner,requestId,source(nativeId),projectId,jobId,createdAt]);
-  await insertStart(accountA,id(980),promotedProject,promotedJob,'721','2026-12-01T10:05:00Z');
-  await insertStart(accountA,id(981),promotedProject,inactiveJob,'722','2026-12-01T13:35:00Z');
-  await insertStart(accountA,id(982),secondProject,secondJob,'724','2026-12-01T13:05:00Z');
-  await insertStart(accountA,id(983),tieProject,tieJobA,'725','2026-12-01T12:35:00Z');
-  await insertStart(accountA,id(984),tieProject,tieJobB,'726','2026-12-01T12:35:00Z');
-  await insertStart(accountB,id(985),isolatedProject,isolatedJob,'727','2026-12-01T15:05:00Z');
+  await insertStart(accountA,id(980),promotedProject,promotedScan,'722','2026-12-01T10:05:00Z');
+  await insertStart(accountA,id(981),secondProject,secondScan,'728','2026-12-01T10:05:00Z');
+  await insertStart(accountA,id(982),tieProject,tieScan,'729','2026-12-01T10:05:00Z');
+  await insertStart(accountB,id(983),isolatedProject,isolatedScan,'730','2026-12-01T10:05:00Z');
   const list=async(owner:string,limit:number)=>db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_list_riff_work($1::uuid,$2::jsonb) value',[owner,JSON.stringify({limit})])).rows[0]!.value;});
   const limited=await list(accountA,2);assert.equal(limited.ok,true);
   assert.deepEqual(limited.data.work.map((item:any)=>item.project_id),[promotedProject,secondProject],'the global limit applies after one row is chosen per project');
@@ -183,14 +187,14 @@ test('recent work deduplicates owned projects before limit and ranks jobs by job
   const promoted=limited.data.work[0];
   assert.equal(promoted.job_id,promotedJob,'a filmed older script outranks a newer inactive project job');
   assert.equal(new Date(promoted.updated_at).toISOString(),'2026-12-01T14:00:00.000Z','top-level recency is the selected job\'s meaningful activity');
-  assert.equal(promoted.source.canonical_url,'https://www.tiktok.com/@fixture/video/721','source stays paired with the activity-selected job');
+  assert.equal(promoted.source.canonical_url,'https://www.tiktok.com/@fixture/video/722','the downstream winner keeps its project-entry source');
   assert.equal(promoted.variant_id,promotedVariant,'equal-time variant states use their stable UUID tie-break');
   assert.deepEqual({...promoted.work_state,updated_at:new Date(promoted.work_state.updated_at).toISOString()},
     {job_id:promotedJob,variant_id:promotedVariant,state:'filmed',version:3,updated_at:'2026-12-01T14:00:00.000Z'});
   const all=await list(accountA,20);const tied=all.data.work.find((item:any)=>item.project_id===tieProject);
   assert.equal(tied.job_id,tieJobA,'equal-activity project jobs use the stable job UUID tie-break');
-  assert.equal(tied.source.canonical_url,'https://www.tiktok.com/@fixture/video/725','the deterministic winning job keeps its own start provenance');
+  assert.equal(tied.source.canonical_url,'https://www.tiktok.com/@fixture/video/729','the deterministic downstream winner keeps its project-entry source');
   const isolated=await list(accountB,20);
-  assert.deepEqual(isolated.data.work.map((item:any)=>item.project_id),[isolatedProject]);
-  assert.equal(JSON.stringify(limited).includes(accountB),false);assert.equal(JSON.stringify(limited).includes(id(981)),false);
+  assert.deepEqual(isolated.data.work.map((item:any)=>[item.project_id,item.job_id]),[[isolatedProject,isolatedJob]]);
+  assert.equal(JSON.stringify(limited).includes(accountB),false);assert.equal(JSON.stringify(limited).includes(id(980)),false);
 });

@@ -219,19 +219,21 @@ begin
     or (p_input?'limit' and jsonb_typeof(p_input->'limit') is distinct from 'number') then return public.kettle_error('VALIDATION_ERROR'); end if;
   begin v_limit:=coalesce((p_input->>'limit')::integer,10);exception when others then return public.kettle_error('VALIDATION_ERROR');end;
   if v_limit not between 1 and 20 then return public.kettle_error('VALIDATION_ERROR'); end if;
-  with latest_starts as (
-    select distinct on (s.project_id,s.job_id) s.project_id,s.job_id,s.source
+  with started_projects as (
+    select distinct on (s.project_id) s.project_id,s.source
     from public.riff_creator_starts s
     join public.projects p on (p.id,p.account_id)=(s.project_id,s.account_id)
+    join public.creator_jobs started on started.id=s.job_id and started.project_id=s.project_id
+      and started.account_id=s.account_id
     where s.account_id=p_account_id
-    order by s.project_id,s.job_id,s.created_at desc,s.request_id desc
+    order by s.project_id,s.created_at desc,s.request_id desc,s.job_id asc
   ),job_activity as (
     select p.id project_id,p.name project_name,j.id job_id,j.kind,j.state,j.updated_at job_updated_at,s.source,
       latest.variant_id,latest.state work_state_state,latest.version work_state_version,latest.updated_at work_state_updated_at,
       greatest(j.updated_at,coalesce(latest.updated_at,j.updated_at)) activity_at
-    from latest_starts s
+    from started_projects s
     join public.projects p on p.id=s.project_id and p.account_id=p_account_id
-    join public.creator_jobs j on j.id=s.job_id and j.project_id=p.id and j.account_id=p.account_id
+    join public.creator_jobs j on j.project_id=p.id and j.account_id=p.account_id
     left join lateral (
       select ws.variant_id,ws.state,ws.version,ws.updated_at
       from public.riff_work_states ws
