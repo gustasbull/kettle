@@ -12,6 +12,11 @@
 
 **Authoritative design:** [Paper — Riff · Core workflows](https://app.paper.design/file/01M39TTB7DKFHZY2JVDMAEDZ81/p-5-0), page `p-5-0`, artboard `Z9H-0` (`CURRENT · Riff · New creator flow`). Read the relevant nodes with Paper MCP `get_jsx`, `get_computed_styles`, and `get_fill_image` before implementing each task. Screenshots are verification only, never the source of implementation values.
 
+**Paper evidence date:** The exact node tree, JSX, computed styles, and tokens were
+captured on 11 October in the audit handoff. A 12 October live basic-info check
+reconfirmed the same file/page/artboard dimensions and token hash, but node-level
+reads were permission-blocked and therefore did not supersede that audit.
+
 **Audit handoff:** `.context/paper-core-workflows-audit.md`
 
 ## Non-negotiable decisions
@@ -24,7 +29,7 @@
 - No provider fetch, generation, billing, retry, or credit spend is added by this plan. Existing provider work stays behind its current authenticated durable workflow. Instagram remains a presentation-ready contract plus an honest unsupported production path until a verified provider is integrated.
 - Hooks, Product showcases, and CTAs may reuse validated reference videos as part-specific inspiration. Their filter is a user-selected creative lens, not a claimed server classification. Never label a video as category-ranked without stored evidence.
 - Direct file upload remains a native ChatGPT handoff until the public tool contract accepts OpenAI file parameters and retention/authorization is approved.
-- `open_riff` is still a read-only authenticated alias. First-use onboarding is account-level and app-owned: Home shows the Paper carousel only when `onboarding_seen_at` is null, then writes the marker only after the user completes its final visible step. Reinstalling the same account must not reset it. The model never drives the marker write; `show_riff_welcome` is replay-only.
+- `open_riff` is still a read-only authenticated alias and always opens usable Home. First-use onboarding is account-level: an exact null `onboarding_seen_at` marker hides only private recents, then the MCP instructions and packaged setup sequence call `show_riff_welcome` once inline in the originating ChatGPT response. Only the standalone welcome app's explicit final action may write the marker. Reinstalling the same account must not reset it; returning users skip the automatic welcome, and explicit replay never marks completion.
 - Ownership always comes from verified credentials. New mutations require the service role repository path, account-scoped RPC, request-ID idempotency, expected-version/concurrency behavior, and no client-visible service credential.
 - All provider text is untrusted. Continue inert `textContent`, strict safe-URL projection, CSP allowlists, no credential-bearing URL, and no external fetch from static resources.
 - Apply migrations append-only after integration; never edit applied history or reset a remote/shared database. The next allocated migration is `20261011091046_riff_work_state.sql`.
@@ -34,7 +39,7 @@
 
 | State | Paper node / audit locator | Production route |
 | --- | --- | --- |
-| Welcome | `13QH-0` | `open_riff` first-use route; `show_riff_welcome` is replay-only |
+| Welcome | `13QH-0` | `show_riff_welcome` inline in the originating chat after a strict first-use `open_riff` result; the same tool is explicit replay for returning users and replay never marks completion |
 | Fetch video | `14TG-0` | scan job, video, accepted/reviewing stage |
 | Analyze video | `14QY-0` | scan job, video, building-analysis stage |
 | Profile loading | `14R1-0` | scan job, profile, running |
@@ -53,27 +58,34 @@
 
 **Files:**
 - Modify: `apps/panel/riff-onboarding/index.ts`
+- Modify: `apps/panel/riff-onboarding-bridge.ts`
 - Modify: `apps/panel/riff-home/index.ts`
+- Modify: `apps/panel/riff-home-bridge.ts`
 - Modify: `apps/worker/mcp.ts`
+- Modify: `apps/worker/mcp-definitions.ts`
 - Modify: `apps/worker/riff-onboarding-resource.ts`
 - Modify: `apps/panel/creator-performance.ts`
 - Modify: `apps/worker/creator-telemetry.ts`
 - Modify: `packages/application/creator-observability.ts`
+- Modify: `plugins/riff/skills/setup/SKILL.md`
 - Modify: `scripts/build-panel.mjs`
 - Modify: `scripts/creator-latency-benchmark.ts`
 - Modify: `tests/panel/riff-onboarding.test.mjs`
+- Modify: `tests/panel/riff-onboarding-bridge.test.mjs`
 - Modify: `tests/panel/riff-home.test.mjs`
+- Modify: `tests/panel/riff-home-bridge.test.mjs`
 - Modify: `tests/auth.test.ts`
 - Modify: `tests/panel-build.test.ts`
 - Modify: `tests/riff-onboarding-resource.test.ts`
+- Modify: `tests/riff-setup-orchestration.test.ts`
 - Modify: `tests/creator-latency-benchmark.test.ts`
 
-**Interfaces:** Preserve `mountRiffOnboarding`, `open_riff`, `show_riff_welcome`, and `mark_riff_onboarding_seen`. Bump immutable UI/performance resource identifiers whenever bundled content or structured-version telemetry changes.
+**Interfaces:** Preserve the standalone `mountRiffOnboarding`, `open_riff`, `show_riff_welcome`, and `mark_riff_onboarding_seen`. Bump immutable UI/performance resource identifiers whenever bundled content or structured-version telemetry changes.
 
 - [x] Write/finish tests for Paper node `13QH-0`: exact 576/526/454/184/80×124 geometry, copy, gradients, typography, carousel peek, keyboard controls, responsive 320px, dark/200% text, and no host-owned chrome/composer.
-- [x] Add a raw `open_riff` Home test proving `onboarding_seen_at: null` hides Home/recents, a strict completion receipt enters Home, and a set marker renders Home normally.
+- [x] Add first-use tests proving `open_riff` keeps Home usable, `onboarding_seen_at: null` hides only recents, the standalone inline welcome writes completion only from its explicit final action, and a set marker skips automatic welcome and renders Home normally.
 - [x] Implement the direct Paper structure and styles with owned media-free artwork; do not infer values from screenshots or redistribute Paper's illustrative fill asset.
-- [x] Pin MCP initialize instructions and the packaged setup skill to one `open_riff` call; the app owns first-use routing and is the only advertised caller of the completion write.
+- [x] Pin MCP initialize instructions and the packaged setup skill to `open_riff` followed by one inline `show_riff_welcome` only for an exact null marker; the model never calls the completion write and failures remain safely retryable.
 - [x] Bump onboarding, Home, pipeline, and creator-performance immutable versions, rebuild bundles, and retain compatibility aliases for existing turns.
 - [x] Run focused browser/resource/auth/build tests and commit the reviewed first-launch fixes.
 
@@ -245,10 +257,16 @@
 - [x] Exercise every visible action and keyboard path end-to-end with bridge fakes; assert no dead controls, silent writes, fictional success, external resource request, secret leakage, or document overflow.
 - [x] Verify first-launch composition, returning Home, menu, account dropdown, every loading/analysis/product/discovery/studio/saved state, and 320px/reduced-motion/dark/forced-colors/200% text variants.
 - [x] Bump immutable Home/pipeline resource versions and telemetry fingerprints. Rebuild generated bundles and update resource tests.
-- [x] Reconcile `PRODUCT.md` and engineering decisions with the implemented boundaries, explicitly recording Instagram/provider and app-owned raw-MCP onboarding behavior.
+- [x] Reconcile `PRODUCT.md` and engineering decisions with the implemented boundaries, explicitly recording Instagram/provider and account-owned inline onboarding behavior.
 - [x] Run focused visual/resource tests and commit `test: verify Riff Core workflows against Paper`.
 
 ### Task 9: Whole-repository verification, production migration/deployment, live proof, and merge
+
+Current immutable local release candidates are Home v6
+`ui://riff/home-v6.html`, onboarding v5 `ui://riff/onboarding-v5.html`, and
+pipeline v6 `ui://kettle/creator-pipeline-v6.html`, with compatibility aliases
+Home v1–v5, onboarding v1–v4, and pipeline v2–v5. These identifiers remain local
+release evidence until Task 9 verifies the hosted resource bytes and fingerprints.
 
 **Files:**
 - Modify: `docs/engineering/verification.md` or the existing Riff verification record

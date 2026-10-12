@@ -41,7 +41,7 @@ html, body { margin: 0; padding: 0; background: transparent; }
   border-radius: 24px; background: var(--riff-onboarding-surface); box-shadow: 0 3px 6px #2035560A, 0 10px 18px #20355614;
 }
 .riff-onboarding__visual {
-  display: flex; width: 100%; height: 184px; flex: 0 0 184px; flex-direction: column;
+  display: flex; width: 100%; min-height: 184px; flex: 0 0 auto; flex-direction: column;
   justify-content: center; gap: 8px; overflow: hidden; padding: 16px 16px 28px;
   border-radius: 18px; background: var(--riff-onboarding-canvas);
 }
@@ -123,7 +123,7 @@ html, body { margin: 0; padding: 0; background: transparent; }
   padding: 0; border: 1px solid var(--riff-onboarding-line); border-radius: 999px; background: var(--riff-onboarding-canvas); cursor: pointer;
 }
 .riff-onboarding__next svg { display: block; width: 16px; height: 16px; }
-.riff-onboarding__closing { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+.riff-onboarding__closing { display: flex; width:100%; min-width:0; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
 .riff-onboarding__closing strong { color: var(--riff-onboarding-ink); font-size: 15px; font-weight: 600; line-height: 21px; }
 .riff-onboarding__closing p { width: 440px; max-width: 100%; color: var(--riff-onboarding-muted); font-size: 13px; line-height: 19px; }
 .riff-onboarding__down { display: block; width: 18px; height: 18px; }
@@ -156,7 +156,7 @@ html, body { margin: 0; padding: 0; background: transparent; }
   .riff-onboarding__headline { font-size: 28px; line-height: 35px; }
   .riff-onboarding__carousel { padding-inline: 0; }
   .riff-onboarding__slide { width: calc(100cqi - 46px); flex-basis: calc(100cqi - 46px); padding: 7px; }
-  .riff-onboarding__visual { height: 176px; flex-basis: 176px; padding: 14px 10px 24px; }
+  .riff-onboarding__visual { min-height: 176px; padding: 14px 10px 24px; }
   .riff-onboarding__start { gap: 8px; }
   .riff-onboarding__sample-video { width: 56px; height: 100px; flex-basis: 56px; border-width: 2px; }
   .riff-onboarding__prompt { padding: 8px 9px; font-size: 11px; line-height: 15px; }

@@ -10,12 +10,13 @@ Use this workflow for installation, setup, connection, or first use. If the user
 Never render the welcome on the sign-in website or inside Riff Home. The first-use card belongs in the same originating ChatGPT conversation; Home remains open on the right.
 
 1. Call `open_riff` as the first tool call. It is the protected action that starts OAuth when connection is required and opens the Riff app after authorization succeeds.
-2. Stop there. The `open_riff` app owns first-use routing: it shows the Start → Find → Make Paper carousel when `onboarding_seen_at` is null and records completion only after the user explicitly finishes the visible guide.
-3. Never call `mark_riff_onboarding_seen` from the model. Call `show_riff_welcome` only when the user explicitly asks to replay the guide; replaying it does not change onboarding state.
-4. Respond in the ChatGPT conversation with one concise Start → Find → Make introduction: start with creator context, find an evidence-backed direction, then make a filmable version.
-5. Offer one next action: paste a creator profile or public video link, describe an idea, or attach a video through the ChatGPT composer.
+2. Inspect only a strict, coherent successful `open_riff` structured result. When `data.account.onboarding_seen_at` is exactly `null`, call `show_riff_welcome` exactly once in the same originating response. This renders the Start → Find → Make Paper carousel inline in chat while Home remains usable on the right. If the result is failed, malformed, or omits the marker, do not infer first use or call the welcome automatically.
+3. When `data.account.onboarding_seen_at` is set, do not call `show_riff_welcome` unless the user explicitly asks to replay the guide.
+4. Never call `mark_riff_onboarding_seen` from the model. Only the inline welcome app may call it after the user explicitly finishes the visible final step; replaying the guide never resets account state.
+5. Respond in the ChatGPT conversation with one concise Start → Find → Make introduction: start with creator context, find an evidence-backed direction, then make a filmable version.
+6. Offer one next action: paste a creator profile or public video link, describe an idea, or attach a video through the ChatGPT composer.
 
-Treat onboarding as complete only when the `open_riff` app confirms the explicit completion write; never infer completion from merely opening or displaying the card.
+Treat onboarding as complete only when the inline welcome app confirms the explicit completion write; never infer completion from merely opening or displaying the card. A completion failure must leave Home usable and the guide retryable.
 
 Require an explicit user request or explicit user action before starting provider research, fetching public data, consuming trial credits, or spending. Installation and opening Home are not permission to do that work.
 

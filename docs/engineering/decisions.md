@@ -2,11 +2,14 @@
 
 ## Riff Core workflows visual acceptance — 2026-10-12
 
-Task 8 accepts the Riff-owned CURRENT surface against the read-only Paper source:
-file `01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, artboard `Z9H-0`
-(`7700 × 10112`), observed token hash `17cc259e`. Host-owned ChatGPT rail,
-composer, attribution, authorization/install chrome, and fullscreen chrome are not
-part of the visual target.
+Task 8 accepts the Riff-owned CURRENT surface against the exact read-only Paper
+tree/JSX/computed-style audit captured on 11 October: file
+`01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, artboard `Z9H-0`
+(`7700 × 10112`), token hash `17cc259e`. On 12 October, live basic info
+reconfirmed those identifiers, dimensions, and hash; node-level reads were
+permission-blocked, so that check is not a newer node-level reconciliation.
+Host-owned ChatGPT rail, composer, attribution, authorization/install chrome, and
+fullscreen chrome are not part of the visual target.
 
 - Authored Paper examples live only in the deterministic test fixture module. Every
   fixture is marked `origin: 'fixture'`, `contains_fixture_data: true`, has a stable
@@ -27,29 +30,34 @@ part of the visual target.
   job/work-state activity, with source provenance kept on the selected job. A filmed
   Studio state exposes a receipt-backed `Undo filmed` correction to `active` and never
   replaces persisted truth after only a conversational handoff.
-- The canonical immutable resources are `ui://riff/home-v5.html`
-  (`riff-home-v5`, SHA-256 `502c67c7528e242d885472fee5c9b8dc4a54ee1421a729c648dbbc76c9fa43fc`,
-  262701 raw / 71385 gzip bytes), `ui://riff/onboarding-v4.html`
-  (`riff-onboarding-v4`, SHA-256 `3e25c39b3e55481d337a93d107595bd251c4ba5f9db5a95322f6aa3a1e194585`,
-  27988 raw / 8333 gzip bytes), and `ui://kettle/creator-pipeline-v5.html`
-  (`creator-pipeline-v5`, SHA-256 `805a66311bcb4cb1183659cd0c76179273ca9b41d6ad1cb2ba2f8135df13c2f8`,
-  176643 raw / 47928 gzip bytes). Home keeps v1–v4 compatibility URIs,
-  onboarding keeps v3, and the pipeline keeps v2–v4; all aliases serve the same
-  current static document so existing turns do not lose their resource.
+- The canonical immutable local release candidates are `ui://riff/home-v6.html`
+  (`riff-home-v6`, SHA-256 `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`,
+  246025 raw / 67032 gzip bytes), `ui://riff/onboarding-v5.html`
+  (`riff-onboarding-v5`, SHA-256 `890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a`,
+  36472 raw / 10835 gzip bytes), and `ui://kettle/creator-pipeline-v6.html`
+  (`creator-pipeline-v6`, SHA-256 `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`,
+  177195 raw / 47988 gzip bytes). Home keeps v1–v5 compatibility URIs,
+  onboarding keeps v1–v4, and the pipeline keeps v2–v5; all aliases serve the same
+  current static document so existing turns do not lose their resource. These local
+  identities are not evidence that the hosted Worker serves the same bytes.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
   against real `color-scheme`, `data-theme`, and host variables, including nested
   analysis bands and Studio on-screen text. Discovery and Studio now have explicit
   roving-key, activation, geometry, safe-link, retry-focus, and scope-reset evidence;
   every major route checks reachable controls at 320, 375, 768, and 1440 CSS pixels.
-- The first-use contract is one protected `open_riff` call. The Home app routes a
-  null `onboarding_seen_at` marker to the embedded Paper carousel and keeps Home and
-  recents hidden until the user completes the final visible step. Only the app can
-  advertise `mark_riff_onboarding_seen`; malformed output, rejection, timeout, an
-  account switch, or a stale action leaves onboarding unmarked and safely retryable.
-  `show_riff_welcome` is an explicit replay surface and never changes account state.
+- The first-use contract begins with one protected `open_riff` call, which always
+  opens usable Home. An exact null `onboarding_seen_at` marker suppresses only the
+  private recent-work read. The MCP instructions and packaged setup sequence then
+  call `show_riff_welcome` once so the standalone Paper carousel renders inline in
+  the originating ChatGPT response while Home remains open on the right. Only that
+  inline app's explicit final action may call `mark_riff_onboarding_seen`; the model
+  never calls it. Malformed output, rejection, timeout, an account switch, or a stale
+  action leaves onboarding unmarked and safely retryable. Returning users skip the
+  automatic welcome, and an explicit replay never changes account state.
 - Instagram remains presentation/fixture-only until a permitted live provider path is
-  verified. Raw MCP clients receive the same app-owned first-use router through
-  `open_riff`; the packaged setup skill is guidance, not a required multi-tool sequence.
+  verified. The server publishes the same strict first-use sequence through its MCP
+  instructions and `open_riff` result; the packaged setup skill pins the supported
+  host behavior but is not the only client that can render the inline resource.
 - Verified scope is local static resources, parsed fixtures, bridge behavior, ordered
   local migrations through PGlite, and generated-bundle determinism. This acceptance
   authorizes no provider call, spend, deployment, publication, external outreach,

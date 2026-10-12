@@ -26,7 +26,7 @@ const endpoints = z.enum([
 const cacheStates = z.enum(['none', 'hit', 'miss', 'replay', 'ambiguous', 'unknown']);
 const safeInteger = (maximum: number) => z.number().finite().nonnegative().max(maximum)
   .transform(value => Math.round(value));
-const version = z.enum(['riff-home-v5', 'riff-onboarding-v4', 'creator-pipeline-v5']);
+const version = z.enum(['riff-home-v6', 'riff-onboarding-v5', 'creator-pipeline-v6']);
 const bundleVersion = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
 const eventSchema = z.strictObject({

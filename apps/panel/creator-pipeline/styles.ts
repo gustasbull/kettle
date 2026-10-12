@@ -337,4 +337,10 @@ html, body { margin: 0; background: transparent; }
 :root[data-theme="dark"] .riff-studio-shell--part { background:var(--color-background-secondary,#181d25); }
 :root[data-theme="dark"] .riff-studio-caption { border-color:var(--color-border-secondary,#596273); }
 :root[data-theme="dark"] .riff-on-screen-text { color:var(--color-text-primary,#f6f7f9);border-left-color:var(--color-ring-primary,#b8ceff);background:var(--color-background-primary,#101318); }
+:root[data-theme="dark"] .riff-loading-activity { color:#d8b4fe; }
+:root[data-theme="dark"] .riff-analysis-row__status { color:var(--color-text-secondary,#c1c8d2); }
+:root[data-theme="dark"] .riff-analysis-row--working-well .riff-analysis-row__status { color:#86efac; }
+:root[data-theme="dark"] .riff-analysis-row--needs-attention .riff-analysis-row__status { color:#fde68a; }
+:root[data-theme="dark"] .riff-analysis-row--needs-rework .riff-analysis-row__status { color:#fca5a5; }
+:root[data-theme="dark"] .riff-studio-filmed-status { color:#86efac; }
 `;

@@ -563,7 +563,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
       return {overflow:style.overflow,stage:dimensions(stage),active:dimensions(active),activeMedia:dimensions(media),middle:dimensions(middle),middleMedia:dimensions(middle.querySelector('.riff-idea-media')),outer:dimensions(outer),outerMedia:dimensions(outer.querySelector('.riff-idea-media')),arrow:dimensions(arrow),navigation:{...dimensions(navigation),gap:getComputedStyle(navigation).gap}};
     }),{
       overflow:'visible',stage:{width:999,height:566,radius:'0px'},active:{width:232,height:454,radius:'24px'},activeMedia:{width:214,height:354,radius:'18px'},
-      middle:{width:196,height:348,radius:'24px'},middleMedia:{width:178,height:330,radius:'18px'},outer:{width:160,height:284,radius:'24px'},outerMedia:{width:142,height:266,radius:'18px'},arrow:{width:36,height:36,radius:'999px'},navigation:{width:340,height:36,radius:'0px',gap:'10px'},
+      middle:{width:196,height:348,radius:'24px'},middleMedia:{width:178,height:330,radius:'18px'},outer:{width:160,height:284,radius:'24px'},outerMedia:{width:142,height:266,radius:'18px'},arrow:{width:44,height:44,radius:'999px'},navigation:{width:340,height:44,radius:'0px',gap:'4px'},
     });
     assert.equal(await root.locator('.riff-libraries').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(240, 240, 242)');
     assert.equal(await root.getByRole('tab',{name:'Hooks',exact:true}).evaluate(node=>getComputedStyle(node).color),'rgb(105, 51, 161)');

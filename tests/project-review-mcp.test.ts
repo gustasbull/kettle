@@ -8,11 +8,19 @@ import { GetProjectInput, GetProjectOutput, SaveProjectOutput } from '../package
 import { handleMcp, type McpAuth } from '../apps/worker/mcp.ts';
 import { oauthScopes } from '../packages/auth/index.ts';
 import { PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME, PROJECT_REVIEW_META, projectReviewHtml } from '../apps/worker/project-review-resource.ts';
-import { RIFF_ONBOARDING_MIME, RIFF_ONBOARDING_URI, RIFF_ONBOARDING_V3_URI } from '../apps/worker/riff-onboarding-resource.ts';
+import {
+  RIFF_ONBOARDING_LEGACY_URI,
+  RIFF_ONBOARDING_MIME,
+  RIFF_ONBOARDING_URI,
+  RIFF_ONBOARDING_V2_URI,
+  RIFF_ONBOARDING_V3_URI,
+  RIFF_ONBOARDING_V4_URI,
+} from '../apps/worker/riff-onboarding-resource.ts';
 import {
   RIFF_HOME_LEGACY_URI,
   RIFF_HOME_MIME,
   RIFF_HOME_URI,
+  RIFF_HOME_V5_URI,
   RIFF_HOME_V4_URI,
   RIFF_HOME_V3_URI,
   RIFF_HOME_V2_URI,
@@ -117,9 +125,13 @@ test('project-review render tool uses signed identity, exact read contract and r
   const resources = await (await rpc('resources/list', {}, auth)).json() as { result: { resources: Record<string, unknown>[] } };
   assert.deepEqual(resources.result.resources.map((r) => [r.name, r.uri, r.mimeType]),
     [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
+      ['riff-onboarding-v4-compat', RIFF_ONBOARDING_V4_URI, RIFF_ONBOARDING_MIME],
       ['riff-onboarding-v3-compat', RIFF_ONBOARDING_V3_URI, RIFF_ONBOARDING_MIME],
+      ['riff-onboarding-v2-compat', RIFF_ONBOARDING_V2_URI, RIFF_ONBOARDING_MIME],
+      ['riff-onboarding-v1-compat', RIFF_ONBOARDING_LEGACY_URI, RIFF_ONBOARDING_MIME],
       ['kettle-project-review', PROJECT_REVIEW_URI, PROJECT_REVIEW_MIME],
       ['riff-home', RIFF_HOME_URI, RIFF_HOME_MIME],
+      ['riff-home-v5-compat', RIFF_HOME_V5_URI, RIFF_HOME_MIME],
       ['riff-home-v4-compat', RIFF_HOME_V4_URI, RIFF_HOME_MIME],
       ['riff-home-v3-compat', RIFF_HOME_V3_URI, RIFF_HOME_MIME],
       ['riff-home-v2-compat', RIFF_HOME_V2_URI, RIFF_HOME_MIME],

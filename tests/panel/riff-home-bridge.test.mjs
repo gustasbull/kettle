@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 const internalUuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 const internalWorkflowLanguage = /\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant|file ID|save_creator_scripts)\b|\bversion\s+\d+\b/i;
 
-test('raw open_riff guarantees first-use onboarding, marks only after completion, then runs the creator path', async (t) => {
+test('raw open_riff keeps first-use Home usable while the separate welcome stays in chat', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
     import { pipelineFixture } from './apps/panel/creator-pipeline/fixtures.ts';
@@ -55,24 +55,17 @@ test('raw open_riff guarantees first-use onboarding, marks only after completion
   assert.equal(await frame.evaluate(() => document.documentElement.dataset.theme), 'dark');
   assert.equal(await frame.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--riff-safe-top')), '7px');
   assert.equal(await frame.locator('#__mcp-host-fonts').count(), 1);
-  assert.equal(await frame.getByRole('region', { name: 'Welcome to Riff' }).count(), 1,
-    'the open_riff resource itself renders the exact first-use welcome');
-  assert.equal(await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isHidden(), true);
+  assert.equal(await frame.getByRole('region', { name: 'Welcome to Riff' }).count(), 0,
+    'the inline welcome belongs in the originating ChatGPT conversation, not Home');
+  assert.equal(await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isVisible(), true,
+    'Home remains independently usable on first open');
   assert.equal(await page.evaluate(() => window.calls.some(call => call.name === 'mark_riff_onboarding_seen')), false,
-    'rendering the welcome never marks onboarding');
+    'Home never writes the welcome marker');
   assert.equal(await page.evaluate(() => window.calls.some(call => call.name === 'list_riff_work')), false,
-    'private recent work waits until onboarding is completed');
+    'private recent work waits until the separate welcome is completed');
 
   assert.equal(await page.evaluate(() => window.calls.some(call => call.name === 'show_riff_welcome')), false,
     'the resource does not depend on model-orchestrated welcome calls');
-
-  await frame.getByRole('button', { name: 'Next step' }).click();
-  await frame.getByRole('button', { name: 'Next step' }).click();
-  await frame.getByRole('button', { name: 'Finish welcome' }).click();
-  await page.waitForFunction(() => window.calls.some(call => call.name === 'mark_riff_onboarding_seen'));
-  assert.deepEqual(await page.evaluate(() => window.calls.find(call => call.name === 'mark_riff_onboarding_seen').arguments), {});
-  await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').waitFor({ state: 'visible' });
-  await page.waitForFunction(() => window.calls.some(call => call.name === 'list_riff_work'));
 
   const input = frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
   await frame.evaluate(() => { window.openai = { selectFiles: async () => [{fileId:'file_video',fileName:'clip.mp4',mimeType:'video/mp4'}] }; });
@@ -104,7 +97,10 @@ test('raw open_riff guarantees first-use onboarding, marks only after completion
   assert.equal(start.arguments.source_url, source);
   assert.match(start.arguments.request_id, /^[0-9a-f-]{36}$/i);
   await frame.getByRole('heading', { name: 'Unlock your video’s viral potential.' }).waitFor();
-  await page.waitForFunction(() => window.calls.filter(call => call.name === 'list_riff_work').length >= 2);
+  assert.equal(await page.evaluate(() => window.calls.filter(call => call.name === 'list_riff_work').length),1,
+    'an explicit creator action may refresh authenticated work without exposing first-use recents');
+  assert.equal(await frame.getByRole('heading',{name:'Pick up where you left off'}).isHidden(),true,
+    'a null first-use marker keeps private recents visually closed while the creator workflow remains usable');
 
   await frame.getByRole('button', { name: 'Explore viral formats' }).click();
   await page.waitForFunction(() => window.calls.some(call => call.name === 'start_creator_recommendations'));
@@ -144,52 +140,6 @@ test('raw open_riff guarantees first-use onboarding, marks only after completion
   await page.evaluate(() => frame().postMessage({jsonrpc:'2.0',id:'teardown',method:'ui/resource-teardown',params:{}},'*'));
   await page.waitForFunction(() => window.tornDown);
   await frame.waitForFunction(() => document.querySelector('#mount').textContent === '');
-});
-
-test('first-use completion fails closed for unsupported, malformed, rejected, and timed-out writes, then retries safely',async t=>{
-  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
-    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
-    window.mode='extra';window.markCalls=0;window.listCalls=0;
-    const install=()=>window.openai={callTool:async(name)=>{
-      if(name==='list_riff_work'){window.listCalls++;return {structuredContent:{ok:true,data:{work:[]}},content:[]};}
-      if(name!=='mark_riff_onboarding_seen')return {structuredContent:{ok:true,data:{}},content:[]};
-      window.markCalls++;
-      if(window.mode==='reject')throw new Error('fixture rejection');
-      if(window.mode==='timeout')return new Promise(()=>{});
-      if(window.mode==='invalid')return {structuredContent:{ok:true,data:{onboarding_seen_at:'0'}},content:[]};
-      if(window.mode==='extra')return {structuredContent:{ok:true,data:{onboarding_seen_at:'2026-01-01T00:01:00Z',private:true}},content:[]};
-      return {structuredContent:{ok:true,data:{onboarding_seen_at:'2026-01-01T00:01:00Z'}},content:[]};
-    }};
-    install();window.setMode=mode=>{window.mode=mode;if(mode==='unsupported')delete window.openai;else install();};
-    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:300,toolTimeoutMs:80,maxPolls:0});
-  `},bundle:true,platform:'browser',format:'iife',write:false});
-  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
-    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
-    res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
-      addEventListener('message',event=>{const message=event.data;
-        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,hostInfo:{name:'first-use-failures',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
-        if(message.method==='ui/notifications/initialized'){frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'First use',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:null},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;}
-      });</script><iframe src="/frame"></iframe>`);
-  });
-  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
-  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
-  const page=await browser.newPage();page.setDefaultTimeout(4_000);
-  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
-  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
-  await frame.getByRole('button',{name:'Next step'}).click();await frame.getByRole('button',{name:'Next step'}).click();
-  for(const mode of ['unsupported','extra','invalid','reject','timeout']){
-    await frame.evaluate(value=>window.setMode(value),mode);
-    await frame.getByRole('button',{name:'Finish welcome'}).click();
-    await frame.locator('.riff-onboarding__status').getByText(/could not confirm/i).waitFor();
-    assert.equal(await frame.getByRole('region',{name:'Welcome to Riff'}).isVisible(),true,mode);
-    assert.equal(await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isHidden(),true,mode);
-    assert.equal(await frame.evaluate(()=>window.listCalls),0,mode);
-  }
-  await frame.evaluate(()=>window.setMode('success'));
-  await frame.getByRole('button',{name:'Finish welcome'}).click();
-  await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').waitFor({state:'visible'});
-  assert.equal(await frame.evaluate(()=>window.markCalls),5,'unsupported transport never reached a tool; four failed attempts and one retry did');
-  assert.equal(await frame.evaluate(()=>window.listCalls),1);
 });
 
 test('Riff Home accepts only a coherent complete initial result and preserves the current account on malformed notifications',async t=>{
@@ -273,6 +223,10 @@ test('Riff Home accepts only a coherent complete initial result and preserves th
     for(const result of malformed)window.emitResult(result);
   },[account1,account2]);
   await frame.waitForTimeout(50);
+  assert.equal(await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isVisible(),true,
+    'an unreadable initial account result fails open to the recoverable Home surface');
+  assert.equal(await frame.locator('.riff-home__account').textContent(),'Account unavailable');
+  assert.match(await frame.locator('.riff-home__status').textContent(),/incomplete account details|could not read this account/i);
   assert.equal(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length),0,
     'malformed initial notifications cannot start an account-scoped list');
   assert.equal(await frame.evaluate(()=>document.querySelector('.riff-menu__account-trigger')?.getAttribute('aria-label')),'Riff account menu',

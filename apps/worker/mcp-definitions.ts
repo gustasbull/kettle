@@ -68,10 +68,11 @@ export const WELCOME_OUTPUT = z.strictObject({
 export const WELCOME_META = deepFreezePlain({
   securitySchemes: OAUTH_SECURITY,
   ui: { resourceUri: RIFF_ONBOARDING_URI },
+  'openai/widgetAccessible': true,
 });
 export const WELCOME_REGISTRATION = deepFreezePlain({
   title: 'Welcome to Riff',
-  description: 'Show the Riff guide: start with creator context, find an idea, and make it yours. Reads no account data and performs no writes.',
+  description: 'Show the inline Riff guide in chat while Home remains usable. The tool itself is read-only; only the guide’s visible final action can record completion.',
   inputSchema: z.strictObject({}),
   outputSchema: WELCOME_OUTPUT,
   annotations: READ_ONLY,
@@ -237,7 +238,7 @@ export const PROFILE_REGISTRATION = deepFreezePlain({
 });
 export const HOME_REGISTRATION = deepFreezePlain({
   title: 'Riff Home',
-  description: 'Open Riff. The app routes first-use accounts through the Paper welcome before Home; returning accounts open Home directly. This tool reads account state only.',
+  description: 'Open the usable Riff Home panel and read account state. When onboarding is incomplete, its result instructs ChatGPT to show the separate inline Paper welcome in the same conversation.',
   inputSchema: ACCOUNT_CONTRACT.input, outputSchema: ACCOUNT_CONTRACT.output.options[0],
   annotations: READ_ONLY, _meta: HOME_META,
 });
@@ -268,8 +269,8 @@ const DIAGNOSTIC_DESCRIPTOR = deepFreezePlain({
   _meta: { securitySchemes: NOAUTH_SECURITY },
 }) as AuthTool;
 const WELCOME_DESCRIPTOR = deepFreezePlain({
-  name: 'show_riff_welcome', title: 'Welcome to Riff',
-  description: 'Show the first-run Riff guide: start with creator context, find an idea, and make it yours. No account data or writes.',
+  name: 'show_riff_welcome', title: WELCOME_REGISTRATION.title,
+  description: WELCOME_REGISTRATION.description,
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   outputSchema: outputSchema(WELCOME_OUTPUT), annotations: READ_ONLY,
   securitySchemes: OAUTH_SECURITY, _meta: WELCOME_META,

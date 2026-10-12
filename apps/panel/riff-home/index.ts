@@ -10,7 +10,6 @@ import type { Project } from '../../../packages/contracts/index.ts';
 import type { RiffWorkState } from '../../../packages/contracts/riff-work-state.ts';
 import { cloneStrictJsonObject, strictObjectShape } from '../call-tool-result-validation.ts';
 import { mountRiffMenu } from '../riff-shell/menu.ts';
-import { mountRiffOnboarding } from '../riff-onboarding/index.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
@@ -51,7 +50,6 @@ export type RiffHomeActions = {
   send: RiffPanelAction;
   upload?: () => Promise<RiffActionResult>;
   showWelcome?: () => Promise<RiffActionResult>;
-  completeOnboarding?: () => Promise<RiffActionResult & { status: 'sent' | 'failed' }>;
   accountSettings?: () => Promise<RiffActionResult>;
   support?: () => Promise<RiffActionResult>;
   feedback?: () => Promise<RiffActionResult>;
@@ -116,8 +114,6 @@ ${riffBaseStyles}
 html, body { margin: 0; min-height: 100%; background: #FCFCFE; }
 body { min-height: 100vh; }
 .riff-home { min-height: 100vh; padding: 12px; background: radial-gradient(circle, rgba(101,86,122,.06) .6px, transparent .85px) center/16px 16px, radial-gradient(at 10% 70%, #DCEBFA 0%, transparent 60%), radial-gradient(at 70% 65%, #E6DDF6 0%, transparent 58%), radial-gradient(at 92% 30%, #F5E2EF 0%, transparent 55%), #FCFCFE; color: #242426; }
-.riff-home__onboarding { display:flex; min-height:calc(100vh - 24px); align-items:center; justify-content:center; }
-.riff-home__onboarding[hidden] { display:none; }
 .riff-home__account { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .riff-home__chrome { display:flex; width:100%; flex:0 0 auto; align-items:center; justify-content:space-between; padding:calc(16px + var(--riff-safe-top,0px)) 24px 8px; border-radius:24px 24px 0 0; }
 .riff-home__chrome-trail { display:flex; width:fit-content; height:44px; flex:0 0 auto; align-items:center; gap:14px; white-space:nowrap; }
@@ -149,6 +145,8 @@ body { min-height: 100vh; }
 .riff-home__chip:disabled, .riff-home__upload:disabled, .riff-home__submit:disabled, .riff-home__recent-next:disabled, .riff-home__recent-card:disabled { cursor: wait; opacity: .62; }
 .riff-home__status { width: 760px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; text-align: left; }
 .riff-home__status:empty { display: none; }
+.riff-home__welcome-help { display:flex; min-height:44px; align-items:center; justify-content:center; align-self:center; padding:10px 18px; border:1px solid #D6DDEA; border-radius:999px; color:#492481; background:#FFF; font:600 13px/20px inherit; cursor:pointer; }
+.riff-home__welcome-help[hidden] { display:none; }
 .riff-home__intent { display:flex; width:760px; max-width:100%; align-items:center; justify-content:center; flex-wrap:wrap; gap:10px; padding:14px; border:1px solid #DDE5F1; border-radius:16px; background:#FFFFFFCC; }
 .riff-home__intent[hidden] { display:none; }
 .riff-home__intent legend { width:100%; padding:0; color:#363B45; font-size:13px; font-weight:600; line-height:20px; text-align:center; }
@@ -198,6 +196,7 @@ body { min-height: 100vh; }
 :root[data-theme="dark"] .riff-home__intent legend { color:#F6F7F9; }
 :root[data-theme="dark"] .riff-home__intent button { color:#C8A8FF; border-color:#596273; background:#242832; }
 :root[data-theme="dark"] .riff-home__intent button:hover { background:#303643; }
+:root[data-theme="dark"] .riff-home__welcome-help { color:#D8B4FE; border-color:#596273; background:#242832; }
 @media (max-width: 480px) {
   .riff-home__chrome { padding-inline: 12px; }
   .riff-home__chrome-trail { height: auto; max-width: 100%; flex-wrap: wrap; gap: 6px 8px; white-space: normal; }
@@ -318,7 +317,6 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   };
   const style = node('style'); style.textContent = homeStyles;
   const app = node('main', undefined, 'riff-app riff-home riff-menu-scope');
-  const onboardingHost=node('section',undefined,'riff-home__onboarding');onboardingHost.hidden=true;
   const chrome=node('header',undefined,'riff-home__chrome');const trail=node('div',undefined,'riff-home__chrome-trail');
   const menuHost=node('span');
   const brand=node('span',undefined,'riff-home__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,node('span','Riff'));
@@ -355,6 +353,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   const submit = node('button', 'Find my next idea', 'riff-home__submit'); submit.type = 'submit';
   footer.append(upload, submit); inputShell.append(input, footer); form.append(label, chips, inputShell);
   const status = node('p', '', 'riff-home__status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+  const welcomeHelp = node('button', 'Show welcome guide', 'riff-home__welcome-help'); welcomeHelp.type = 'button'; welcomeHelp.hidden = true;
   const intent = doc.createElement('fieldset'); intent.className = 'riff-home__intent'; intent.hidden = true;
   const intentLegend = node('legend', 'What did you share?');
   const productChoice = node('button', 'Product description'); productChoice.type = 'button';
@@ -370,18 +369,16 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   recentHead.append(recentTitle, recentNext);
   const recents = node('div', undefined, 'riff-home__recents');
   recentSection.append(recentHead, recents);
-  home.append(hero, form, intent, status, recentSection);
+  home.append(hero, form, intent, status, welcomeHelp, recentSection);
 
   const workflow = node('section', undefined, 'riff-home__workflow'); workflow.hidden = true;
   const workflowRoot = node('div'); workflow.append(workflowRoot);
   chrome.hidden=true;home.hidden=true;
-  app.append(onboardingHost,chrome,account, home, workflow); root.replaceChildren(style, app);
+  app.append(chrome,account, home, workflow); root.replaceChildren(style, app);
 
   let disposed = false;
   let pipeline: ReturnType<typeof mountCreatorPipeline> | undefined;
   let product: ReturnType<typeof mountRiffProductContext> | undefined;
-  let onboarding:ReturnType<typeof mountRiffOnboarding>|undefined;
-  let firstUse=false;
   let pendingIntent = '';
   let menu!: ReturnType<typeof mountRiffMenu>;
   let recentsState: RiffRecentsState = { status: 'loading' };
@@ -398,22 +395,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     }
     finally { if (control) control.disabled = false; }
   };
-  const hideOnboarding=()=>{
-    onboarding?.dispose();onboarding=undefined;onboardingHost.replaceChildren();onboardingHost.hidden=true;
-  };
-  const showFirstUseOnboarding=()=>{
-    chrome.hidden=true;home.hidden=true;workflow.hidden=true;onboardingHost.hidden=false;
-    onboarding??=mountRiffOnboarding(onboardingHost,{
-      onComplete:actions.completeOnboarding??(async()=>({
-        status:'failed',message:'Riff cannot finish the welcome in this host. Reopen it from ChatGPT.',
-      })),
-    });
-  };
   const showHome = () => {
     if (disposed) return;
-    if(firstUse){showFirstUseOnboarding();return;}
     invocationEpoch++;
-    hideOnboarding();chrome.hidden=false;
+    chrome.hidden=false;
     pipeline?.leaveCatalog();
     if (product) { product.dispose(); product = undefined; workflowRoot.replaceChildren(); }
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
@@ -511,6 +496,11 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     'Opening the ChatGPT file picker…',
     upload,
   ));
+  welcomeHelp.addEventListener('click', () => void invoke(
+    actions.showWelcome ?? (() => actions.send('Show me the Riff welcome guide in this ChatGPT conversation. Keep Riff Home open and usable on the right.')),
+    'Opening the welcome guide in ChatGPT…',
+    welcomeHelp,
+  ));
 
   recentNext.addEventListener('click', () => {
     if (disposed) return;
@@ -563,24 +553,23 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     render(state) {
       if (disposed) return;
       if (state.status === 'loading') {
-        account.textContent = 'Connecting…';firstUse=false;hideOnboarding();chrome.hidden=true;home.hidden=true;workflow.hidden=true;return;
+        account.textContent = 'Connecting…';welcomeHelp.hidden=true;chrome.hidden=true;home.hidden=true;workflow.hidden=true;return;
       }
       if (state.status === 'error') {
-        firstUse=false;hideOnboarding();chrome.hidden=false;home.hidden=false;workflow.hidden=true;
+        chrome.hidden=false;home.hidden=false;workflow.hidden=true;
         account.textContent = 'Account unavailable';
         status.textContent = state.message;
+        welcomeHelp.hidden = false;
         recentSection.hidden = false;
         return;
       }
-      const wasFirstUse=firstUse;
-      firstUse=state.account.onboarding_seen_at===null;
       account.textContent = `Ready, ${state.account.name}`;
-      recentSection.hidden = firstUse;
+      welcomeHelp.hidden = true;
+      recentSection.hidden = state.account.onboarding_seen_at === null;
       menu.render({ account: state.account });
       if (/Reconnect|incomplete|could not/i.test(status.textContent)) status.textContent = '';
-      if(firstUse){showFirstUseOnboarding();return;}
-      hideOnboarding();chrome.hidden=false;
-      if(wasFirstUse||(home.hidden&&workflow.hidden))showHome();
+      chrome.hidden=false;
+      if(home.hidden&&workflow.hidden)showHome();
     },
     setRecents(items) { if (!disposed) renderRecentsState({ status: 'ready', items }); },
     setRecentsState(state) { if (!disposed) renderRecentsState(state); },
@@ -598,10 +587,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setCatalogState(state){pipeline?.setCatalogState(state);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
-    clearPrivate(){if(disposed)return;firstUse=false;hideOnboarding();input.value='';pendingIntent='';intent.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
+    clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;welcomeHelp.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
-      if (disposed) return; disposed = true; onboarding?.dispose();onboarding=undefined;menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();
+      if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();
     },
   };
 }

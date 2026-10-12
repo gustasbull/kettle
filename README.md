@@ -14,11 +14,14 @@ display brand.
 
 The reviewed local CURRENT-workflow acceptance is recorded in the
 [Task 8 report](.superpowers/sdd/2026-10-11-riff-paper-core-workflows-completion/task-8-report.md).
-Its canonical static resources are Home v4
-`sha256:ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454`
-and pipeline v4
-`sha256:7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187`.
-These are deterministic local-build identities, not hosted-deployment proof.
+The current immutable local-build candidates are Home v6
+(`ui://riff/home-v6.html`,
+`sha256:15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`),
+inline onboarding v5 (`ui://riff/onboarding-v5.html`,
+`sha256:890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a`),
+and standalone pipeline v6 (`ui://kettle/creator-pipeline-v6.html`,
+`sha256:0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`).
+These are deterministic local identities, not hosted-deployment proof.
 
 ## Runnable engineering foundation
 

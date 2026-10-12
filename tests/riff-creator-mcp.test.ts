@@ -33,7 +33,7 @@ test('Riff creator entry and recents are authenticated MCP tools usable by Home'
     assert.equal(tool.annotations.openWorldHint, name === 'start_riff_creator');
     assert.deepEqual(tool._meta.ui?.visibility, ['model', 'app'], `${name} must be callable from Riff Home`);
     if (name === 'start_riff_creator') {
-      assert.equal(tool._meta.ui.resourceUri, 'ui://kettle/creator-pipeline-v5.html',
+      assert.equal(tool._meta.ui.resourceUri, 'ui://kettle/creator-pipeline-v6.html',
         'a direct @Riff chat start must attach the live creator workflow');
     } else assert.equal(tool._meta.ui?.resourceUri, undefined);
   }

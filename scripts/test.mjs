@@ -15,9 +15,23 @@ const files = await discover('tests');
 if (files.length === 0) {
   console.log(`No ${browser ? 'browser' : 'TypeScript'} test suites present.`);
 } else {
-  const result = spawnSync(process.execPath, [
-    ...(browser ? [] : ['--import', 'tsx']), '--test', ...files,
-  ], { stdio: 'inherit' });
-  if (result.error) throw result.error;
-  process.exitCode = result.status ?? 1;
+  // panel-build exercises failure cleanup by replacing generated modules. Keep
+  // it out of the parallel import phase so resource/MCP suites can never
+  // observe the intentionally absent file between cleanup and atomic rebuild.
+  const groups = browser
+    ? [files]
+    : [
+        files.filter(path => path !== 'tests/panel-build.test.ts'),
+        files.filter(path => path === 'tests/panel-build.test.ts'),
+      ].filter(group => group.length > 0);
+  for (const group of groups) {
+    const result = spawnSync(process.execPath, [
+      ...(browser ? [] : ['--import', 'tsx']), '--test', ...group,
+    ], { stdio: 'inherit' });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      process.exitCode = result.status ?? 1;
+      break;
+    }
+  }
 }

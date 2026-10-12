@@ -2,7 +2,8 @@
 
 - Status: canonical, design-led product direction
 - Brand: **Riff** (double f)
-- Last reconciled with Paper: 10 October 2026
+- Last exact node-level reconciliation with Paper: 11 October 2026
+- Paper identity/basic info reverified: 12 October 2026
 
 ## Source of truth
 
@@ -15,6 +16,11 @@ The visual authority is the `CURRENT · Riff · New creator flow` artboard on th
 [Riff · Core workflows Paper page](https://app.paper.design/file/01M39TTB7DKFHZY2JVDMAEDZ81/p-5-0).
 Illustrative names, media, metrics, and scripts in that artboard demonstrate the
 experience rather than prescribe production data.
+
+The exact tree, JSX, computed-style, and token reconciliation was captured on
+11 October. On 12 October, live basic info reconfirmed the same file, page,
+`Z9H-0` artboard dimensions, and token hash; node-level reads were permission-
+blocked, so that check is identity verification rather than a newer design audit.
 
 Use the following precedence when sources disagree:
 
@@ -106,8 +112,8 @@ webhook: the first successful open is the reliable product trigger.
 
 The welcome is a one-time onboarding experience for the connected Riff account,
 not a message that repeats in each conversation. Reinstalling or reconnecting
-must not erase the person's work. A future help action may replay onboarding, but
-that is not required for the happy path.
+must not erase the person's work. An explicit help action may replay onboarding,
+but replay never resets or writes the account's completion marker.
 
 ### First-open composition
 
@@ -116,6 +122,13 @@ First use opens both parts of the experience:
 - Chat shows the branded **Welcome to Riff** introduction.
 - The Riff panel opens to Home on the right.
 - Neither surface blocks the other; the person can begin in chat or in the panel.
+
+`open_riff` always opens usable Home. When its strict account result reports
+`onboarding_seen_at: null`, Riff's server instructions and packaged setup sequence
+call `show_riff_welcome` once in the same originating ChatGPT response. The null
+marker withholds private recent-work loading only; it does not replace or hide Home.
+Only the standalone inline welcome app's explicit final action may call
+`mark_riff_onboarding_seen`. Displaying or replaying the welcome never marks it.
 
 The welcome explains three short steps in a horizontal carousel:
 
@@ -132,6 +145,8 @@ idea in chat, or use the app on the right.
 After onboarding has been seen, opening Riff goes directly to Home or restores
 the active work. The welcome must never prevent access when its state cannot be
 read; in that case Riff should open Home and offer onboarding as secondary help.
+A rejected, malformed, or timed-out completion remains unmarked and safely
+retryable.
 
 ## 2. Home and the always-available creator input
 
@@ -565,14 +580,14 @@ definition of the intended experience.
 | Durable creator jobs | Scan, recommendation, and script jobs persist with events, idempotent request IDs, receipts, account ownership, allowances, and budget gates | Cancellation and broader recovery UX are not complete |
 | TikTok creator analysis | Authenticated `start_riff_creator` accepts a public TikTok profile or video URL, derives ownership from OAuth, creates a project and queued scan, and opens the saved job UI directly; Analysis renders saved evidence, limitations, and six honest dimension slots | Uploaded-file ingestion, Instagram, general availability, and a complete single-video contract for every Paper field are not implemented |
 | Script creation | ChatGPT can draft and persist multiple script variants against a completed job; fullscreen Studio renders Full video, Hook, Main content, and CTA from persisted segments, timing, caption/hashtags, selected references, and lineage. TikTok/Reels is an explicit local formatting choice. Receipt-backed Save, Undo, Filmed, and resume states are durable | Direct version-editing UI, publication, and verified cross-platform posting remain absent |
-| First-open onboarding | The plugin setup skill opens Home for authorization, then strictly sequences **Welcome to Riff** in the originating ChatGPT conversation before marking onboarding seen. Home remains usable while the welcome is pending; welcome failure, malformed output, or timeout never calls the mark tool | A raw custom MCP URL cannot distribute or execute the package setup skill; it receives first-open prose but not the package-controlled carousel sequence. There is no user-facing replay preference |
+| First-open onboarding | `open_riff` always opens usable Home. On an exact null marker, the MCP instructions and packaged setup sequence call `show_riff_welcome` once inline in the originating ChatGPT response while only private recents remain hidden. Only the standalone welcome app's explicit final action may mark onboarding seen; malformed, rejected, or timed-out writes remain retryable. Returning users skip it, and explicit replay never writes account state | Live ChatGPT first-install/reinstall evidence is still required for release; there is no persistent user-facing replay preference |
 | Universal creator input | Fullscreen Home routes public TikTok profile/video links into the durable start flow, keeps one request ID across ambiguous retries, lists real recent work, and distinguishes plain-text Product description from Video idea. Product text stays local until explicit validation and a receipt-backed save; ideas and supported host file selection use explicit ChatGPT handoffs that do not claim upload or analysis | Selected files are sent back to ChatGPT but are not uploaded to or analyzed by the backend; live non-TikTok creator ingestion remains unavailable |
 | Single-video analysis | A direct public TikTok video start preserves the exact URL for a saved Lightreel seed review, combines it with bounded profile evidence, and renders six honest dimensions | No end-to-end uploaded-file ingestion or full single-video contract matching every Paper field |
 | Discovery libraries | One validated owned recommendation batch renders Videos, Hooks, Product showcases, and CTAs as local creative lenses without reordering or reclassifying its references. Whole and part actions preserve selection lineage; authenticated saved-catalog cards are browse-only and can only propose an unsaved adaptation | The lenses are not server-ranked categories, and catalog browsing does not fetch providers or create a saved recommendation/script without real owned lineage |
 | Instagram profile route | The CURRENT Paper route has deterministic presentation fixtures, platform-specific Reels copy, strict validation, and an explicit unavailable-provider result | No verified live Instagram provider path; fixture presentation is not provider evidence |
 | Product context | A plain-text Product description opens an editable brief, preserves unknown fields, validates user-confirmed values, and calls authenticated `save_project` exactly once with expected version and request ID. Only a parsed receipt enables Discovery; failed/conflict/ambiguous outcomes preserve the draft | Product URLs are not fetched, inferred claims remain prohibited, and cross-session Product reopening still requires server-owned work linkage |
 | Saved work and recents | Home lists account-scoped recent work and restores authoritative analysis, Discovery, Studio, Saved, or Filmed state. `set_riff_work_state` persists account/job/variant-scoped active/saved/filmed projections with expected-version and request-ID semantics, append-only events/receipts, exact replay, conflict recovery, Undo, and receipt-backed confirmation | Full Vault asset management, collaboration, destructive deletion, and publication remain absent |
-| Immutable app resources | Home `ui://riff/home-v4.html` and standalone pipeline `ui://kettle/creator-pipeline-v4.html` embed deterministic SHA-256 fingerprints and retain v1–v3 or v2–v3 compatibility aliases for existing turns | Local resource verification is not a hosted deployment or public-release proof |
+| Immutable app resources | Home `ui://riff/home-v6.html` (`sha256:15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`), inline onboarding `ui://riff/onboarding-v5.html` (`sha256:890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a`), and standalone pipeline `ui://kettle/creator-pipeline-v6.html` (`sha256:0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`) are deterministic local candidates. Compatibility aliases remain for Home v1–v5, onboarding v1–v4, and pipeline v2–v5 | Local resource verification is not a hosted deployment or public-release proof |
 | Billing and usage | A server-only, account-scoped creator trial grant reserves provider units before use, consumes one run atomically, preserves exact replays, and expires no later than seven days; managed OpenAI spend is denied | Customer billing, entitlements, refill UX, and production usage UX are not configured |
 
 Do not redesign the intended experience around these gaps. Close the gaps in

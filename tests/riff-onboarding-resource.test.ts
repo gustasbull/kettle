@@ -7,13 +7,16 @@ import {
   RIFF_ONBOARDING_META,
   RIFF_ONBOARDING_MIME,
   RIFF_ONBOARDING_URI,
+  RIFF_ONBOARDING_V4_URI,
   RIFF_ONBOARDING_V3_URI,
+  RIFF_ONBOARDING_V2_URI,
+  RIFF_ONBOARDING_LEGACY_URI,
   registerRiffOnboardingResource,
   riffOnboardingHtml,
 } from '../apps/worker/riff-onboarding-resource.ts';
 
 test('Riff onboarding is one static, inline-only, empty-network MCP App', async (t) => {
-  assert.equal(RIFF_ONBOARDING_URI, 'ui://riff/onboarding-v4.html');
+  assert.equal(RIFF_ONBOARDING_URI, 'ui://riff/onboarding-v5.html');
   const server = new McpServer({ name: 'riff-onboarding-fixture', version: '1' });
   registerRiffOnboardingResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -26,7 +29,13 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
   assert.deepEqual(listed.resources.map(({ name, uri, mimeType }) => ({ name, uri, mimeType })), [{
     name: 'riff-onboarding', uri: RIFF_ONBOARDING_URI, mimeType: RIFF_ONBOARDING_MIME,
   }, {
+    name: 'riff-onboarding-v4-compat', uri: RIFF_ONBOARDING_V4_URI, mimeType: RIFF_ONBOARDING_MIME,
+  }, {
     name: 'riff-onboarding-v3-compat', uri: RIFF_ONBOARDING_V3_URI, mimeType: RIFF_ONBOARDING_MIME,
+  }, {
+    name: 'riff-onboarding-v2-compat', uri: RIFF_ONBOARDING_V2_URI, mimeType: RIFF_ONBOARDING_MIME,
+  }, {
+    name: 'riff-onboarding-v1-compat', uri: RIFF_ONBOARDING_LEGACY_URI, mimeType: RIFF_ONBOARDING_MIME,
   }]);
   const content = (await client.readResource({ uri: RIFF_ONBOARDING_URI })).contents[0]!;
   const compatible = (await client.readResource({ uri: RIFF_ONBOARDING_V3_URI })).contents[0]!;
@@ -40,6 +49,11 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
   assert.ok('text' in content);
   assert.ok('text' in compatible);
   assert.equal(compatible.text, content.text);
+  for (const alias of [RIFF_ONBOARDING_V4_URI, RIFF_ONBOARDING_V2_URI, RIFF_ONBOARDING_LEGACY_URI]) {
+    const prior = (await client.readResource({ uri: alias })).contents[0]!;
+    assert.ok('text' in prior);
+    assert.equal(prior.text, content.text);
+  }
   const html = content.text as string;
   assert.match(html, /Welcome to Riff/);
   assert.match(html, /Unlock your viral potential/);
@@ -50,7 +64,7 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
 
 test('Riff onboarding HTML escapes raw-text delimiters', () => {
   const html = riffOnboardingHtml('const payload = "</ScRiPt><!--";', {
-    resource_version: 'riff-onboarding-v4', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-onboarding-v5', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));

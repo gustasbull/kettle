@@ -164,14 +164,14 @@ test('Riff onboarding keeps the approved composition usable in a 320px inline ca
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
 });
 
-test('Riff onboarding follows dark host colors and survives 200% text without clipped controls', async (t) => {
+test('Riff onboarding follows dark host colors and keeps every required line readable at 320px with 200% text', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffOnboarding } from './apps/panel/riff-onboarding/index.ts';
     window.view = mountRiffOnboarding(document.getElementById('root'));
   ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 700, height: 1200 } });
+  const page = await browser.newPage({ viewport: { width: 320, height: 1800 } });
   await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
   await page.evaluate(() => {
     document.documentElement.dataset.theme = 'dark';
@@ -198,9 +198,25 @@ test('Riff onboarding follows dark host colors and survives 200% text without cl
     node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1,
   ).map(node => node.getAttribute('aria-label') || node.textContent?.trim()));
   assert.deepEqual(clipped, []);
+  for (const step of ['Start','Find','Make']) {
+    await page.getByRole('tab',{name:`Show ${step} step`}).click();
+    const lost = await page.locator('.riff-onboarding__card').evaluate(card => {
+      const cardRect=card.getBoundingClientRect();
+      const active=card.querySelector('.riff-onboarding__slide[aria-current="step"]');
+      const required=[...card.querySelectorAll('.riff-onboarding__intro h1,.riff-onboarding__intro h2,.riff-onboarding__closing strong,.riff-onboarding__closing p'),
+        ...active.querySelectorAll('h3,p,.riff-onboarding__working-label,.riff-onboarding__working-copy,.riff-onboarding__chip')];
+      return required.filter(node=>{
+        const rect=node.getBoundingClientRect();const style=getComputedStyle(node);
+        return style.visibility!=='hidden'&&(rect.left<cardRect.left-1||rect.right>cardRect.right+1||rect.top<cardRect.top-1||rect.bottom>cardRect.bottom+1);
+      }).map(node=>node.textContent?.trim());
+    });
+    assert.deepEqual(lost,[],`${step} copy remains inside the visible welcome card`);
+    assert.equal(await page.locator('.riff-onboarding__slide[aria-current="step"] .riff-onboarding__visual').evaluate(node=>node.scrollHeight<=node.clientHeight+1),true,
+      `${step} informative example is not vertically clipped`);
+  }
 });
 
-test('embedded first-use onboarding completes only after the visible final step', async (t) => {
+test('inline first-use onboarding completes only after the visible final step', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffOnboarding } from './apps/panel/riff-onboarding/index.ts';
     window.completions = 0;

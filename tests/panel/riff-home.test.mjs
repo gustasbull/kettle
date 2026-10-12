@@ -259,11 +259,6 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
       start:async()=>({status:'sent',message:'Started.'}),
       send:async prompt=>{window.events.push({kind:'message',prompt});return {status:'sent',message:'Sent.'}},
       showWelcome:async()=>{window.events.push({kind:'welcome'});return {status:'sent',message:'Requested in chat.'}},
-      completeOnboarding:async()=>{
-        window.events.push({kind:'complete-onboarding'});
-        window.renderAccount('2026-10-11T12:00:00Z');
-        return {status:'sent',message:'Welcome completed.'};
-      },
       openRecent:async jobId=>{window.events.push({kind:'recent',jobId});return {status:'sent',message:'Opened.'}},
       refreshRecents:async()=>{window.events.push({kind:'refresh-recents'});return {status:'sent',message:'Recent work refreshed.'}},
     });
@@ -297,20 +292,17 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
     ]);
   });
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 0,
-    'an explicit null marker is first use, so Home does not show recents before welcome completion');
-  assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).isVisible(), true,
-    'the raw Home resource guarantees the Paper welcome for a first-use account');
-  assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isHidden(), true);
-  await page.getByRole('button', { name: 'Next step' }).click();
-  await page.getByRole('button', { name: 'Next step' }).click();
-  await page.getByRole('button', { name: 'Finish welcome' }).click();
-  assert.equal(await page.evaluate(() => window.events.filter(event=>event.kind==='complete-onboarding').length), 1);
-  assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).count(), 0);
+    'an explicit null marker hides private recents until the separate welcome is complete');
+  assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).count(), 0,
+    'the welcome belongs in the originating ChatGPT conversation, never inside Home');
   assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isVisible(), true);
 
   await page.evaluate(() => window.renderError());
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1,
     'an unreadable marker fails open to normal Home rather than leaving recents blocked');
+  await page.getByRole('button',{name:'Show welcome guide'}).click();
+  assert.equal((await page.evaluate(()=>window.events.at(-1))).kind,'welcome',
+    'an unreadable marker offers the welcome as secondary help without blocking Home');
 
   await page.evaluate(() => window.renderAccount('2026-10-11T12:00:00Z'));
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1);

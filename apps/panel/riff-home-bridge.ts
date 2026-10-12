@@ -16,7 +16,7 @@ import {
   validateProductDraft,
   type ProductDraft,
 } from './riff-product-context-validation.ts';
-import { parseListRiffWorkResult, parseOnboardingSeenResult, riffRecentLabel } from './riff-home-validation.ts';
+import { parseListRiffWorkResult, riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
 import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 import {
@@ -429,6 +429,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return { status: 'sent', message: 'Analysis started. Riff will update this saved job here.' };
     },
     send,
+    showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep Riff Home open and usable on the right.'); },
     accountSettings: () => send('Open my Riff account settings in ChatGPT. Do not claim a setting changed until the host confirms it.'),
     support: () => send('I need support with Riff. Help me describe the issue and show the available support handoff.'),
     feedback: () => send('I want to give feedback about Riff. Help me send it through the available ChatGPT handoff.'),
@@ -449,25 +450,6 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
         const label = selected.fileName?.trim() || 'selected video';
         return send(`I selected “${label}” in ChatGPT for Riff. Help me analyze this video. If Riff cannot yet pass the selected file to its analysis tools, say so plainly and ask me for a public TikTok link; do not claim the file was processed.`);
       } catch { return { status: 'failed', message: 'The file picker could not complete. Attach the video in ChatGPT instead.' }; }
-    },
-    showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'); },
-    async completeOnboarding() {
-      const accountId=activeAccountId;
-      if(!accountId||homeState.status!=='ready'||homeState.account.onboarding_seen_at!==null)return {
-        status:'failed',message:'Riff cannot finish this welcome because the account changed. Reopen Riff Home.',
-      };
-      const epoch=++actionEpoch;
-      const outcome=await callTool('mark_riff_onboarding_seen',{});
-      if(disposed||epoch!==actionEpoch||activeAccountId!==accountId)return {
-        status:'failed',message:'A newer Riff account or action is already shown.',
-      };
-      const onboardingSeenAt=outcome.status==='response'?parseOnboardingSeenResult(outcome.value):undefined;
-      if(!onboardingSeenAt)return {
-        status:'failed',message:'Riff could not confirm welcome completion. Try the same action again safely.',
-      };
-      homeState={status:'ready',account:{...homeState.account,onboarding_seen_at:onboardingSeenAt}};
-      render(homeState);ensureInitialWork();
-      return {status:'sent',message:'Welcome completed. Riff Home is ready.'};
     },
     async openRecent(jobId,variantId) {
       const epoch = ++actionEpoch;
@@ -666,11 +648,27 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     app.ontoolresult = undefined; app.ontoolcancelled = undefined; app.onhostcontextchanged = undefined;
     void app.close();
   }
+  const failOpenInitialAccount = (message: string) => {
+    if (activeAccountId !== undefined) return;
+    homeState = { status: 'error', message };
+    render(homeState);
+  };
   app.ontoolresult = (params) => {
     const result = parseStrictCallToolResult(params);
-    if (!result || !isBusinessResultFlagCoherent(result, true)) return;
+    if (!result) {
+      failOpenInitialAccount('Riff returned incomplete account details. Reopen Home.');
+      return;
+    }
     const nextState = riffHomeStructuredOutput(result.structuredContent);
-    if (nextState.status !== 'ready') return;
+    if (nextState.status !== 'ready') {
+      failOpenInitialAccount(nextState.status === 'error'
+        ? nextState.message : 'Riff returned incomplete account details. Reopen Home.');
+      return;
+    }
+    if (!isBusinessResultFlagCoherent(result, true)) {
+      failOpenInitialAccount('Riff returned incomplete account details. Reopen Home.');
+      return;
+    }
     const nextAccountId = nextState.account.id;
     const pendingAccountChanged = (creatorRequest !== undefined && creatorRequest.accountId !== nextAccountId)
       || (productSaveRequest !== undefined && productSaveRequest.accountId !== nextAccountId);

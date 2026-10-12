@@ -60,7 +60,7 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
     }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }), { config, verifier: auth.verifier, operations });
     return response;
   };
-  const listing = await (await rpc('tools/list', {})).json() as { result: { tools: { name: string; title?: string; _meta: unknown; securitySchemes: unknown }[] } };
+  const listing = await (await rpc('tools/list', {})).json() as { result: { tools: { name: string; title?: string; description?: string; _meta: unknown; securitySchemes: unknown }[] } };
   assert.deepEqual(listing.result.tools.map((tool) => tool.name), ['kettle_diagnostic', 'show_riff_welcome', 'get_account_state', 'mark_riff_onboarding_seen', 'get_project', 'save_project', 'show_project_brief', 'get_riff_profile', 'open_riff']);
   for (const tool of listing.result.tools) assert.ok(tool.title?.trim(), `${tool.name} must have a title`);
   const save = listing.result.tools.find((tool) => tool.name === 'save_project')!;
@@ -68,6 +68,10 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   assert.deepEqual(save._meta, { securitySchemes: [{ type: 'oauth2', scopes: [...oauthScopes] }] });
   const welcome = listing.result.tools.find((tool) => tool.name === 'show_riff_welcome')!;
   assert.deepEqual(welcome.securitySchemes, [{ type: 'oauth2', scopes: [...oauthScopes] }]);
+  assert.match(welcome.description ?? '', /inline.*Home remains usable.*final action.*record completion/i,
+    'tool discovery must explain the separate inline guide and its app-only completion action');
+  assert.equal((welcome._meta as Record<string,unknown>)['openai/widgetAccessible'],true,
+    'the inline welcome app may invoke only the app-visible completion tool');
   const profile = listing.result.tools.find((tool) => tool.name === 'get_riff_profile')!;
   assert.equal((profile._meta as Record<string, unknown>)['openai/profile'], true);
   assert.equal(listing.result.tools.filter((tool) => (tool._meta as Record<string, unknown>)['openai/profile'] === true).length, 1);
@@ -75,8 +79,8 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   assert.equal((home as { title?: string }).title, 'Riff Home');
   assert.deepEqual((home._meta as { 'openai/ui': { entrypoints: unknown[] } })['openai/ui'].entrypoints, [{ type: 'global' }, { type: 'thread' }]);
   assert.deepEqual((home._meta as { ui: { visibility?: string[] } }).ui.visibility, ['model', 'app']);
-  assert.equal((home._meta as { ui: { resourceUri: string } }).ui.resourceUri, 'ui://riff/home-v5.html',
-    'a fresh Home result selects the immutable v5 resource');
+  assert.equal((home._meta as { ui: { resourceUri: string } }).ui.resourceUri, 'ui://riff/home-v6.html',
+    'a fresh Home result selects the immutable v6 resource');
   const mark = listing.result.tools.find((tool) => tool.name === 'mark_riff_onboarding_seen')!;
   assert.deepEqual((mark._meta as { ui: { visibility?: string[] } }).ui.visibility, ['app'],
     'only the first-use app may advertise the completion write');
@@ -133,7 +137,7 @@ test('Riff profile and Home aliases each perform one verified account-state read
   const home = await invoke('open_riff', token);
   assert.deepEqual(home.structuredContent, accountState);
   assert.match(home.content?.[0]?.text ?? '',
-    /Welcome to Riff.*first-use Paper guide is open in the Riff app.*final step.*explicit action succeeds/i);
+    /Home is open and usable.*call `show_riff_welcome` once.*same ChatGPT conversation.*visible final action/i);
   assert.deepEqual(calls, [{ name: 'get_account_state', owner: accountA, input: {} }]);
   calls.length = 0;
   const anonymous = await invoke('get_riff_profile');
@@ -163,12 +167,12 @@ test('MCP discovery stays local while protected tool invocations verify identity
     protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'latency-test', version: '1' },
   })).json() as { result: { instructions?: string } };
   assert.match(initialized.result.instructions ?? '', /open Riff immediately with `open_riff`/i);
-  assert.match(initialized.result.instructions ?? '', /open_riff.*owns first-use routing.*Paper welcome/is,
-    'raw MCP clients delegate first-open routing to the Home app');
+  assert.match(initialized.result.instructions ?? '', /open_riff.*onboarding_seen_at.*null.*show_riff_welcome.*same originating response/is,
+    'raw MCP clients compose the inline welcome with an independently usable Home');
   assert.match(initialized.result.instructions ?? '', /Never call `mark_riff_onboarding_seen` from the model/i);
-  assert.match(initialized.result.instructions ?? '', /show_riff_welcome.*explicitly asks to replay.*never changes onboarding state/i);
+  assert.match(initialized.result.instructions ?? '', /onboarding_seen_at.*already set.*show_riff_welcome.*explicitly asks to replay/i);
   await rpc('tools/list', {});
-  await rpc('resources/read', { uri: 'ui://riff/home-v5.html' });
+  await rpc('resources/read', { uri: 'ui://riff/home-v6.html' });
   assert.equal(identity.resolutions.length, 0,
     'public MCP discovery and static UI reads must not resolve an account merely because ChatGPT attached a token');
 

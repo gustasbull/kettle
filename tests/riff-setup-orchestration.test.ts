@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { createOperations, failure } from '../packages/application/operations.ts';
 import { handleMcp } from '../apps/worker/mcp.ts';
 import { RIFF_HOME_URI } from '../apps/worker/riff-home-resource.ts';
+import { RIFF_ONBOARDING_URI } from '../apps/worker/riff-onboarding-resource.ts';
 import { config, fixtureAuth } from './auth-fixtures.ts';
 import { accountA } from './fixtures.ts';
 
-test('raw MCP setup needs only open_riff because the app owns first-use routing and completion',async()=>{
+test('raw MCP setup opens Home and conditionally renders the separate inline welcome',async()=>{
   const identity=await fixtureAuth();const token=await identity.token();
   let onboardingSeenAt:string|null=null;let markWrites=0;const repositoryCalls:string[]=[];
   const operations=createOperations(identity.verifier,{async call(operation){
@@ -25,17 +26,22 @@ test('raw MCP setup needs only open_riff because the app owns first-use routing 
     return response.json() as Promise<{result:any}>;
   };
   const initialized=(await rpc('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'raw-mcp-fixture',version:'1'}})).result;
-  assert.match(initialized.instructions,/open_riff.*owns first-use routing/is);
+  assert.match(initialized.instructions,/open_riff.*onboarding_seen_at.*null.*show_riff_welcome.*same originating response/is);
   assert.match(initialized.instructions,/never call `mark_riff_onboarding_seen`/i);
 
   const tools=(await rpc('tools/list',{})).result.tools as Array<{name:string;_meta?:{ui?:{resourceUri?:string;visibility?:string[]}}}>;
   assert.equal(tools.find(tool=>tool.name==='open_riff')?._meta?.ui?.resourceUri,RIFF_HOME_URI);
+  assert.equal(tools.find(tool=>tool.name==='show_riff_welcome')?._meta?.ui?.resourceUri,RIFF_ONBOARDING_URI);
   assert.deepEqual(tools.find(tool=>tool.name==='mark_riff_onboarding_seen')?._meta?.ui?.visibility,['app']);
 
   const first=(await rpc('tools/call',{name:'open_riff',arguments:{}})).result;
   assert.equal(first.structuredContent.data.account.onboarding_seen_at,null);
-  assert.match(first.content[0].text,/first-use Paper guide is open in the Riff app/i);
+  assert.match(first.content[0].text,/Home is open and usable.*call `show_riff_welcome` once.*same ChatGPT conversation/i);
   assert.equal(markWrites,0,'open_riff remains read-only and never marks merely because the guide can render');
+  assert.deepEqual(repositoryCalls,['get_account_state']);
+  const welcome=(await rpc('tools/call',{name:'show_riff_welcome',arguments:{}})).result;
+  assert.deepEqual(welcome.structuredContent,{steps:['Start','Find','Make']});
+  assert.equal(markWrites,0,'rendering the inline welcome does not mark before its visible final action');
   assert.deepEqual(repositoryCalls,['get_account_state']);
 
   onboardingSeenAt='2026-10-11T08:05:00Z';

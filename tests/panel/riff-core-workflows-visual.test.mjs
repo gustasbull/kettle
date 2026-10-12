@@ -931,6 +931,8 @@ test('integrated Riff-owned CURRENT routes retain Paper geometry, semantics, key
 
   await page.evaluate(() => window.bootHome('first'));
   assert.equal(await page.getByRole('heading', { name: 'Let’s make your next video go viral.' }).count(), 1);
+  assert.equal(await page.getByRole('region',{name:'Welcome to Riff'}).count(),0,
+    'first-use Home stays independent from the inline chat welcome');
   assert.equal(await page.getByRole('heading', { name: 'Pick up where you left off' }).isHidden(), true);
   await page.evaluate(() => window.bootHome('returning'));
   assert.equal(await page.getByRole('button', { name: /Open Authored recent/ }).count(), 4);
@@ -1063,6 +1065,18 @@ test('key CURRENT routes retain semantics, boundaries, focus, and unclipped cont
           return Number.isFinite(lineHeight) && node.clientHeight + 1 < lineHeight;
         }).map(node => node.getAttribute('aria-label') || node.getAttribute('placeholder')));
         assert.deepEqual(clippedFields, [], `200% text clips fields on ${route}`);
+        if(route==='onboarding'){
+          const lost=await page.locator('.riff-onboarding__card').evaluate(card=>{
+            const bounds=card.getBoundingClientRect();const active=card.querySelector('.riff-onboarding__slide[aria-current="step"]');
+            const required=[...card.querySelectorAll('.riff-onboarding__intro h1,.riff-onboarding__intro h2,.riff-onboarding__closing strong,.riff-onboarding__closing p'),
+              ...active.querySelectorAll('h3,p,.riff-onboarding__working-label,.riff-onboarding__working-copy,.riff-onboarding__chip')];
+            return required.filter(node=>{const rect=node.getBoundingClientRect();return rect.left<bounds.left-1||rect.right>bounds.right+1||rect.top<bounds.top-1||rect.bottom>bounds.bottom+1;})
+              .map(node=>node.textContent?.trim());
+          });
+          assert.deepEqual(lost,[],'200% onboarding copy remains inside the visible card');
+          assert.equal(await page.locator('.riff-onboarding__slide[aria-current="step"] .riff-onboarding__visual').evaluate(node=>node.scrollHeight<=node.clientHeight+1),true,
+            '200% onboarding example remains readable');
+        }
       }
     }
     if (mode === 'reduced') {
@@ -1161,6 +1175,30 @@ test('dark host variables drive every pipeline, Product, Discovery, Studio, and 
     ...(selectedSelector ? { selected: 'rgb(17, 24, 39)/rgb(248, 250, 252)' } : {}),
     ...(focusSelector ? { focus: 'true/rgb(147, 197, 253)' } : {}),
   })));
+  const contrastSamples=async selector=>page.locator(selector).evaluateAll(nodes=>{
+    const channels=value=>(value.match(/[\d.]+/g)??[]).slice(0,3).map(Number);
+    const luminance=value=>{
+      const [r,g,b]=channels(value).map(channel=>{const unit=channel/255;return unit<=.04045?unit/12.92:((unit+.055)/1.055)**2.4;});
+      return .2126*r+.7152*g+.0722*b;
+    };
+    return nodes.map(node=>{
+      let background=node;let color=getComputedStyle(background).backgroundColor;
+      while(background.parentElement&&(/rgba\([^)]*,\s*0\)$/.test(color)||color==='transparent')){
+        background=background.parentElement;color=getComputedStyle(background).backgroundColor;
+      }
+      const foreground=getComputedStyle(node).color;const light=luminance(foreground),dark=luminance(color);
+      return {text:node.textContent?.trim(),foreground,background:color,ratio:(Math.max(light,dark)+.05)/(Math.min(light,dark)+.05)};
+    });
+  });
+  await pipeline('fetch');
+  const loadingContrast=await contrastSamples('.riff-loading-activity');
+  await pipeline('video');
+  const statusContrast=await contrastSamples('.riff-analysis-row__status');
+  await pipeline('filmed');
+  const filmedContrast=await contrastSamples('.riff-studio-filmed-status');
+  for(const sample of [...loadingContrast,...statusContrast,...filmedContrast]){
+    assert.ok(sample.ratio>=4.5,`dark semantic text contrast ${sample.ratio.toFixed(2)}:1 for ${JSON.stringify(sample)}`);
+  }
   await pipeline('video');
   assert.deepEqual(await page.locator('.riff-analysis-row').first().evaluate(node=>({
     surface:getComputedStyle(node).backgroundColor,
@@ -1176,7 +1214,7 @@ test('dark host variables drive every pipeline, Product, Discovery, Studio, and 
   assert.equal(await page.evaluate(() => window.external.length), 0);
 });
 
-test('the generated Home v5 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
+test('the generated Home v6 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
   const { RIFF_HOME_DOCUMENT } = await import('../../apps/worker/riff-home-resource.ts');
   const scan = structuredClone(riffCoreWorkflowFixtures.scans.videoFull.value);
   scan.revision = 2;
@@ -1208,8 +1246,10 @@ test('the generated Home v5 resource and real bridge keep one root through Home,
       const fixture=${payload};const account=${accountPayload};window.calls=[];window.messages=[];window.ready=false;window.workState=null;window.scriptJob=fixture.scripts;
       const frame=()=>document.querySelector('iframe').contentWindow;
       const respond=(id,structuredContent,isError=false)=>frame().postMessage({jsonrpc:'2.0',id,result:{content:[],structuredContent,isError,_meta:{}}},'*');
-      const work=()=>[{job_id:window.scriptJob.id,project_name:'Authored Studio',kind:'scripts',state:'succeeded',updated_at:window.scriptJob.updated_at,
-        source:{platform:'tiktok',handle:'authored.resource'},variant_id:window.workState?.variant_id??null,work_state:window.workState}];
+      const work=()=>[{project_id:window.scriptJob.project_id,job_id:window.scriptJob.id,project_name:'Authored Studio',kind:'scripts',state:'succeeded',updated_at:window.scriptJob.updated_at,
+        source:{platform:'tiktok',kind:'video',handle:'authored.resource',canonical_url:'https://www.tiktok.com/@authored.resource/video/9000000000000000001',
+          profile_url:'https://www.tiktok.com/@authored.resource',video_url:'https://www.tiktok.com/@authored.resource/video/9000000000000000001'},
+        variant_id:window.workState?.variant_id??null,work_state:window.workState}];
       addEventListener('message',event=>{const message=event.data;
         if(message.method==='ui/initialize')return frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,
           hostInfo:{name:'task8-resource-host',version:'1'},hostCapabilities:{serverTools:{},experimental:{'openai/message':{}}},hostContext:{theme:'light',locale:'en'}}},'*');
@@ -1300,7 +1340,7 @@ test('the generated Home v5 resource and real bridge keep one root through Home,
     ['save_project','start_riff_creator','start_creator_recommendations','set_riff_work_state']);
   assert.equal(await page.evaluate(()=>window.calls.some(call=>Object.hasOwn(call.arguments??{},'account_id'))),false);
   assert.equal(await page.evaluate(()=>window.calls.find(call=>call.name==='list_riff_videos').arguments.role),'discovered_reference');
-  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v5$/);
+  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v6$/);
   assert.equal(await frame.evaluate(()=>window.__task8ImageSources.some(source=>/^javascript:|^https?:\/\/(?![^/]*(?:tiktokcdn\.com|tiktokcdn-us\.com))/i.test(source))),false);
   assert.deepEqual(network.filter(url=>!url.startsWith(base)&&url!=='about:blank'),[]);
   assert.doesNotMatch(await frame.locator('body').textContent(),/Bearer |service[_ -]?role|postgres(?:ql)?:\/\//i);

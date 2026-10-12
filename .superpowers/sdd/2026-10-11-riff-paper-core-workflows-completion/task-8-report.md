@@ -6,8 +6,9 @@ Completed local acceptance of the Riff-owned CURRENT workflows against the
 read-only Paper authority. The acceptance surface now has a deterministic,
 test-only 42-row fixture matrix; 15 executable browser suites; one-root Home
 navigation through Product, loading, analysis, Discovery, Studio, Saved, and
-resume; equivalent standalone pipeline behavior; and immutable Home/pipeline v4
-resources with compatibility aliases.
+resume; equivalent standalone pipeline behavior; and current immutable Home v6,
+inline onboarding v5, and standalone pipeline v6 resources with compatibility
+aliases.
 
 No provider request, paid work, hosted deployment, publication, Paper mutation,
 production secret, external outreach, or remote database operation was performed.
@@ -50,11 +51,14 @@ viewport. The upload fake now states that the selection was sent to ChatGPT but 
 not uploaded or analyzed, and the malformed-marker fixture distinguishes parser
 rejection from Home's truthful fail-open recent-work recovery.
 
-Packaged first use is now exercised through the real MCP public surface plus a
-package-host fake: `open_riff` opens usable Home while the welcome can still be
-pending, strict welcome success then permits `mark_riff_onboarding_seen`, and
-failure, malformed output, or timeout stop before the write. This is explicitly a
-package/setup-skill orchestration contract; raw MCP does not run the sequence itself.
+First use is exercised through the real MCP public surface plus a package-host
+fake: `open_riff` always opens usable Home, and an exact null marker suppresses
+only private recents. The server's MCP instructions and packaged setup sequence
+then call `show_riff_welcome` once so the standalone Paper carousel renders inline
+in the originating chat. Only its explicit final action may call
+`mark_riff_onboarding_seen`; the model never calls that tool. Rejected, malformed,
+or timed-out completion remains unmarked and retryable. Returning users skip the
+automatic welcome, and an explicit replay never writes account state.
 The same packaged guidance now reflects the exposed `set_riff_work_state` tool:
 Save, Undo, or Filmed is claimed only after a strict successful receipt and
 authoritative job reconciliation; every other outcome remains unconfirmed or failed.
@@ -105,14 +109,17 @@ unexpected browser I/O.
 
 ## Paper and visual review
 
-The authority is Paper file `01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, CURRENT
-artboard `Z9H-0` at 7700×10112, observed token hash `17cc259e`. Host-owned ChatGPT
-chrome is outside the target.
+The exact node-level authority is the tree/JSX/computed-style audit captured on
+11 October for Paper file `01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, CURRENT
+artboard `Z9H-0` at 7700×10112, token hash `17cc259e`. Live basic info on
+12 October reconfirmed those identifiers, dimensions, and hash, but node-level
+reads were permission-blocked; it is not represented as a newer design audit.
+Host-owned ChatGPT chrome is outside the target.
 
 Executable assertions cover roles and text, geometry, computed styles, semantic
 state, keyboard routes, focus, active-control clipping, document overflow, host dark
 variables, forced colors, reduced motion, and 200% text at 320, 375, 768, and 1440
-CSS pixels. The real generated Home v4 document and real parent bridge also pass the
+CSS pixels. The real generated Home v6 document and real parent bridge also pass the
 same-root journey with exact calls, no account input, and no unexpected network
 request.
 
@@ -125,36 +132,39 @@ cover loading, video analysis, Product, Discovery, Studio, and Saved. `manifest.
 records each image's dimensions, byte count, and SHA-256; the byte-identical
 10,054-byte manifest SHA-256 is
 `689d144e8736f677dcdbe4e1b99f72e664b18aaf5d622e64b4e0d3f448c0dc0d`.
-These images are human-review evidence, not pixel-diff baselines or source data.
+These images are the preserved pre-correction Task 8 human-review record, not
+pixel-diff baselines or source data. In particular, its first-use capture predates
+the corrected chat-plus-Home composition and is not current release evidence; the
+current implementation is sourced from the exact Paper audit and exercised by the
+updated browser assertions.
 
-## Immutable resources
+## Current immutable resources
 
-The final deterministic resource identities are:
+The current deterministic local release candidates after the first-use correction
+are:
 
 | Resource | Version | SHA-256 | Raw | Gzip | Budget |
 | --- | --- | --- | ---: | ---: | ---: |
-| `ui://riff/home-v4.html` | `riff-home-v4` | `ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454` | 242423 | 66574 | 500000 / 110000 |
-| `ui://kettle/creator-pipeline-v4.html` | `creator-pipeline-v4` | `7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187` | 175538 | 47646 | 250000 / 75000 |
+| `ui://riff/home-v6.html` | `riff-home-v6` | `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4` | 246025 | 67032 | 500000 / 110000 |
+| `ui://riff/onboarding-v5.html` | `riff-onboarding-v5` | `890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a` | 36472 | 10835 | 400000 / 85000 |
+| `ui://kettle/creator-pipeline-v6.html` | `creator-pipeline-v6` | `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358` | 177195 | 47988 | 250000 / 75000 |
 
-Home retains the v1, v2, and v3 URIs and pipeline retains v2 and v3. Those are
-compatibility handles serving the current static document, not claims that a mutable
-historical bundle remains under each URI. Telemetry, observations, build manifests,
-benchmarks, and resource tests use the canonical v4 versions.
+Home retains v1–v5, onboarding retains v1–v4, and pipeline retains v2–v5.
+Those are compatibility handles serving the current static documents, not claims
+that a mutable historical bundle remains under each URI. Telemetry, observations,
+build manifests, benchmarks, and resource tests use the canonical v6/v5/v6
+versions. Task 9 must still reproduce these bytes from a clean generated state and
+prove the hosted Worker serves them; this section does not claim either result.
 
-Two consecutive final builds produced identical resource metadata and generated-file
-hashes:
+The hosted migration application for `20261011091042` through
+`20261011091046` also remains a Task 9 operation. No remote migration or deployment
+is claimed here.
 
-- manifest: `f5694e3fd3317564a1ab23d5c84e36b10587e41718aedc1487042d0e3121b701`;
-- generated pipeline module:
-  `92dd138857d6c34321d193cc2705c70e6ad6c0c624900a1cb8837829913293d3`;
-- generated Home module:
-  `b0584ef5246e26a65335ecd3b1c1299a203b67f2020feb12bbe985fbfbc7753e`.
+## Task 8 verification record
 
-The still-unapplied pending migration
-`supabase/migrations/20261011091046_riff_work_state.sql` has SHA-256
-`a316b883f880f3f28a2af79b1ccf2aec7dac71b67bb310d2f6369b2509bd866d`.
-
-## Final verification
+The counts below are the preserved Task 8 acceptance record. They predate the
+post-review first-use/resource correction above and therefore are not final Task 9
+whole-repository or hosted-release evidence.
 
 - Work-state client/database/MCP matrix:
   `npx tsx --test tests/riff-work-state-client.test.ts tests/riff-work-state-database.test.ts tests/riff-work-state-mcp.test.ts`
@@ -191,10 +201,12 @@ migration was added.
 `PRODUCT.md` and `docs/engineering/decisions.md` now distinguish implemented truth
 from intended scope: Discovery's four libraries are local creative lenses over real
 owned lineage, Product save requires explicit validation and a parsed receipt,
-Saved/Filmed/resume state is durable, and the v4 artifacts are locally verified.
+Saved/Filmed/resume state is durable, and the current v6/v5/v6 artifacts are local
+release candidates.
 
 Instagram remains deterministic presentation/fixture coverage only; it is not live
-provider proof. A raw custom MCP URL can receive truthful first-open prose but cannot
-distribute the package-controlled onboarding skill or carousel. Product URLs are not
-fetched, catalog browsing creates no fictional persisted lineage, and local visual
-acceptance is not a hosted deployment or public-release claim.
+provider proof. A capable MCP host can follow the server-published first-use sequence
+and render the same standalone inline welcome resource; the packaged setup skill pins
+that sequence for the distributed Riff package. Product URLs are not fetched, catalog
+browsing creates no fictional persisted lineage, and local visual acceptance is not
+a hosted deployment or public-release claim.
