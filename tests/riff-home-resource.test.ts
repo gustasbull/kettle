@@ -7,6 +7,7 @@ import {
   RIFF_HOME_META,
   RIFF_HOME_MIME,
   RIFF_HOME_URI,
+  RIFF_HOME_V6_URI,
   RIFF_HOME_V5_URI,
   RIFF_HOME_V4_URI,
   RIFF_HOME_V3_URI,
@@ -37,6 +38,8 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
   assert.deepEqual(listed.resources.map(({ name, uri, mimeType }) => ({ name, uri, mimeType })), [{
     name: 'riff-home', uri: RIFF_HOME_URI, mimeType: RIFF_HOME_MIME,
   }, {
+    name: 'riff-home-v6-compat', uri: RIFF_HOME_V6_URI, mimeType: RIFF_HOME_MIME,
+  }, {
     name: 'riff-home-v5-compat', uri: RIFF_HOME_V5_URI, mimeType: RIFF_HOME_MIME,
   }, {
     name: 'riff-home-v4-compat', uri: RIFF_HOME_V4_URI, mimeType: RIFF_HOME_MIME,
@@ -48,17 +51,21 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
     name: 'riff-home-v1-compat', uri: RIFF_HOME_LEGACY_URI, mimeType: RIFF_HOME_MIME,
   }]);
   const content = (await client.readResource({ uri: RIFF_HOME_URI })).contents[0]!;
+  const v6 = (await client.readResource({ uri: RIFF_HOME_V6_URI })).contents[0]!;
   const v5 = (await client.readResource({ uri: RIFF_HOME_V5_URI })).contents[0]!;
   const v4 = (await client.readResource({ uri: RIFF_HOME_V4_URI })).contents[0]!;
   const v3 = (await client.readResource({ uri: RIFF_HOME_V3_URI })).contents[0]!;
   const prior = (await client.readResource({ uri: RIFF_HOME_V2_URI })).contents[0]!;
   const legacy = (await client.readResource({ uri: RIFF_HOME_LEGACY_URI })).contents[0]!;
   assert.ok('text' in content);
+  assert.ok('text' in v6);
   assert.ok('text' in v5);
   assert.ok('text' in v4);
   assert.ok('text' in v3);
   assert.ok('text' in prior);
   assert.ok('text' in legacy);
+  assert.equal(v6.text, content.text,
+    'existing ChatGPT threads can reload their cached v6 resource with the current safe bundle');
   assert.equal(v5.text, content.text,
     'existing ChatGPT threads can reload their cached v5 resource with the current safe bundle');
   assert.equal(v4.text, content.text,
@@ -70,10 +77,10 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
   assert.equal(legacy.text, content.text,
     'existing ChatGPT threads can reload their cached v1 resource with the current safe bundle');
   assert.equal(content.text, RIFF_HOME_DOCUMENT);
-  assert.equal(RIFF_HOME_URI, 'ui://riff/home-v6.html');
-  assert.equal(riffHomeFingerprint.resource_version, 'riff-home-v6');
+  assert.equal(RIFF_HOME_URI, 'ui://riff/home-v7.html');
+  assert.equal(riffHomeFingerprint.resource_version, 'riff-home-v7');
   assert.deepEqual(panelManifest.panels.find(panel => panel.panel === 'riff-home'), riffHomeFingerprint);
-  assert.match(content.text as string, new RegExp(`content="${riffHomeFingerprint.bundle_version}" data-resource-version="riff-home-v6"`));
+  assert.match(content.text as string, new RegExp(`content="${riffHomeFingerprint.bundle_version}" data-resource-version="riff-home-v7"`));
   assert.deepEqual(content._meta, RIFF_HOME_META);
   assert.deepEqual(RIFF_HOME_META['openai/ui'], {
     availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen',
@@ -93,10 +100,10 @@ test('Riff Home keeps the prior URI readable while publishing the current fullsc
 
 test('Riff Home HTML escapes raw-text delimiters', () => {
   const html = riffHomeHtml('const payload = "</ScRiPt><!--";', {
-    resource_version: 'riff-home-v6', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-home-v7', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));
   assert.ok(!html.includes('<!--'));
-  assert.match(html, new RegExp(`name="riff-bundle-version" content="sha256:${'a'.repeat(64)}" data-resource-version="riff-home-v6"`));
+  assert.match(html, new RegExp(`name="riff-bundle-version" content="sha256:${'a'.repeat(64)}" data-resource-version="riff-home-v7"`));
 });

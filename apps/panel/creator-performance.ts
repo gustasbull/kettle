@@ -3,7 +3,7 @@ type PanelStatus = 'ok' | 'error' | 'timeout' | 'rejected';
 type PanelFingerprint = { resource_version: string; bundle_version: string };
 type LocalPerformance = Pick<Performance, 'now' | 'measure'>;
 
-const resourceVersions = new Set(['riff-home-v6', 'riff-onboarding-v5', 'creator-pipeline-v6']);
+const resourceVersions = new Set(['riff-home-v7', 'riff-onboarding-v7', 'creator-pipeline-v7']);
 const safeBundleVersion = /^sha256:[a-f0-9]{64}$/;
 
 /** Content-free, browser-local Performance entries. No reporting transport exists. */

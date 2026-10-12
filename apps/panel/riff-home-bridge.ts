@@ -637,23 +637,37 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     }
   };
   const handshake = new AbortController();
-  const timer = setTimeout(() => {
-    if (!connected && !disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' });
-  }, timeoutMs);
+  let initialResultObserved = false;
+  let initialResultTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopInitialResultWatchdog = () => {
+    if (initialResultTimer !== undefined) clearTimeout(initialResultTimer);
+    initialResultTimer = undefined;
+  };
+  function failOpenInitialAccount(message: string) {
+    if (activeAccountId !== undefined) return;
+    view.setRecentsState({ status: 'error', message: 'Recent work is unavailable until Riff reconnects your account.' });
+    homeState = { status: 'error', message };
+    render(homeState);
+  }
+  const startInitialResultWatchdog = () => {
+    stopInitialResultWatchdog();
+    if (disposed || initialResultObserved || activeAccountId !== undefined) return;
+    initialResultTimer = setTimeout(() => {
+      initialResultTimer = undefined;
+      if (!disposed) failOpenInitialAccount('Riff account details did not arrive. Reopen Home from ChatGPT.');
+    }, timeoutMs);
+  };
   function dispose() {
     if (disposed) return;
-    disposed = true; connected = false;controller.dispose();workStateClient.invalidate();clearTimeout(timer); handshake.abort(); view.dispose();
+    disposed = true; connected = false;controller.dispose();workStateClient.invalidate();stopInitialResultWatchdog(); handshake.abort(); view.dispose();
     window.removeEventListener('pagehide', dispose);
     root.ownerDocument.removeEventListener('visibilitychange',visibilityChanged);
     app.ontoolresult = undefined; app.ontoolcancelled = undefined; app.onhostcontextchanged = undefined;
     void app.close();
   }
-  const failOpenInitialAccount = (message: string) => {
-    if (activeAccountId !== undefined) return;
-    homeState = { status: 'error', message };
-    render(homeState);
-  };
   app.ontoolresult = (params) => {
+    initialResultObserved = true;
+    stopInitialResultWatchdog();
     const result = parseStrictCallToolResult(params);
     if (!result) {
       failOpenInitialAccount('Riff returned incomplete account details. Reopen Home.');
@@ -680,7 +694,11 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     if (catalogDeferred && activeAccountId) void loadCatalog(catalogDeferred.projectId);
     ensureInitialWork();
   };
-  app.ontoolcancelled = () => render({ status: 'error', message: 'Riff Home was cancelled. Reopen it from ChatGPT.' });
+  app.ontoolcancelled = () => {
+    initialResultObserved = true;
+    stopInitialResultWatchdog();
+    failOpenInitialAccount('Riff Home was cancelled. Reopen it from ChatGPT.');
+  };
   app.onhostcontextchanged = applyContext;
   app.onteardown = async () => { setTimeout(dispose, 0); return {}; };
   app.onclose = () => {
@@ -692,17 +710,24 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   const visibilityChanged=()=>controller.visibilityChanged(root.ownerDocument.hidden);
   root.ownerDocument.addEventListener('visibilitychange',visibilityChanged);
   if (window.parent === window) {
-    clearTimeout(timer); render({ status: 'error', message: 'Preview mode. Open Riff from ChatGPT to connect your account.' });
+    initialResultObserved = true;
+    failOpenInitialAccount('Preview mode. Open Riff from ChatGPT to connect your account.');
   } else {
     void app.connect(new PostMessageTransport(window.parent, window.parent), {
       signal: handshake.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
     }).then(() => {
       if (disposed) return;
-      connected = true; clearTimeout(timer); applyContext(app.getHostContext());
+      connected = true; applyContext(app.getHostContext());
       controller.connected(!!app.getHostCapabilities()?.serverTools||!!window.openai?.callTool);
+      startInitialResultWatchdog();
       if (catalogDeferred && activeAccountId) void loadCatalog(catalogDeferred.projectId);
       ensureInitialWork();
-    }).catch(() => { if (!disposed) render({ status: 'error', message: 'Riff Home could not connect. Reopen it from ChatGPT.' }); });
+    }).catch(() => {
+      if (disposed) return;
+      initialResultObserved = true;
+      stopInitialResultWatchdog();
+      failOpenInitialAccount('Riff Home could not connect. Reopen it from ChatGPT.');
+    });
   }
   return { dispose };
 }

@@ -128,7 +128,7 @@ test('Riff onboarding keeps completion retryable across unsupported, malformed, 
     'unsupported transport never reached a tool; five failed attempts and one confirmed retry did');
 });
 
-test('Riff onboarding requires a coherent issuance and rejects a stale account before confirming completion',async t=>{
+test('Riff onboarding tells an unbound or stale-account welcome to reopen for the current account',async t=>{
   const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
     import { mountRiffOnboardingBridge } from './apps/panel/riff-onboarding-bridge.ts';
     window.bridge=mountRiffOnboardingBridge(document.getElementById('mount'),{timeoutMs:300,toolTimeoutMs:200});
@@ -172,20 +172,15 @@ test('Riff onboarding requires a coherent issuance and rejects a stale account b
   await frame.getByRole('button',{name:'Next step'}).click();await frame.getByRole('button',{name:'Next step'}).click();
 
   await frame.getByRole('button',{name:'Finish welcome'}).click();
-  await frame.getByRole('status').getByText(/could not confirm/i).waitFor();
+  await frame.getByRole('status').getByText(/not bound.*current Riff account.*reopen the welcome guide/i).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.calls),[],'missing account binding must not invoke a write');
 
   await page.evaluate(value=>window.issue({structuredContent:{
     steps:['Start','Find','Make'],expected_account_id:value,
   },content:[],isError:false,_meta:{}}),accountA);
   await frame.getByRole('button',{name:'Finish welcome'}).click();
-  await frame.getByRole('status').getByText(/could not confirm/i).waitFor();
+  await frame.getByRole('status').getByText(/belongs to another Riff account.*reopen the welcome guide.*current account/i).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.writes),[],'account switch rejection leaves both accounts unmarked');
   assert.deepEqual(await page.evaluate(()=>window.calls),[{name:'mark_riff_onboarding_seen',arguments:{expected_account_id:accountA}}]);
   assert.equal(await frame.getByRole('button',{name:'Finish welcome'}).isEnabled(),true);
-
-  await page.evaluate(value=>window.useAccount(value),accountA);
-  await frame.getByRole('button',{name:'Finish welcome'}).click();
-  await frame.getByRole('status').getByText(/Welcome completed.*Home is ready/i).waitFor();
-  assert.deepEqual(await page.evaluate(()=>window.writes),[accountA]);
 });

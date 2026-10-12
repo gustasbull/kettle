@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   isCreatorJobView,parseCreatorJobView,parseListRiffWorkResult,parseOnboardingSeenResult,
 } from '../../apps/panel/riff-home-validation.ts';
-import { parseWelcomeAccountBinding } from '../../apps/panel/riff-onboarding-validation.ts';
+import {
+  parseWelcomeAccountBinding,
+  parseWelcomeCompletionConflict,
+} from '../../apps/panel/riff-onboarding-validation.ts';
 import { pipelineFixture } from '../../apps/panel/creator-pipeline/fixtures.ts';
 import { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 
@@ -62,6 +65,35 @@ test('onboarding accepts only the exact coherent credential-bound welcome issuan
     enumerable:true,configurable:true,get(){reads++;return accountId;},
   });
   assert.equal(parseWelcomeAccountBinding(accessor),undefined);
+  assert.equal(reads,0,'hostile accessors are rejected without execution');
+});
+
+test('onboarding recognizes only an exact coherent account-version conflict',()=>{
+  const exact=()=>({structuredContent:{ok:false,error:{
+    code:'VERSION_CONFLICT',message:'Riff state changed.',retryable:false,recovery:'reload',
+  }},content:[],isError:true,_meta:{}});
+  assert.equal(parseWelcomeCompletionConflict(exact()),true);
+  const cases:Array<[string,(value:any)=>void]>=[
+    ['success error flag',value=>{value.isError=false;}],
+    ['missing error flag is still coherent',()=>{}],
+    ['wrong code',value=>{value.structuredContent.error.code='UNAVAILABLE';}],
+    ['extra result key',value=>{value.structuredContent.debug=true;}],
+    ['extra error key',value=>{value.structuredContent.error.account_id='private';}],
+    ['empty message',value=>{value.structuredContent.error.message='';}],
+    ['wrong retryability',value=>{value.structuredContent.error.retryable=true;}],
+    ['wrong recovery',value=>{value.structuredContent.error.recovery='retry_same_request';}],
+  ];
+  for(const [name,mutate] of cases){
+    const value=exact();
+    if(name==='missing error flag is still coherent') Reflect.deleteProperty(value,'isError');
+    else mutate(value);
+    assert.equal(parseWelcomeCompletionConflict(value),name==='missing error flag is still coherent',name);
+  }
+  const accessor=exact();let reads=0;
+  Object.defineProperty(accessor.structuredContent.error,'code',{
+    enumerable:true,configurable:true,get(){reads++;return 'VERSION_CONFLICT';},
+  });
+  assert.equal(parseWelcomeCompletionConflict(accessor),false);
   assert.equal(reads,0,'hostile accessors are rejected without execution');
 });
 

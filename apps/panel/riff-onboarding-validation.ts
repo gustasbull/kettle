@@ -20,3 +20,18 @@ export function parseWelcomeAccountBinding(raw: unknown): string | undefined {
       &&accountId(result.expected_account_id)?result.expected_account_id:undefined;
   } catch { return; }
 }
+
+/** Recognize only the canonical failure proving that this mounted welcome is
+ * bound to a different verified account. Other failures remain ambiguous and
+ * may be retried with the same request. */
+export function parseWelcomeCompletionConflict(raw: unknown): boolean {
+  try {
+    const envelope=parseStrictCallToolResult(raw);
+    const result=strictObjectShape(envelope?.structuredContent,['ok','error']);
+    const error=strictObjectShape(result?.error,['code','message','retryable','recovery']);
+    return !!envelope&&isBusinessResultFlagCoherent(envelope,false)&&result?.ok===false&&!!error
+      &&error.code==='VERSION_CONFLICT'&&typeof error.message==='string'
+      &&error.message.trim().length>0&&error.message.length<=500
+      &&error.retryable===false&&error.recovery==='reload';
+  } catch { return false; }
+}

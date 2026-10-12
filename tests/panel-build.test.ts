@@ -113,9 +113,9 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   t.after(() => rm(root, { recursive: true, force: true }));
   const panel = join(root, 'apps/panel');
   const fixtures = [
-    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v6' },
-    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v6' },
-    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v6' },
+    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v7' },
+    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v7' },
+    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v7' },
   ] as const;
   for (const fixture of fixtures) {
     const component = join(panel, fixture.name, 'index.ts');

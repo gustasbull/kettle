@@ -30,14 +30,14 @@ fullscreen chrome are not part of the visual target.
   job/work-state activity, with source provenance kept on the selected job. A filmed
   Studio state exposes a receipt-backed `Undo filmed` correction to `active` and never
   replaces persisted truth after only a conversational handoff.
-- The canonical immutable local release candidates are `ui://riff/home-v6.html`
-  (`riff-home-v6`, SHA-256 `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`,
-  246025 raw / 67032 gzip bytes), `ui://riff/onboarding-v6.html`
-  (`riff-onboarding-v6`, SHA-256 `895affa9aaf20db9569e8efa763dcbe20b3608c0874204613af6fb66791da204`,
-  37064 raw / 11033 gzip bytes), and `ui://kettle/creator-pipeline-v6.html`
-  (`creator-pipeline-v6`, SHA-256 `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`,
-  177195 raw / 47988 gzip bytes). Home keeps v1–v5 compatibility URIs,
-  onboarding keeps v1–v5, and the pipeline keeps v2–v5; all aliases serve the same
+- The canonical immutable local release candidates are `ui://riff/home-v7.html`
+  (`riff-home-v7`, SHA-256 `55477d20245398aa936d227dc5bcb59d4bd28022cefbe39fb5e28c76450cd40d`,
+  246140 raw / 67085 gzip bytes), `ui://riff/onboarding-v7.html`
+  (`riff-onboarding-v7`, SHA-256 `4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589`,
+  37664 raw / 11225 gzip bytes), and `ui://kettle/creator-pipeline-v7.html`
+  (`creator-pipeline-v7`, SHA-256 `f4f2371af58bb3c494efda4bd1d749d337aceb83e781cc083a9d40f53ac226c8`,
+  177195 raw / 47987 gzip bytes). Home keeps v1–v6 compatibility URIs,
+  onboarding keeps v1–v6, and the pipeline keeps v2–v6; all aliases serve the same
   current static document so existing turns do not lose their resource. These local
   identities are not evidence that the hosted Worker serves the same bytes.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state

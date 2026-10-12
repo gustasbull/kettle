@@ -6,8 +6,8 @@ Completed local acceptance of the Riff-owned CURRENT workflows against the
 read-only Paper authority. The acceptance surface now has a deterministic,
 test-only 42-row fixture matrix; 15 executable browser suites; one-root Home
 navigation through Product, loading, analysis, Discovery, Studio, Saved, and
-resume; equivalent standalone pipeline behavior; and current immutable Home v6,
-inline onboarding v6, and standalone pipeline v6 resources with compatibility
+resume; equivalent standalone pipeline behavior; and current immutable Home v7,
+inline onboarding v7, and standalone pipeline v7 resources with compatibility
 aliases.
 
 No provider request, paid work, hosted deployment, publication, Paper mutation,
@@ -123,7 +123,7 @@ Host-owned ChatGPT chrome is outside the target.
 Executable assertions cover roles and text, geometry, computed styles, semantic
 state, keyboard routes, focus, active-control clipping, document overflow, host dark
 variables, forced colors, reduced motion, and 200% text at 320, 375, 768, and 1440
-CSS pixels. The real generated Home v6 document and real parent bridge also pass the
+CSS pixels. The real generated Home v7 document and real parent bridge also pass the
 same-root journey with exact calls, no account input, and no unexpected network
 request.
 
@@ -149,14 +149,14 @@ are:
 
 | Resource | Version | SHA-256 | Raw | Gzip | Budget |
 | --- | --- | --- | ---: | ---: | ---: |
-| `ui://riff/home-v6.html` | `riff-home-v6` | `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4` | 246025 | 67032 | 500000 / 110000 |
-| `ui://riff/onboarding-v6.html` | `riff-onboarding-v6` | `895affa9aaf20db9569e8efa763dcbe20b3608c0874204613af6fb66791da204` | 37064 | 11033 | 400000 / 85000 |
-| `ui://kettle/creator-pipeline-v6.html` | `creator-pipeline-v6` | `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358` | 177195 | 47988 | 250000 / 75000 |
+| `ui://riff/home-v7.html` | `riff-home-v7` | `55477d20245398aa936d227dc5bcb59d4bd28022cefbe39fb5e28c76450cd40d` | 246140 | 67085 | 500000 / 110000 |
+| `ui://riff/onboarding-v7.html` | `riff-onboarding-v7` | `4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589` | 37664 | 11225 | 400000 / 85000 |
+| `ui://kettle/creator-pipeline-v7.html` | `creator-pipeline-v7` | `f4f2371af58bb3c494efda4bd1d749d337aceb83e781cc083a9d40f53ac226c8` | 177195 | 47987 | 250000 / 75000 |
 
-Home retains v1–v5, onboarding retains v1–v5, and pipeline retains v2–v5.
+Home retains v1–v6, onboarding retains v1–v6, and pipeline retains v2–v6.
 Those are compatibility handles serving the current static documents, not claims
 that a mutable historical bundle remains under each URI. Telemetry, observations,
-build manifests, benchmarks, and resource tests use the canonical v6/v6/v6
+build manifests, benchmarks, and resource tests use the canonical v7/v7/v7
 versions. Task 9 must still reproduce these bytes from a clean generated state and
 prove the hosted Worker serves them; this section does not claim either result.
 
@@ -205,7 +205,7 @@ migration was added.
 `PRODUCT.md` and `docs/engineering/decisions.md` now distinguish implemented truth
 from intended scope: Discovery's four libraries are local creative lenses over real
 owned lineage, Product save requires explicit validation and a parsed receipt,
-Saved/Filmed/resume state is durable, and the current v6/v6/v6 artifacts are local
+Saved/Filmed/resume state is durable, and the current v7/v7/v7 artifacts are local
 release candidates.
 
 Instagram remains deterministic presentation/fixture coverage only; it is not live

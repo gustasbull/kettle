@@ -259,6 +259,47 @@ test('Riff Home accepts only a coherent complete initial result and preserves th
   assert.equal(await frame.evaluate(()=>window.getterReads),0);
 });
 
+test('Riff Home fails open when the host handshake completes without an initial tool result',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:80,toolTimeoutMs:200,maxPolls:0});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>window.ready=false;window.calls=[];const frame=()=>document.querySelector('iframe').contentWindow;
+      window.emitAccount=()=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{
+        structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Recovered account',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-01-01T00:02:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[],isError:false,_meta:{}
+      }},'*');
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,
+          hostInfo:{name:'missing-initial-result',version:'1'},hostCapabilities:{serverTools:{}},hostContext:{}}},'*');
+        if(message.method==='ui/notifications/initialized')window.ready=true;
+        if(message.method==='tools/call'){
+          window.calls.push(message.params);
+          frame().postMessage({jsonrpc:'2.0',id:message.id,result:{structuredContent:{ok:true,data:{work:[]}},content:[],isError:false,_meta:{}}},'*');
+        }
+      });</script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  await frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').waitFor();
+  assert.equal(await frame.locator('.riff-home__account').textContent(),'Account unavailable');
+  assert.match(await frame.locator('.riff-home__status').textContent(),/account details.*did not arrive/i);
+  assert.equal(await frame.getByRole('button',{name:'Show welcome guide'}).isVisible(),true);
+  assert.equal(await frame.locator('.riff-home__recents').getAttribute('aria-busy'),'false');
+  assert.match(await frame.locator('.riff-home__recents').textContent(),/Recent work is unavailable/i);
+  assert.doesNotMatch(await frame.locator('.riff-home__recents').textContent(),/Loading recent work/i);
+  assert.deepEqual(await page.evaluate(()=>window.calls),[],'no account-scoped read runs without a verified account result');
+
+  await page.evaluate(()=>window.emitAccount());
+  await frame.waitForFunction(()=>document.querySelector('.riff-home__account')?.textContent==='Ready, Recovered account');
+  await frame.locator('.riff-home__recents').getByText('No recent work yet.').waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.calls.map(call=>call.name)),['list_riff_work']);
+});
+
 test('Riff Home uses the ChatGPT compatibility tool bridge when MCP Apps serverTools is absent', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';

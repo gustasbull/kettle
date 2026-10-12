@@ -4,7 +4,10 @@ import {
 } from './mcp-app-lite.ts';
 import { mountRiffOnboarding } from './riff-onboarding/index.ts';
 import { parseOnboardingSeenResult } from './riff-home-validation.ts';
-import { parseWelcomeAccountBinding } from './riff-onboarding-validation.ts';
+import {
+  parseWelcomeAccountBinding,
+  parseWelcomeCompletionConflict,
+} from './riff-onboarding-validation.ts';
 
 type OpenAIHost = { callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown> };
 
@@ -16,7 +19,11 @@ export function mountRiffOnboardingBridge(root: HTMLElement, options: { timeoutM
   let expectedAccountId: string | undefined;
   const finishWelcome = async () => {
     const completionAccountId = expectedAccountId;
-    if (!connected || !completionAccountId) return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
+    if (!connected) return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
+    if (!completionAccountId) return {
+      status: 'failed' as const,
+      message: 'This welcome is not bound to the current Riff account. Reopen the welcome guide from ChatGPT.',
+    };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), toolTimeoutMs);
     try {
@@ -33,8 +40,14 @@ export function mountRiffOnboardingBridge(root: HTMLElement, options: { timeoutM
           new Promise<never>((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('timeout')), { once: true })),
         ]);
       } else return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
-      return parseOnboardingSeenResult(result)
-        ? { status: 'sent' as const, message: 'Welcome completed. Riff Home is ready on the right.' }
+      if (parseOnboardingSeenResult(result)) {
+        return { status: 'sent' as const, message: 'Welcome completed. Riff Home is ready on the right.' };
+      }
+      return parseWelcomeCompletionConflict(result)
+        ? {
+          status: 'failed' as const,
+          message: 'This welcome belongs to another Riff account. Reopen the welcome guide from ChatGPT for the current account.',
+        }
         : { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
     } catch {
       return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
