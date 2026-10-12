@@ -107,7 +107,8 @@ export function createRiffWorkStateClient<T extends JobSnapshot>(
     if(!latest||!sameUuid(latest.id,job.id)||!reconciled||!sameWorkState(reconciled,saved))
       return {status:'failed',message:'Riff saved the request but could not reconcile the latest job. Try the same action again safely.'};
     pending=undefined;
-    return {status:'confirmed',message:state==='saved'?'Saved for later.':state==='filmed'?'Marked as filmed.':'Save undone.',
+    return {status:'confirmed',message:state==='saved'?'Saved for later.':state==='filmed'?'Marked as filmed.'
+      :current?.state==='filmed'?'Marked as not filmed.':'Save undone.',
       workState:saved,job:latest};
   };
   return {set,invalidate};

@@ -15,9 +15,9 @@ display brand.
 The reviewed local CURRENT-workflow acceptance is recorded in the
 [Task 8 report](.superpowers/sdd/2026-10-11-riff-paper-core-workflows-completion/task-8-report.md).
 Its canonical static resources are Home v4
-`sha256:730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09`
+`sha256:ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454`
 and pipeline v4
-`sha256:ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e`.
+`sha256:7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187`.
 These are deterministic local-build identities, not hosted-deployment proof.
 
 ## Runnable engineering foundation

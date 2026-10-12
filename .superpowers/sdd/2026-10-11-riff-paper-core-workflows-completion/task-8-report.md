@@ -59,6 +59,16 @@ The same packaged guidance now reflects the exposed `set_riff_work_state` tool:
 Save, Undo, or Filmed is claimed only after a strict successful receipt and
 authoritative job reconciliation; every other outcome remains unconfirmed or failed.
 
+A later whole-branch review established three additional RED cases before their
+fixes: URL credentials/custom ports/fragments crossed the Home handoff boundary;
+recent-work limiting could duplicate a project and pair a promoted job with another
+start's source; and filmed Studio repeated `I filmed it` instead of offering a factual
+correction. Home now uses one canonical safe URL projection, recent work ranks only
+started jobs after per-project deduplication while retaining selected-job provenance,
+and `Undo filmed` changes to `active` only after strict receipt reconciliation. The
+standalone fallback explicitly says the correction is not persisted and leaves the
+filmed state intact.
+
 A second review also removed an evidence mismatch in the Task 8 host fake. Its
 `settle: never` call now genuinely stays pending while a bounded harness timeout
 requests cancellation and restores the retry UI; the test asserts that the host call
@@ -106,14 +116,15 @@ CSS pixels. The real generated Home v4 document and real parent bridge also pass
 same-root journey with exact calls, no account input, and no unexpected network
 request.
 
-Thirty-one deterministic post-implementation PNGs were recaptured and inspected
+Thirty-three deterministic post-implementation PNGs were recaptured twice and inspected
 under ignored `.context/task8-visual-review/`. They cover first/returning Home,
 menu/account, all loading rows, partial/full/platform analysis, Product, every
-Discovery lens, every Studio part, Saved, dark, forced-colors, reduced-motion, and
-200% text. Six additional dark-host captures cover loading, video analysis, Product,
-Discovery, Studio, and Saved. `manifest.json` records each image's dimensions, byte
-count, and SHA-256; the 9,448-byte manifest SHA-256 is
-`6d9d2e8909ecf534391c4137b0fb01580abbb37cfcdf6e4560490eb9481770e6`.
+Discovery lens, every Studio part, Saved, filmed, the confirmed filmed correction,
+dark, forced-colors, reduced-motion, and 200% text. Six additional dark-host captures
+cover loading, video analysis, Product, Discovery, Studio, and Saved. `manifest.json`
+records each image's dimensions, byte count, and SHA-256; the byte-identical
+10,054-byte manifest SHA-256 is
+`689d144e8736f677dcdbe4e1b99f72e664b18aaf5d622e64b4e0d3f448c0dc0d`.
 These images are human-review evidence, not pixel-diff baselines or source data.
 
 ## Immutable resources
@@ -122,8 +133,8 @@ The final deterministic resource identities are:
 
 | Resource | Version | SHA-256 | Raw | Gzip | Budget |
 | --- | --- | --- | ---: | ---: | ---: |
-| `ui://riff/home-v4.html` | `riff-home-v4` | `730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09` | 241640 | 66350 | 500000 / 110000 |
-| `ui://kettle/creator-pipeline-v4.html` | `creator-pipeline-v4` | `ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e` | 175107 | 47515 | 250000 / 75000 |
+| `ui://riff/home-v4.html` | `riff-home-v4` | `ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454` | 242423 | 66574 | 500000 / 110000 |
+| `ui://kettle/creator-pipeline-v4.html` | `creator-pipeline-v4` | `7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187` | 175538 | 47646 | 250000 / 75000 |
 
 Home retains the v1, v2, and v3 URIs and pipeline retains v2 and v3. Those are
 compatibility handles serving the current static document, not claims that a mutable
@@ -133,36 +144,43 @@ benchmarks, and resource tests use the canonical v4 versions.
 Two consecutive final builds produced identical resource metadata and generated-file
 hashes:
 
-- manifest: `3ef5c85a0208e986c00a652306fd07e2b170da83470235f24b5d13c024f3a947`;
+- manifest: `f5694e3fd3317564a1ab23d5c84e36b10587e41718aedc1487042d0e3121b701`;
 - generated pipeline module:
-  `e051a409cecba0ebeb19538c3f55e82bc9e7f77cbae1e89669afc865a1d23b82`;
+  `92dd138857d6c34321d193cc2705c70e6ad6c0c624900a1cb8837829913293d3`;
 - generated Home module:
-  `7323ac14d4d23b664d0d960eb5f337e6258bcb8253a6b4401baeb31bc4fc0d19`.
+  `b0584ef5246e26a65335ecd3b1c1299a203b67f2020feb12bbe985fbfbc7753e`.
+
+The still-unapplied pending migration
+`supabase/migrations/20261011091046_riff_work_state.sql` has SHA-256
+`a316b883f880f3f28a2af79b1ccf2aec7dac71b67bb310d2f6369b2509bd866d`.
 
 ## Final verification
 
+- Work-state client/database/MCP matrix:
+  `npx tsx --test tests/riff-work-state-client.test.ts tests/riff-work-state-database.test.ts tests/riff-work-state-mcp.test.ts`
+  — 26/26 passed.
 - Serialized build/resource matrix:
   `node --import tsx --test --test-concurrency=1 tests/panel-build.test.ts tests/riff-home-resource.test.ts tests/creator-pipeline-resource.test.ts`
   — 15/15 passed.
 - Component/visual matrix:
   `node --test tests/panel/riff-home.test.mjs tests/panel/riff-menu.test.mjs tests/panel/creator-pipeline.test.mjs tests/panel/riff-core-workflows-visual.test.mjs`
-  — 41/41 passed.
+  — 42/42 passed.
 - Plugin package plus real-MCP setup-host orchestration:
   `node --import tsx --test tests/plugin-package.test.ts tests/riff-setup-orchestration.test.ts`
   — 3/3 passed; the packaged setup skill also passed its structural validator.
 - Targeted auth/telemetry/MCP/benchmark TypeScript matrix — 33/33 passed before
   the hardening round; the final full check then covered the updated TypeScript suite.
-- `npm run test:browser` — 116/116 passed.
+- `npm run test:browser` — 118/118 passed.
 - `npm run check` — exit 0: typecheck passed, the main Node run passed
-  582/582, dry-run build and smoke passed, and its browser leg passed 116/116.
+  584/584, dry-run build and smoke passed, and its browser leg passed 118/118.
 - `npm run test:db` — 13/13 passed against the ordered migrations in PGlite.
 - Final bundle build run twice — byte-identical generated modules and manifest.
 
-Two independent final re-reviews at `aa48d3a0b018a8f81cd0cc962dc982b93f031212`
-reported no Critical, Important, or Minor findings and both returned **Ready to
-merge: Yes**. They explicitly closed the host-dark, onboarding orchestration,
-Discovery/Studio depth, responsive reachability, setup-skill truthfulness,
-never-settling timeout, and visual-evidence provenance findings.
+Two independent reviews at `aa48d3a0b018a8f81cd0cc962dc982b93f031212`
+reported no findings for that earlier tree. A subsequent whole-branch review found
+the three Important issues described above. This report records their fixes and
+verification but does not claim that a new independent whole-branch re-review is
+clean.
 
 PGlite verifies the actual ordered local migration files but does not prove hosted
 Supabase/PostgREST, live identity, or multi-connection concurrency. No Task 8

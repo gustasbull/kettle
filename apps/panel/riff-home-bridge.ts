@@ -105,12 +105,20 @@ function rejectedFailure(error: unknown) {
   } catch { return; }
 }
 
-function creatorIntent(rawSource: string) {
+type CreatorIntent =
+  | { kind: 'idea'; trimmed: string; key: string }
+  | { kind: 'unsafe_url' }
+  | { kind: 'url'; trimmed: string; sourceUrl: string; parsed: URL; key: string };
+
+function creatorIntent(rawSource: string): CreatorIntent {
   const trimmed = rawSource.trim();
-  const sourceUrl = /^@[\w.]{1,100}$/.test(trimmed) ? `https://www.tiktok.com/${trimmed}` : trimmed;
+  const candidate = /^@[\w.]{1,100}$/.test(trimmed) ? `https://www.tiktok.com/${trimmed}` : trimmed;
   let parsed: URL | undefined;
-  try { parsed = new URL(sourceUrl); } catch { /* An idea is not a URL. */ }
-  return { trimmed, sourceUrl, parsed, key: parsed ? `url:${sourceUrl}` : `idea:${trimmed}` };
+  try { parsed = new URL(candidate); } catch { /* An idea is not a URL. */ }
+  if (!parsed) return { kind: 'idea', trimmed, key: `idea:${trimmed}` };
+  if (parsed.username || parsed.password || parsed.port || candidate.includes('#')) return { kind: 'unsafe_url' };
+  const sourceUrl = parsed.href;
+  return { kind: 'url', trimmed, sourceUrl, parsed, key: `url:${sourceUrl}` };
 }
 
 function pickLocalVideo(doc: Document): Promise<File | undefined> {
@@ -293,7 +301,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   },state=>view.setCatalogState(state));
   view = mountRiffHome(root, {
     inputChanged(rawSource) {
-      if (creatorRequest && creatorRequest.key !== creatorIntent(rawSource).key) {
+      const intent = creatorIntent(rawSource);
+      if (creatorRequest && (intent.kind !== 'url' || creatorRequest.key !== intent.key)) {
         actionEpoch++;
         creatorRequest = undefined;
       }
@@ -371,11 +380,13 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       const epoch = ++actionEpoch;
       productSaveRequest = undefined;
       blockedProductIntentKey = undefined;
-      const { trimmed, sourceUrl, parsed, key: intentKey } = creatorIntent(rawSource);
+      const intent = creatorIntent(rawSource);
       if (creatorRequest?.accountId !== activeAccountId) creatorRequest = undefined;
-      if (creatorRequest && creatorRequest.key !== intentKey) creatorRequest = undefined;
-      if (!parsed || creatorRequest?.key !== intentKey) recommendationRequest = undefined;
-      if (!parsed) return send(`Use Riff to develop my next creator-video idea. My idea is: ${JSON.stringify(trimmed)}. Start by clarifying only the missing context, then help me find an evidence-grounded direction without claiming provider research has run.`);
+      if (creatorRequest && (intent.kind !== 'url' || creatorRequest.key !== intent.key)) creatorRequest = undefined;
+      if (intent.kind !== 'url' || creatorRequest?.key !== intent.key) recommendationRequest = undefined;
+      if (intent.kind === 'idea') return send(`Use Riff to develop my next creator-video idea. My idea is: ${JSON.stringify(intent.trimmed)}. Start by clarifying only the missing context, then help me find an evidence-grounded direction without claiming provider research has run.`);
+      if (intent.kind === 'unsafe_url') return { status: 'failed', message: 'Use a public HTTPS link without credentials, a custom port, or a fragment.' };
+      const { sourceUrl, parsed, key: intentKey } = intent;
       const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
       if (parsed.protocol !== 'https:') return { status: 'failed', message: 'Use a public HTTPS link, or describe the idea without a URL.' };
       if (!['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'].includes(host)) return send(

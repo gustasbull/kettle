@@ -38,7 +38,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
           const previous=job.work_states.find(item=>item.variant_id===variant.id);const workState={job_id:job.id,variant_id:variant.id,state,
             version:(previous?.version??0)+1,updated_at:'2026-10-11T09:10:46.000Z'};
           window.job={...job,work_states:[...job.work_states.filter(item=>item.variant_id!==variant.id),workState]};
-          return {status:'confirmed',message:state==='saved'?'Saved for later.':'Marked as filmed.',workState,job:window.job};},
+          return {status:'confirmed',message:state==='saved'?'Saved for later.':state==='filmed'?'Marked as filmed.':previous?.state==='filmed'?'Marked as not filmed.':'Save undone.',workState,job:window.job};},
         openVault:async context=>{window.connectedActions.push({kind:'open-vault',jobId:context.job.id,scriptsId:context.scripts.id,variantId:context.variant.id});return window.vaultResult;},
       });
       window.job=pipelineFixture(scenario); window.view.render(window.job);
@@ -928,6 +928,32 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     await card.getByRole('button',{name:'Undo save'}).click();
     assert.equal(await root.getByRole('button',{name:'Save for later'}).count(),1);
     assert.deepEqual((await page.evaluate(()=>window.connectedActions.filter(item=>item.kind==='variant-state'))).slice(-2).map(item=>item.state),['saved','active']);
+  });
+
+  await t.test('filmed Studio offers a receipt-backed correction and never invents an unpersisted success',async()=>{
+    await page.evaluate(()=>bootConnected('scripts'));
+    await root.getByRole('button',{name:'I filmed it'}).click();
+    await root.getByRole('button',{name:'Undo filmed'}).waitFor();
+    assert.equal(await root.getByRole('button',{name:'I filmed it'}).count(),0);
+    assert.equal(await root.getByText('Marked as filmed in Riff.',{exact:true}).count(),1);
+    await root.getByRole('button',{name:'Undo filmed'}).click();
+    await root.getByRole('button',{name:'I filmed it'}).waitFor();
+    assert.deepEqual((await page.evaluate(()=>window.connectedActions.filter(item=>item.kind==='variant-state'))).slice(-2).map(item=>item.state),['filmed','active']);
+    assert.equal(await root.getByText('Marked as filmed in Riff.',{exact:true}).count(),0);
+    assert.equal(await root.locator('.riff-pipeline__status').textContent(),'Marked as not filmed.');
+    assert.equal(await page.evaluate(()=>document.activeElement?.textContent?.trim()),'I filmed it','the confirmed correction returns focus to the reachable filming action');
+
+    await page.evaluate(()=>{
+      boot('scripts','fullscreen');const variant=window.job.result.scripts.variants[0];
+      window.job.work_states=[{job_id:window.job.id,variant_id:variant.id,state:'filmed',version:1,updated_at:'2026-10-11T09:10:46.000Z'}];
+      window.view.render(window.job);
+    });
+    await root.getByRole('button',{name:'Undo filmed'}).click();
+    const prompt=await page.evaluate(()=>window.actions.at(-1));
+    assert.match(prompt,/not filmed/i);assert.match(prompt,/not persisted/i);
+    assert.equal(await root.getByRole('button',{name:'Undo filmed'}).count(),1,'a chat handoff cannot rewrite persisted filmed truth');
+    assert.equal(await root.getByText('Marked as filmed in Riff.',{exact:true}).count(),1);
+    assert.match(await root.locator('.riff-pipeline__status').textContent(),/not persisted/i);
   });
 
   await t.test('Studio uses ID-keyed variants, actual timings, complete provenance and local-only controls', async () => {

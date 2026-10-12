@@ -722,6 +722,11 @@ test('Studio four-part semantics, variants, lineage, local format, and receipt-b
   assert.equal(await page.getByRole('heading',{name:'Your viral script, saved.'}).count(),1,'receipt-backed saved state resumes directly');
   await page.evaluate(() => window.bootPipeline('filmed'));
   assert.equal(await page.getByText('Marked as filmed in Riff.',{exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'I filmed it'}).count(),0);
+  await page.getByRole('button',{name:'Undo filmed'}).click();
+  await page.getByRole('button',{name:'I filmed it'}).waitFor();
+  assert.equal(await page.getByText('Marked as filmed in Riff.',{exact:true}).count(),0);
+  assert.equal(await page.evaluate(()=>window.events.at(-1).state),'active');
   await page.evaluate(() => window.bootPipeline('studio-legacy'));
   assert.ok(await page.locator('.riff-filming-tip--legacy').count() >= 1,'legacy scripts fall back to script-level references and guidance');
   await page.evaluate(() => window.bootPipeline('studio-missing'));

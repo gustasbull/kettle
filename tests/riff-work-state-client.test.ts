@@ -68,6 +68,15 @@ test('work-state client accepts v7 UUIDs and reconciles UUID casing semantically
   assert.equal((await client.set({id:upperJob,work_states:[]},upperVariant,'saved')).status,'confirmed');
 });
 
+test('work-state client describes a confirmed filmed correction without calling it a save undo',async()=>{
+  const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
+  const filmed={job_id:jobId,variant_id:variantId,state:'filmed',version:1,updated_at:'2026-10-11T09:10:46.000Z'};
+  const active={...filmed,state:'active',version:2,updated_at:'2026-10-11T09:10:47.000Z'};
+  const client=module.createRiffWorkStateClient(async()=>wrapped({ok:true,data:{work_state:active}}),async()=>({...job,work_states:[active]}));
+  const result=await client.set({...job,work_states:[filmed]},variantId,'active');
+  assert.equal(result.status,'confirmed');assert.equal(result.message,'Marked as not filmed.');
+});
+
 test('work-state client rejects hostile and direct envelopes before rereading authoritative state',async()=>{
   const module:any=await import('../apps/panel/riff-work-state-client.ts').catch(()=>({}));
   const state={job_id:jobId,variant_id:variantId,state:'saved',version:1,updated_at:'2026-10-11T09:10:46.000Z'};

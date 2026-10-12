@@ -219,16 +219,37 @@ begin
     or (p_input?'limit' and jsonb_typeof(p_input->'limit') is distinct from 'number') then return public.kettle_error('VALIDATION_ERROR'); end if;
   begin v_limit:=coalesce((p_input->>'limit')::integer,10);exception when others then return public.kettle_error('VALIDATION_ERROR');end;
   if v_limit not between 1 and 20 then return public.kettle_error('VALIDATION_ERROR'); end if;
-  select coalesce(jsonb_agg(item order by item->>'updated_at' desc,item->>'job_id'),'[]'::jsonb) into v_work from (
-    select jsonb_build_object('project_id',p.id,'project_name',p.name,'job_id',j.id,'kind',j.kind,'state',j.state,
-      'updated_at',j.updated_at,'source',s.source,'variant_id',latest.variant_id,'work_state',case when latest.variant_id is null then null
-        else jsonb_build_object('job_id',j.id,'variant_id',latest.variant_id,'state',latest.state,'version',latest.version,'updated_at',latest.updated_at) end) item
-    from public.riff_creator_starts s join public.projects p on (p.id,p.account_id)=(s.project_id,s.account_id)
-    join lateral (select cj.id,cj.kind,cj.state,cj.updated_at from public.creator_jobs cj where cj.account_id=s.account_id and cj.project_id=s.project_id
-      order by cj.updated_at desc,cj.id limit 1) j on true
-    left join lateral (select ws.variant_id,ws.state,ws.version,ws.updated_at from public.riff_work_states ws where ws.account_id=p_account_id and ws.job_id=j.id
-      order by ws.updated_at desc,ws.version desc,ws.variant_id limit 1) latest on true
-    where s.account_id=p_account_id order by j.updated_at desc,j.id limit v_limit) recent;
+  with latest_starts as (
+    select distinct on (s.project_id,s.job_id) s.project_id,s.job_id,s.source
+    from public.riff_creator_starts s
+    join public.projects p on (p.id,p.account_id)=(s.project_id,s.account_id)
+    where s.account_id=p_account_id
+    order by s.project_id,s.job_id,s.created_at desc,s.request_id desc
+  ),job_activity as (
+    select p.id project_id,p.name project_name,j.id job_id,j.kind,j.state,j.updated_at job_updated_at,s.source,
+      latest.variant_id,latest.state work_state_state,latest.version work_state_version,latest.updated_at work_state_updated_at,
+      greatest(j.updated_at,coalesce(latest.updated_at,j.updated_at)) activity_at
+    from latest_starts s
+    join public.projects p on p.id=s.project_id and p.account_id=p_account_id
+    join public.creator_jobs j on j.id=s.job_id and j.project_id=p.id and j.account_id=p.account_id
+    left join lateral (
+      select ws.variant_id,ws.state,ws.version,ws.updated_at
+      from public.riff_work_states ws
+      where ws.account_id=p_account_id and ws.job_id=j.id
+      order by ws.updated_at desc,ws.version desc,ws.variant_id asc limit 1
+    ) latest on true
+  ),ranked_jobs as (
+    select activity.*,row_number() over(partition by activity.project_id
+      order by activity.activity_at desc,activity.job_updated_at desc,activity.job_id asc) project_job_rank
+    from job_activity activity
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'project_id',recent.project_id,'project_name',recent.project_name,'job_id',recent.job_id,'kind',recent.kind,'state',recent.state,
+      'updated_at',recent.activity_at,'source',recent.source,'variant_id',recent.variant_id,'work_state',case when recent.variant_id is null then null
+        else jsonb_build_object('job_id',recent.job_id,'variant_id',recent.variant_id,'state',recent.work_state_state,
+          'version',recent.work_state_version,'updated_at',recent.work_state_updated_at) end)
+      order by recent.activity_at desc,recent.job_id asc),'[]'::jsonb) into v_work
+  from (select * from ranked_jobs where project_job_rank=1 order by activity_at desc,job_id asc limit v_limit) recent;
   return jsonb_build_object('ok',true,'data',jsonb_build_object('work',v_work));
 end;
 $$;

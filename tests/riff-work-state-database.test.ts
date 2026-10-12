@@ -12,16 +12,18 @@ const variantV7Upper='018F3E12-9ABC-7DEF-8ABC-1234567890AB',variantV7=variantV7U
 const request=(n:number)=>id(800+n);
 type Reply={ok:boolean;data?:any;error?:{code:string}};
 async function rpc(input:unknown,account=accountA):Promise<Reply>{return db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_set_riff_work_state($1::uuid,$2::jsonb) value',[account,JSON.stringify(input)])).rows[0]!.value;});}
+async function saveProject(account:string,name:string){
+  const input=createInput();input.name=name;
+  const reply=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_save_project($1::uuid,$2::jsonb) value',[account,JSON.stringify(input)])).rows[0]!.value;});
+  assert.equal(reply.ok,true);return reply.data!.project.id as string;
+}
 const mutation=(state:'active'|'saved'|'filmed',expected_version:number,request_id:string,variant_id=variantA,job_id=job)=>({job_id,variant_id,state,expected_version,request_id});
 
 before(async()=>{
   await db.exec('create role anon; create role authenticated; create role service_role bypassrls; create role supabase_auth_admin; grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;');
   for(const file of (await readdir('supabase/migrations')).filter(file=>file.endsWith('.sql')).sort())await db.exec(await readFile(`supabase/migrations/${file}`,'utf8'));
   await db.exec(await readFile('supabase/seed.sql','utf8'));
-  const own=createInput();own.name='Work state fixture';
-  const foreign=createInput();foreign.name='Foreign work';
-  const save=async(account:string,input:unknown)=>(await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_save_project($1::uuid,$2::jsonb) value',[account,JSON.stringify(input)])).rows[0]!.value;}));
-  project=(await save(accountA,own)).data!.project.id;foreignProject=(await save(accountB,foreign)).data!.project.id;
+  project=await saveProject(accountA,'Work state fixture');foreignProject=await saveProject(accountB,'Foreign work');
   const scriptResult=JSON.stringify({kind:'scripts',scripts:{variants:[{id:variantA},{id:variantB},{id:variantV7Upper}]}});
   const rollbackResult=JSON.stringify({kind:'scripts',scripts:{variants:[{id:rollbackVariant},{id:id(712)}]}});
   for(const [jobId,owner,projectId,kind,state,result] of [[job,accountA,project,'scripts','succeeded',scriptResult],[foreignJob,accountB,foreignProject,'scripts','succeeded',scriptResult],[scanJob,accountA,project,'scan','succeeded',JSON.stringify({kind:'scan'})],[runningJob,accountA,project,'scripts','running',null],[rollbackJob,accountA,project,'scripts','succeeded',rollbackResult]] as const){
@@ -137,6 +139,58 @@ test('full-job and recent reads are additive, ordered, owner-scoped and redacted
   assert.deepEqual(historical.data.job.work_states,[]);
   await db.query("insert into public.riff_creator_starts(account_id,request_id,input,source,project_id,job_id) values($1,$2,'{}','{\"platform\":\"tiktok\",\"kind\":\"video\",\"handle\":\"fixture\",\"canonical_url\":\"https://www.tiktok.com/@fixture/video/1\",\"profile_url\":\"https://www.tiktok.com/@fixture\",\"video_url\":\"https://www.tiktok.com/@fixture/video/1\"}',$3,$4)",[accountA,crypto.randomUUID(),project,job]);
   const recent=await db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_list_riff_work($1::uuid,$2::jsonb) value',[accountA,'{"limit":4}'])).rows[0]!.value;});
-  assert.equal(recent.ok,true);assert.equal(recent.data.work[0].variant_id,rollbackVariant);assert.equal(recent.data.work[0].work_state.variant_id,rollbackVariant);
+  assert.equal(recent.ok,true);assert.equal(recent.data.work[0].job_id,job);assert.equal(recent.data.work[0].variant_id,variantV7);assert.equal(recent.data.work[0].work_state.variant_id,variantV7);
   assert.equal(JSON.stringify(recent).includes(accountA),false);assert.equal(JSON.stringify(recent).includes(request(20)),false);
+});
+
+test('recent work deduplicates owned projects before limit and ranks jobs by job or work-state activity',async()=>{
+  const promotedProject=await saveProject(accountA,'Promoted filmed work');
+  const secondProject=await saveProject(accountA,'Second recent project');
+  const tieProject=await saveProject(accountA,'Deterministic tie project');
+  const isolatedProject=await saveProject(accountB,'Other owner recent project');
+  const promotedJob=id(721),inactiveJob=id(722),promotedVariant=id(723),tiedVariant=id(733);
+  const secondJob=id(724),tieJobA=id(725),tieJobB=id(726),isolatedJob=id(727);
+  const insertJob=async(jobId:string,owner:string,projectId:string,kind:'scan'|'scripts',updatedAt:string,variants:string[]=[])=>{
+    const result=kind==='scripts'?{kind:'scripts',scripts:{variants:variants.map(variantId=>({id:variantId}))}}:{kind:'scan'};
+    await db.query(`insert into public.creator_jobs
+      (id,account_id,project_id,kind,state,revision,stage,progress,input,captured,result,message,request_id,created_at,updated_at)
+      values($1,$2,$3,$4,'succeeded',1,'accepted',public.kettle_creator_empty_progress($4),'{}','{}',$5::jsonb,null,$6,$7,$7)`,
+      [jobId,owner,projectId,kind,JSON.stringify(result),crypto.randomUUID(),updatedAt]);
+  };
+  await insertJob(promotedJob,accountA,promotedProject,'scripts','2026-12-01T10:00:00Z',[promotedVariant,tiedVariant]);
+  await insertJob(inactiveJob,accountA,promotedProject,'scan','2026-12-01T13:30:00Z');
+  await insertJob(secondJob,accountA,secondProject,'scripts','2026-12-01T13:00:00Z',[id(734)]);
+  await insertJob(tieJobA,accountA,tieProject,'scripts','2026-12-01T12:30:00Z',[id(735)]);
+  await insertJob(tieJobB,accountA,tieProject,'scan','2026-12-01T12:30:00Z');
+  await insertJob(isolatedJob,accountB,isolatedProject,'scripts','2026-12-01T15:00:00Z',[id(736)]);
+  await db.query(`insert into public.riff_work_states(job_id,variant_id,account_id,state,version,created_at,updated_at)
+    values($1,$2,$3,'filmed',3,$4,$4),($1,$5,$3,'saved',3,$4,$4)`,
+    [promotedJob,promotedVariant,accountA,'2026-12-01T14:00:00Z',tiedVariant]);
+  const source=(nativeId:string)=>JSON.stringify({platform:'tiktok',kind:'video',handle:'fixture',canonical_url:`https://www.tiktok.com/@fixture/video/${nativeId}`,profile_url:'https://www.tiktok.com/@fixture',video_url:`https://www.tiktok.com/@fixture/video/${nativeId}`});
+  const insertStart=(owner:string,requestId:string,projectId:string,jobId:string,nativeId:string,createdAt:string)=>db.query(
+    `insert into public.riff_creator_starts(account_id,request_id,input,source,project_id,job_id,created_at) values($1,$2,'{}',$3::jsonb,$4,$5,$6)`,
+    [owner,requestId,source(nativeId),projectId,jobId,createdAt]);
+  await insertStart(accountA,id(980),promotedProject,promotedJob,'721','2026-12-01T10:05:00Z');
+  await insertStart(accountA,id(981),promotedProject,inactiveJob,'722','2026-12-01T13:35:00Z');
+  await insertStart(accountA,id(982),secondProject,secondJob,'724','2026-12-01T13:05:00Z');
+  await insertStart(accountA,id(983),tieProject,tieJobA,'725','2026-12-01T12:35:00Z');
+  await insertStart(accountA,id(984),tieProject,tieJobB,'726','2026-12-01T12:35:00Z');
+  await insertStart(accountB,id(985),isolatedProject,isolatedJob,'727','2026-12-01T15:05:00Z');
+  const list=async(owner:string,limit:number)=>db.transaction(async tx=>{await tx.exec('set local role service_role');return (await tx.query<{value:Reply}>('select public.kettle_list_riff_work($1::uuid,$2::jsonb) value',[owner,JSON.stringify({limit})])).rows[0]!.value;});
+  const limited=await list(accountA,2);assert.equal(limited.ok,true);
+  assert.deepEqual(limited.data.work.map((item:any)=>item.project_id),[promotedProject,secondProject],'the global limit applies after one row is chosen per project');
+  assert.equal(new Set(limited.data.work.map((item:any)=>item.project_id)).size,2,'multiple starts never duplicate a project');
+  const promoted=limited.data.work[0];
+  assert.equal(promoted.job_id,promotedJob,'a filmed older script outranks a newer inactive project job');
+  assert.equal(new Date(promoted.updated_at).toISOString(),'2026-12-01T14:00:00.000Z','top-level recency is the selected job\'s meaningful activity');
+  assert.equal(promoted.source.canonical_url,'https://www.tiktok.com/@fixture/video/721','source stays paired with the activity-selected job');
+  assert.equal(promoted.variant_id,promotedVariant,'equal-time variant states use their stable UUID tie-break');
+  assert.deepEqual({...promoted.work_state,updated_at:new Date(promoted.work_state.updated_at).toISOString()},
+    {job_id:promotedJob,variant_id:promotedVariant,state:'filmed',version:3,updated_at:'2026-12-01T14:00:00.000Z'});
+  const all=await list(accountA,20);const tied=all.data.work.find((item:any)=>item.project_id===tieProject);
+  assert.equal(tied.job_id,tieJobA,'equal-activity project jobs use the stable job UUID tie-break');
+  assert.equal(tied.source.canonical_url,'https://www.tiktok.com/@fixture/video/725','the deterministic winning job keeps its own start provenance');
+  const isolated=await list(accountB,20);
+  assert.deepEqual(isolated.data.work.map((item:any)=>item.project_id),[isolatedProject]);
+  assert.equal(JSON.stringify(limited).includes(accountB),false);assert.equal(JSON.stringify(limited).includes(id(981)),false);
 });

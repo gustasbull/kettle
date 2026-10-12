@@ -290,6 +290,61 @@ test('Riff Home uses the ChatGPT compatibility tool bridge when MCP Apps serverT
   assert.ok(await frame.evaluate(() => window.compatCalls.some(call => call.name === 'list_riff_work')));
 });
 
+test('Riff Home rejects unsafe URL authority components before tools or chat and keys allowed queries by the safe projection',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    window.calls=[];window.messages=[];
+    const failure={structuredContent:{ok:false,error:{code:'UNAVAILABLE',message:'Retry.',retryable:true,recovery:'retry_same_request'}}};
+    window.openai={
+      callTool:async(name,args)=>{window.calls.push({name,args});return name==='list_riff_work'?{structuredContent:{ok:true,data:{work:[]}}}:failure},
+      sendFollowUpMessage:async input=>{window.messages.push(input);return {}},
+    };
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:500,maxPolls:0});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,hostInfo:{name:'safe-url-boundary',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(message.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;
+        }
+      });</script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  const submit=frame.getByRole('button',{name:'Find my next idea'});
+  const send=async source=>{await input.fill(source);await submit.click();await frame.waitForFunction(()=>!document.querySelector('.riff-home__submit')?.disabled)};
+
+  const unsafe=[
+    'https://fixture-user:credential-secret@www.tiktok.com/@fixture/video/7000000000000000001?share=1',
+    'https://example.com:444/reference?keep=1',
+    'https://www.tiktok.com/@fixture/video/7000000000000000001#private-fragment',
+    'https://www.tiktok.com/@fixture/video/7000000000000000001#',
+  ];
+  for(const source of unsafe)await send(source);
+  const unsafeActivity=await frame.evaluate(()=>({
+    tools:window.calls.filter(call=>call.name!=='list_riff_work').length,
+    messages:window.messages.length,
+    serialized:JSON.stringify({calls:window.calls,messages:window.messages}),
+  }));
+  assert.deepEqual({tools:unsafeActivity.tools,messages:unsafeActivity.messages},{tools:0,messages:0});
+  assert.doesNotMatch(unsafeActivity.serialized,/fixture-user|credential-secret|private-fragment/);
+
+  await frame.evaluate(()=>{window.calls=[];window.messages=[]});
+  const submitted='https://WWW.TIKTOK.COM:443/@fixture/video/7000000000000000002?share_app_id=123&utm_source=copy';
+  const canonical='https://www.tiktok.com/@fixture/video/7000000000000000002?share_app_id=123&utm_source=copy';
+  await send(submitted);await send(canonical);
+  const starts=await frame.evaluate(()=>window.calls.filter(call=>call.name==='start_riff_creator').map(call=>call.args));
+  assert.equal(starts.length,2);
+  assert.deepEqual(starts.map(call=>call.source_url),[canonical,canonical],'the accepted query is preserved without interpreting it');
+  assert.equal(starts[0].request_id,starts[1].request_id,'canonical equivalents reuse one safe intent key');
+});
+
 test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT handoffs honestly', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
@@ -473,9 +528,9 @@ test('Riff Home preserves a definitely absent intent and maps returned applicati
   await input.fill(equivalentSource); await submit.click();
   await frame.getByText(/development access or trial allowance/i).waitFor();
   starts = await frame.evaluate(() => window.starts);
-  assert.notEqual(starts[1].request_id, starts[2].request_id,
-    'an exact-string edit receives a new request ID even when URL normalization is equivalent');
-  assert.equal(starts[2].source_url, equivalentSource, 'the idempotency identity matches the exact transformed server input');
+  assert.equal(starts[1].request_id, starts[2].request_id,
+    'canonical-equivalent public URLs reuse the same logical request ID');
+  assert.equal(starts[2].source_url, source,'the server input is the canonical safe projection');
   assert.doesNotMatch(await frame.getByRole('status').textContent(), /unrecognized|public TikTok|could not confirm/i);
   const invalid = 'https://www.tiktok.com/@fixture/video/7000000000000000002';
   await input.fill(invalid); await submit.click();
@@ -998,6 +1053,11 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   await frame.getByRole('button',{name:'I filmed it'}).click();await frame.getByText('Marked as filmed.').waitFor();
   await goHome();await frame.getByRole('button',{name:/Open Saved Studio — Filmed/}).waitFor();
   await openRecent('Filmed');
+  assert.equal(await frame.getByRole('button',{name:'I filmed it'}).count(),0);
+  await frame.getByRole('button',{name:'Undo filmed'}).click();await frame.getByText('Marked as not filmed.').waitFor();
+  await frame.getByRole('button',{name:'I filmed it'}).waitFor();
+  await goHome();await frame.getByRole('button',{name:/Open Saved Studio — Continue script/}).waitFor();
+  await openRecent('Continue script');
 
   await frame.evaluate(()=>{window.listFailNext=true;});
   await frame.getByRole('button',{name:'Save for later'}).click();await frame.getByRole('heading',{name:'Your viral script, saved.'}).waitFor();
@@ -1005,10 +1065,10 @@ test('Riff Home refreshes recent truth after every Studio state change and reope
   await frame.getByRole('button',{name:'Open vault'}).click();
   await frame.locator('.riff-home__status').getByText('My videos opened, but saved work could not be refreshed.').waitFor();
   const workStateCalls=await frame.evaluate(()=>window.calls.filter(call=>call.name==='set_riff_work_state').map(call=>call.args));
-  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','saved','saved','active','filmed','saved']);
+  assert.deepEqual(workStateCalls.map(call=>call.state),['saved','saved','saved','saved','saved','saved','saved','saved','saved','active','filmed','active','saved']);
   for(const retry of workStateCalls.slice(1,9))
     assert.deepEqual(retry,workStateCalls[0],'every legitimate or rejected retry preserves the exact ambiguous write intent');
-  assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=5,'initial load plus every confirmed mutation');
+  assert.ok(await frame.evaluate(()=>window.calls.filter(call=>call.name==='list_riff_work').length)>=6,'initial load plus every confirmed mutation');
   await frame.evaluate(()=>window.bridge.dispose());
 });
 

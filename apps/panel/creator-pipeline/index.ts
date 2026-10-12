@@ -837,9 +837,14 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
       content.querySelectorAll<HTMLButtonElement>('button').forEach(control=>{control.disabled=true;});
       try{
       if(!options.setVariantState){
-        const result=await sendPrompt(state==='saved'
+        const prompt=state==='saved'
           ?`Help me save the ${variant.label} script for later. This action is not persisted in Riff; do not claim success.`
-          :`I filmed the ${variant.label} script. This milestone is not persisted in Riff; do not claim a saved or published milestone.`);
+          :state==='filmed'
+            ?`I filmed the ${variant.label} script. This milestone is not persisted in Riff; do not claim a saved or published milestone.`
+            :persisted?.state==='filmed'
+              ?`Help me mark the ${variant.label} script as not filmed. This action is not persisted in Riff; do not claim its filming status changed.`
+              :`Help me undo the saved status for the ${variant.label} script. This action is not persisted in Riff; do not claim its saved status changed.`;
+        const result=await sendPrompt(prompt);
         return {...result,message:`${result.message} This action is not persisted in Riff.`};
       }
       const result=await options.setVariantState({job,scripts,variant,state});
@@ -847,7 +852,7 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
         render(result.job);
         queueMicrotask(()=>{
           const focus=result.status==='confirmed'&&state==='saved'?content.querySelector<HTMLElement>('.riff-saved-confirmation h1'):
-            content.querySelector<HTMLElement>(state==='active'?'[data-focus="save-later"]':'[data-focus="filmed-it"]');
+            content.querySelector<HTMLElement>(state==='active'&&persisted?.state!=='filmed'?'[data-focus="save-later"]':'[data-focus="filmed-it"]');
           focus?.focus({preventScroll:true});
         });
       }
@@ -876,9 +881,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     const { group, heading } = title('Your script, ready to film.', 'riff-studio-title');
     if (scripts.idea?.title) group.append(el('p', `${scripts.idea.title}${completeReferences.some(item=>item.platform==='tiktok')?' · TikTok':''}`, 'riff-studio-subtitle'));
     header.append(group);
+    const filmed=persisted?.state==='filmed';
     const studioActions = actions(
       button('Save for later', 'riff-button', () => void run(()=>mutate('saved')), 'save-later'),
-      button('I filmed it', 'riff-button riff-button--primary', () => void run(()=>mutate('filmed')), 'filmed-it'),
+      button(filmed?'Undo filmed':'I filmed it', 'riff-button riff-button--primary', () => void run(()=>mutate(filmed?'active':'filmed')), 'filmed-it'),
     );
     studioActions.classList.add('riff-studio-actions'); studioActions.setAttribute('role', 'group'); studioActions.setAttribute('aria-label', 'Studio actions');
     header.append(studioActions); content.append(header);

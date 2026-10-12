@@ -16,16 +16,22 @@ part of the visual target.
   production resource entrypoints.
 - Acceptance uses roles/text, DOM geometry, computed styles, state semantics,
   keyboard routes, responsive overflow, host dark variables, forced colors, reduced
-  motion, and 200% text. Thirty-one screenshots under ignored `.context/` are the
+  motion, and 200% text. Thirty-three screenshots under ignored `.context/` are the
   recorded human review aid, not a pixel-diff baseline or a production data source.
 - Browser fakes record tool calls and block `fetch`, XHR, WebSocket, EventSource,
   `window.open`, and unexpected image sources. Hostile/malformed/timeout/late and
   account-switch cases must fail closed; mutation success requires a parsed receipt.
+- Home rejects parsed URL credentials, custom ports, and fragments before any tool or
+  ChatGPT handoff; accepted HTTPS queries are preserved but not interpreted. Recent
+  work emits one owner-scoped row per started project after ranking started jobs by
+  job/work-state activity, with source provenance kept on the selected job. A filmed
+  Studio state exposes a receipt-backed `Undo filmed` correction to `active` and never
+  replaces persisted truth after only a conversational handoff.
 - The canonical immutable resources are `ui://riff/home-v4.html`
-  (`riff-home-v4`, SHA-256 `730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09`,
-  241640 raw / 66350 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
-  (`creator-pipeline-v4`, SHA-256 `ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e`,
-  175107 raw / 47515 gzip bytes). Home keeps v1–v3 compatibility URIs and the
+  (`riff-home-v4`, SHA-256 `ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454`,
+  242423 raw / 66574 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
+  (`creator-pipeline-v4`, SHA-256 `7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187`,
+  175538 raw / 47646 gzip bytes). Home keeps v1–v3 compatibility URIs and the
   pipeline keeps v2–v3 compatibility URIs; all aliases serve the same current static
   document so existing turns do not lose their resource.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
