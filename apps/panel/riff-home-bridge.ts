@@ -146,8 +146,9 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   let initialWorkLoadStarted = false;
   let workLoadEpoch = 0;
   let activeAccountId: string | undefined;
-  let creatorRequest: { accountId: string | undefined; key: string; requestId: string } | undefined;
-  let productSaveRequest: { accountId: string | undefined; key: string; input: SaveProjectInput } | undefined;
+  const accountUnavailableMessage = 'Riff account details are unavailable. Reopen Home from ChatGPT before starting or saving work.';
+  let creatorRequest: { accountId: string; key: string; requestId: string } | undefined;
+  let productSaveRequest: { accountId: string; key: string; input: SaveProjectInput } | undefined;
   let blockedProductIntentKey: string | undefined;
   let recommendationRequest: { key: string; requestId: string } | undefined;
   let actionEpoch = 0;
@@ -175,7 +176,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     deadlineMs = toolTimeoutMs,
     interpretApplicationErrors = true,
   ): Promise<ToolCallOutcome> => {
-    if (!connected) return { status: 'transport_error', diagnostic: 'transport_error' };
+    if (!connected || !activeAccountId) return { status: 'transport_error', diagnostic: 'transport_error' };
     try {
       let value: unknown;
       if (app.getHostCapabilities()?.serverTools) {
@@ -311,6 +312,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
     },
     async saveProduct(context: { draft: ProductDraft; project: Project | null }) {
       const accountId = activeAccountId;
+      if (!accountId) return { status: 'failed', message: accountUnavailableMessage };
       const intentKey = JSON.stringify({
         accountId,
         projectId: context.project?.id ?? null,
@@ -392,8 +394,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       if (!['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'].includes(host)) return send(
         `Use Riff to start from this user-supplied link: ${parsed.href}. Determine whether it is a creator profile, video, product, or reference. The currently connected direct provider path supports public TikTok only, so explain any limitation plainly and collect the minimum context needed without claiming analysis has run.`,
       );
+      const accountId = activeAccountId;
+      if (!accountId) return { status: 'failed', message: accountUnavailableMessage };
       if (!creatorRequest || creatorRequest.key !== intentKey) {
-        creatorRequest = { accountId: activeAccountId, key: intentKey, requestId: crypto.randomUUID() };
+        creatorRequest = { accountId, key: intentKey, requestId: crypto.randomUUID() };
       }
       const pendingRequest = creatorRequest;
       const exactInput = { request_id: pendingRequest.requestId, source_url: sourceUrl };
@@ -518,7 +522,7 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   render(homeState);
 
   const controllerTool=async(name:'get_creator_job_status'|'get_creator_job',input:{job_id:string},signal:AbortSignal)=>{
-    if(!connected)throw new Error('Disconnected');
+    if(!connected||!activeAccountId)throw new Error('Disconnected');
     if(app.getHostCapabilities()?.serverTools)return app.callServerTool({name,arguments:input},{signal,timeout:toolTimeoutMs,maxTotalTimeout:toolTimeoutMs});
     if(!window.openai?.callTool)throw new Error('Read tools unavailable');
     return Promise.race([window.openai.callTool(name,input),new Promise<never>((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('Cancelled')),{once:true}))]);
@@ -576,9 +580,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   }
 
   async function loadWork(): Promise<{ status: 'sent' | 'failed'; message: string }> {
-    if (disposed || !connected) {
-      view.setRecentsState({ status: 'error', message: 'Reconnect Riff in ChatGPT, then try again.' });
-      return { status: 'failed', message: 'Reconnect Riff in ChatGPT, then try again.' };
+    if (disposed || !connected || !activeAccountId) {
+      const message = activeAccountId ? 'Reconnect Riff in ChatGPT, then try again.' : accountUnavailableMessage;
+      view.setRecentsState({ status: 'error', message });
+      return { status: 'failed', message };
     }
     const epoch = ++workLoadEpoch;
     view.setRecentsState({ status: 'loading' });
@@ -684,9 +689,10 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       return;
     }
     const nextAccountId = nextState.account.id;
-    const pendingAccountChanged = (creatorRequest !== undefined && creatorRequest.accountId !== nextAccountId)
-      || (productSaveRequest !== undefined && productSaveRequest.accountId !== nextAccountId);
-    if (pendingAccountChanged || (activeAccountId !== undefined && activeAccountId !== nextAccountId)) {
+    // The first credential-derived binding also clears any intent entered while
+    // fail-open Home was unbound. Account-owned UI must never survive adoption
+    // of a delayed result, even if its request already completed.
+    if (activeAccountId === undefined || activeAccountId !== nextAccountId) {
       invalidateAccountBoundary();
     }
     activeAccountId = nextAccountId;

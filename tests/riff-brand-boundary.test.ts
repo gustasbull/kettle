@@ -32,6 +32,6 @@ test('production copy uses Riff while lowercase Kettle compatibility identifiers
   const mcp = await readFile('apps/worker/mcp.ts', 'utf8');
   const pipelineResource = await readFile('apps/worker/creator-pipeline-resource.ts', 'utf8');
   assert.match(mcp, /'kettle_diagnostic'/, 'public diagnostic name remains compatible');
-  assert.match(pipelineResource, /ui:\/\/kettle\/creator-pipeline-v7\.html/, 'current resource URI is cache-versioned');
+  assert.match(pipelineResource, /ui:\/\/kettle\/creator-pipeline-v8\.html/, 'current resource URI is cache-versioned');
   assert.match(pipelineResource, /ui:\/\/kettle\/creator-pipeline-v2\.html/, 'prior resource URI remains compatible');
 });

@@ -7,6 +7,7 @@ import {
   RIFF_ONBOARDING_META,
   RIFF_ONBOARDING_MIME,
   RIFF_ONBOARDING_URI,
+  RIFF_ONBOARDING_V7_URI,
   RIFF_ONBOARDING_V6_URI,
   RIFF_ONBOARDING_V5_URI,
   RIFF_ONBOARDING_V4_URI,
@@ -18,7 +19,7 @@ import {
 } from '../apps/worker/riff-onboarding-resource.ts';
 
 test('Riff onboarding is one static, inline-only, empty-network MCP App', async (t) => {
-  assert.equal(RIFF_ONBOARDING_URI, 'ui://riff/onboarding-v7.html');
+  assert.equal(RIFF_ONBOARDING_URI, 'ui://riff/onboarding-v8.html');
   const server = new McpServer({ name: 'riff-onboarding-fixture', version: '1' });
   registerRiffOnboardingResource(server);
   const client = new Client({ name: 'fixture-client', version: '1' });
@@ -30,6 +31,8 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
   const listed = await client.listResources();
   assert.deepEqual(listed.resources.map(({ name, uri, mimeType }) => ({ name, uri, mimeType })), [{
     name: 'riff-onboarding', uri: RIFF_ONBOARDING_URI, mimeType: RIFF_ONBOARDING_MIME,
+  }, {
+    name: 'riff-onboarding-v7-compat', uri: RIFF_ONBOARDING_V7_URI, mimeType: RIFF_ONBOARDING_MIME,
   }, {
     name: 'riff-onboarding-v6-compat', uri: RIFF_ONBOARDING_V6_URI, mimeType: RIFF_ONBOARDING_MIME,
   }, {
@@ -55,7 +58,7 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
   assert.ok('text' in content);
   assert.ok('text' in compatible);
   assert.equal(compatible.text, content.text);
-  for (const alias of [RIFF_ONBOARDING_V6_URI, RIFF_ONBOARDING_V5_URI, RIFF_ONBOARDING_V4_URI, RIFF_ONBOARDING_V2_URI, RIFF_ONBOARDING_LEGACY_URI]) {
+  for (const alias of [RIFF_ONBOARDING_V7_URI, RIFF_ONBOARDING_V6_URI, RIFF_ONBOARDING_V5_URI, RIFF_ONBOARDING_V4_URI, RIFF_ONBOARDING_V2_URI, RIFF_ONBOARDING_LEGACY_URI]) {
     const prior = (await client.readResource({ uri: alias })).contents[0]!;
     assert.ok('text' in prior);
     assert.equal(prior.text, content.text);
@@ -70,7 +73,7 @@ test('Riff onboarding is one static, inline-only, empty-network MCP App', async 
 
 test('Riff onboarding HTML escapes raw-text delimiters', () => {
   const html = riffOnboardingHtml('const payload = "</ScRiPt><!--";', {
-    resource_version: 'riff-onboarding-v7', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-onboarding-v8', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
   assert.equal((html.match(/<\/script>/gi) ?? []).length, 1);
   assert.ok(html.includes('<\\/script>'));

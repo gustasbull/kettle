@@ -19,11 +19,11 @@ const bundle = (character: string) => `sha256:${character.repeat(64)}`;
 const manifest = {
   schema_version: 1,
   panels: [
-    { panel: 'creator-pipeline', resource_version: 'creator-pipeline-v7', sha256: 'a'.repeat(64), raw_bytes: 10,
+    { panel: 'creator-pipeline', resource_version: 'creator-pipeline-v8', sha256: 'a'.repeat(64), raw_bytes: 10,
       gzip_bytes: 5, budget: { raw_bytes: 250_000, gzip_bytes: 75_000 }, bundle_version: bundle('a') },
-    { panel: 'riff-home', resource_version: 'riff-home-v7', sha256: 'b'.repeat(64), raw_bytes: 20,
+    { panel: 'riff-home', resource_version: 'riff-home-v8', sha256: 'b'.repeat(64), raw_bytes: 20,
       gzip_bytes: 8, budget: { raw_bytes: 500_000, gzip_bytes: 110_000 }, bundle_version: bundle('b') },
-    { panel: 'riff-onboarding', resource_version: 'riff-onboarding-v7', sha256: 'c'.repeat(64), raw_bytes: 30,
+    { panel: 'riff-onboarding', resource_version: 'riff-onboarding-v8', sha256: 'c'.repeat(64), raw_bytes: 30,
       gzip_bytes: 9, budget: { raw_bytes: 400_000, gzip_bytes: 85_000 }, bundle_version: bundle('c') },
   ],
 };

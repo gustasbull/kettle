@@ -14,13 +14,13 @@ display brand.
 
 The reviewed local CURRENT-workflow acceptance is recorded in the
 [Task 8 report](.superpowers/sdd/2026-10-11-riff-paper-core-workflows-completion/task-8-report.md).
-The current immutable local-build candidates are Home v7
-(`ui://riff/home-v7.html`,
-`sha256:55477d20245398aa936d227dc5bcb59d4bd28022cefbe39fb5e28c76450cd40d`),
-inline onboarding v7 (`ui://riff/onboarding-v7.html`,
+The current immutable local-build candidates are Home v8
+(`ui://riff/home-v8.html`,
+`sha256:6ebe32a4e7127a89acaa7cf456a914e6588427d618210753b4d36e0bb1a48b1a`),
+inline onboarding v8 (`ui://riff/onboarding-v8.html`,
 `sha256:4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589`),
-and standalone pipeline v7 (`ui://kettle/creator-pipeline-v7.html`,
-`sha256:f4f2371af58bb3c494efda4bd1d749d337aceb83e781cc083a9d40f53ac226c8`).
+and standalone pipeline v8 (`ui://kettle/creator-pipeline-v8.html`,
+`sha256:f8e3b0e88018207ebfbdaa95e5b3314626c7e0f64dc21cca0ff246306c8df0df`).
 These are deterministic local identities, not hosted-deployment proof.
 
 ## Runnable engineering foundation

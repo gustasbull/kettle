@@ -294,8 +294,30 @@ test('Riff Home fails open when the host handshake completes without an initial 
   assert.doesNotMatch(await frame.locator('.riff-home__recents').textContent(),/Loading recent work/i);
   assert.deepEqual(await page.evaluate(()=>window.calls),[],'no account-scoped read runs without a verified account result');
 
+  const input=frame.getByPlaceholder('Share a video or profile link, or tell me what you want to make…');
+  await input.fill('https://www.tiktok.com/@fixture/video/7000000000000000001');
+  await frame.getByRole('button',{name:'Find my next idea'}).click();
+  await frame.getByRole('status').getByText(/account details are unavailable.*reopen Home/i).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.calls),[],
+    'fail-open Home cannot start account-owned work before its credential-derived account binding arrives');
+
+  await input.fill('Product description');await input.press('Control+Enter');
+  await frame.getByRole('button',{name:'Product description'}).click();
+  await frame.getByLabel('Product',{exact:true}).fill('FocusNest');
+  await frame.getByLabel('Audience',{exact:true}).fill('Remote workers');
+  await frame.getByLabel('Main benefit',{exact:true}).fill('Focus');
+  await frame.getByLabel('Content style',{exact:true}).fill('Demo');
+  await frame.getByLabel('Language',{exact:true}).fill('en');
+  await frame.getByLabel('Duration in seconds',{exact:true}).fill('20');
+  await frame.getByRole('button',{name:'Confirm context'}).click();
+  await frame.getByRole('status').getByText(/account details are unavailable.*reopen Home/i).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.calls),[],
+    'fail-open Home cannot save account-owned Product context before its account binding arrives');
+
   await page.evaluate(()=>window.emitAccount());
   await frame.waitForFunction(()=>document.querySelector('.riff-home__account')?.textContent==='Ready, Recovered account');
+  assert.equal(await frame.locator('.riff-home__status').textContent(),'','recovery clears the stale watchdog status');
+  assert.equal(await input.inputValue(),'','the first account binding clears any unbound private intent');
   await frame.locator('.riff-home__recents').getByText('No recent work yet.').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.calls.map(call=>call.name)),['list_riff_work']);
 });

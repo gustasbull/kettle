@@ -587,7 +587,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setCatalogState(state){pipeline?.setCatalogState(state);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
-    clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;welcomeHelp.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
+    clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;status.textContent='';welcomeHelp.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
       if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();

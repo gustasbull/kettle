@@ -11,7 +11,7 @@ test('Riff is a portable, mixed-auth Agent Plugins package with complete assets'
   assert.equal(manifest.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.equal(manifest.name, 'riff');
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  assert.equal(manifest.version, '0.1.5', 'the fail-open Home and account-aware welcome recovery invalidate the installed package cache');
+  assert.equal(manifest.version, '0.1.6', 'the account-bound fail-open Home recovery invalidates the installed package cache');
   assert.equal(manifest.extensions['com.openai'].onboardingSkill, './skills/setup/SKILL.md');
   const ui = manifest.extensions['com.openai'].interface;
   assert.equal(ui.displayName, 'Riff');

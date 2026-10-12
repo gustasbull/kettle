@@ -76,8 +76,8 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
     assert.deepEqual(tool.outputSchema.oneOf.map((branch: Record<string, unknown>) => branch.required),
       [['ok', 'data'], ['ok', 'error']]);
     assert.deepEqual(tool.securitySchemes,[{type:'oauth2',scopes:[...oauthScopes]}]);
-    if(name==='render_creator_job')assert.equal(tool._meta.ui.resourceUri,'ui://kettle/creator-pipeline-v7.html',
-      'a fresh rendered creator result selects the immutable v7 resource');
+    if(name==='render_creator_job')assert.equal(tool._meta.ui.resourceUri,'ui://kettle/creator-pipeline-v8.html',
+      'a fresh rendered creator result selects the immutable v8 resource');
   }
   const statusTool=listing.result.tools.find(t=>t.name==='get_creator_job_status');assert.ok(statusTool);
   assert.deepEqual(statusTool.inputSchema,{...z.toJSONSchema(pipelineContracts.get_creator_job_status.input),type:'object'});
@@ -161,7 +161,7 @@ test('trial-only authenticated MCP profile-to-DNA-to-ideas-to-saved-ChatGPT-scri
   const foreignSave=await call('save_creator_scripts',{...saveInput,request_id:crypto.randomUUID()},foreign);assert.equal(foreignSave.result.isError,true);
   assert.equal(foreignSave.result.content[0]!.text,'Riff request failed (NOT_FOUND). Reload the latest saved state before trying again.');
   assert.equal(dispatches.length,dispatchCount);assert.equal(f.http.length,requests);
-  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v7.html'})).json() as any;
+  const resource=await (await rpc('resources/read',{uri:'ui://kettle/creator-pipeline-v8.html'})).json() as any;
   const content=resource.result.contents[0];assert.match(content.text,/get_creator_job/);assert.ok(!content.text.includes(saved.id));
   assert.deepEqual(content._meta.ui.csp,{
     connectDomains:[],

@@ -1214,7 +1214,7 @@ test('dark host variables drive every pipeline, Product, Discovery, Studio, and 
   assert.equal(await page.evaluate(() => window.external.length), 0);
 });
 
-test('the generated Home v7 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
+test('the generated Home v8 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
   const { RIFF_HOME_DOCUMENT } = await import('../../apps/worker/riff-home-resource.ts');
   const scan = structuredClone(riffCoreWorkflowFixtures.scans.videoFull.value);
   scan.revision = 2;
@@ -1340,7 +1340,7 @@ test('the generated Home v7 resource and real bridge keep one root through Home,
     ['save_project','start_riff_creator','start_creator_recommendations','set_riff_work_state']);
   assert.equal(await page.evaluate(()=>window.calls.some(call=>Object.hasOwn(call.arguments??{},'account_id'))),false);
   assert.equal(await page.evaluate(()=>window.calls.find(call=>call.name==='list_riff_videos').arguments.role),'discovered_reference');
-  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v7$/);
+  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v8$/);
   assert.equal(await frame.evaluate(()=>window.__task8ImageSources.some(source=>/^javascript:|^https?:\/\/(?![^/]*(?:tiktokcdn\.com|tiktokcdn-us\.com))/i.test(source))),false);
   assert.deepEqual(network.filter(url=>!url.startsWith(base)&&url!=='about:blank'),[]);
   assert.doesNotMatch(await frame.locator('body').textContent(),/Bearer |service[_ -]?role|postgres(?:ql)?:\/\//i);

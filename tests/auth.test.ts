@@ -79,8 +79,8 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   assert.equal((home as { title?: string }).title, 'Riff Home');
   assert.deepEqual((home._meta as { 'openai/ui': { entrypoints: unknown[] } })['openai/ui'].entrypoints, [{ type: 'global' }, { type: 'thread' }]);
   assert.deepEqual((home._meta as { ui: { visibility?: string[] } }).ui.visibility, ['model', 'app']);
-  assert.equal((home._meta as { ui: { resourceUri: string } }).ui.resourceUri, 'ui://riff/home-v7.html',
-    'a fresh Home result selects the immutable v7 resource');
+  assert.equal((home._meta as { ui: { resourceUri: string } }).ui.resourceUri, 'ui://riff/home-v8.html',
+    'a fresh Home result selects the immutable v8 resource');
   const mark = listing.result.tools.find((tool) => tool.name === 'mark_riff_onboarding_seen')!;
   assert.deepEqual((mark._meta as { ui: { visibility?: string[] } }).ui.visibility, ['app'],
     'only the first-use app may advertise the completion write');
@@ -181,7 +181,7 @@ test('MCP discovery stays local while protected tool invocations verify identity
   assert.match(initialized.result.instructions ?? '', /Never call `mark_riff_onboarding_seen` from the model/i);
   assert.match(initialized.result.instructions ?? '', /onboarding_seen_at.*already set.*show_riff_welcome.*explicitly asks to replay/i);
   await rpc('tools/list', {});
-  await rpc('resources/read', { uri: 'ui://riff/home-v7.html' });
+  await rpc('resources/read', { uri: 'ui://riff/home-v8.html' });
   assert.equal(identity.resolutions.length, 0,
     'public MCP discovery and static UI reads must not resolve an account merely because ChatGPT attached a token');
 

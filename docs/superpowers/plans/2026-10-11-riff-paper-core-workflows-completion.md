@@ -262,10 +262,10 @@ reads were permission-blocked and therefore did not supersede that audit.
 
 ### Task 9: Whole-repository verification, production migration/deployment, live proof, and merge
 
-Current immutable local release candidates are Home v7
-`ui://riff/home-v7.html`, onboarding v7 `ui://riff/onboarding-v7.html`, and
-pipeline v7 `ui://kettle/creator-pipeline-v7.html`, with compatibility aliases
-Home v1–v6, onboarding v1–v6, and pipeline v2–v6. These identifiers remain local
+Current immutable local release candidates are Home v8
+`ui://riff/home-v8.html`, onboarding v8 `ui://riff/onboarding-v8.html`, and
+pipeline v8 `ui://kettle/creator-pipeline-v8.html`, with compatibility aliases
+Home v1–v7, onboarding v1–v7, and pipeline v2–v7. These identifiers remain local
 release evidence until Task 9 verifies the hosted resource bytes and fingerprints.
 
 **Files:**
