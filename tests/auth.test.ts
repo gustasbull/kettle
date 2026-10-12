@@ -100,6 +100,15 @@ test('authenticated MCP advertises standard OAuth scopes and returns challenges;
   };
   assert.equal(invalidInvocation.result.isError, true);
   assert.match(invalidInvocation.result._meta!['mcp/www_authenticate']![0]!, /invalid_token/);
+  const welcomeMissingScope = await (await rpc('tools/call', {
+    name: 'show_riff_welcome', arguments: {},
+  }, await auth.token({ riff_permissions: ['projects:read'] }))).json() as {
+    result: { isError?: boolean; structuredContent?: unknown; _meta?: Record<string, string[]> };
+  };
+  assert.equal(welcomeMissingScope.result.isError, true);
+  assert.equal(welcomeMissingScope.result.structuredContent, undefined,
+    'a scope-denied welcome must not issue an account binding');
+  assert.match(welcomeMissingScope.result._meta!['mcp/www_authenticate']![0]!, /insufficient_scope/);
   const missingScope = await (await rpc('tools/call', { name: 'save_project', arguments: createInput() }, await auth.token({ riff_permissions: ['account:read'] }))).json() as { result: { _meta: Record<string, string[]> } };
   assert.match(missingScope.result._meta['mcp/www_authenticate']![0]!, /insufficient_scope/);
   assert.match(missingScope.result._meta['mcp/www_authenticate']![0]!, /scope="openid"/);

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCreatorJobView,parseCreatorJobView,parseListRiffWorkResult,parseOnboardingSeenResult } from '../../apps/panel/riff-home-validation.ts';
+import {
+  isCreatorJobView,parseCreatorJobView,parseListRiffWorkResult,parseOnboardingSeenResult,
+} from '../../apps/panel/riff-home-validation.ts';
+import { parseWelcomeAccountBinding } from '../../apps/panel/riff-onboarding-validation.ts';
 import { pipelineFixture } from '../../apps/panel/creator-pipeline/fixtures.ts';
 import { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 
@@ -39,6 +42,27 @@ test('Home accepts only an exact coherent onboarding completion receipt',()=>{
     ['permissive Date.parse value',value=>{value.structuredContent.data.onboarding_seen_at='0';}],
   ];
   for(const [name,mutate] of cases){const value=exact();mutate(value);assert.equal(parseOnboardingSeenResult(value),undefined,name);}
+});
+
+test('onboarding accepts only the exact coherent credential-bound welcome issuance',()=>{
+  const accountId='11111111-1111-4111-8111-111111111111';
+  const exact=()=>({structuredContent:{steps:['Start','Find','Make'],expected_account_id:accountId},content:[]});
+  assert.equal(parseWelcomeAccountBinding(exact()),accountId);
+  const cases:Array<[string,(value:any)=>void]>=[
+    ['incoherent isError',value=>{value.isError=true;}],
+    ['extra result key',value=>{value.structuredContent.debug=true;}],
+    ['missing steps',value=>{delete value.structuredContent.steps;}],
+    ['wrong steps',value=>{value.structuredContent.steps=['Start','Make','Find'];}],
+    ['extra step',value=>{value.structuredContent.steps.push('Publish');}],
+    ['invalid account UUID',value=>{value.structuredContent.expected_account_id='account-a';}],
+  ];
+  for(const [name,mutate] of cases){const value=exact();mutate(value);assert.equal(parseWelcomeAccountBinding(value),undefined,name);}
+  const accessor=exact();let reads=0;
+  Object.defineProperty(accessor.structuredContent,'expected_account_id',{
+    enumerable:true,configurable:true,get(){reads++;return accountId;},
+  });
+  assert.equal(parseWelcomeAccountBinding(accessor),undefined);
+  assert.equal(reads,0,'hostile accessors are rejected without execution');
 });
 
 test('Home parses the exact public recent-work result as one all-or-nothing value', () => {

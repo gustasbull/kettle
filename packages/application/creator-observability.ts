@@ -21,7 +21,7 @@ export type CreatorObservationFields = {
   request_bytes?: number;
   response_bytes?: number;
   item_count?: number;
-  resource_version?: 'riff-home-v6' | 'riff-onboarding-v5' | 'creator-pipeline-v6';
+  resource_version?: 'riff-home-v6' | 'riff-onboarding-v6' | 'creator-pipeline-v6';
   bundle_version?: string;
 };
 

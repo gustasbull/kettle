@@ -10,7 +10,7 @@ import { registerCreatorReviewResource } from './creator-review-resource.ts';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { CONTRACT_VERSION, type Account, type Failure, type Project } from '../../packages/contracts/index.ts';
+import { CONTRACT_VERSION, Id, type Account, type Failure, type Project } from '../../packages/contracts/index.ts';
 import { OpenAIProfile } from '../../packages/contracts/openai-profile.ts';
 
 import { registerProjectReviewResource } from './project-review-resource.ts';
@@ -138,14 +138,24 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
   if (auth) {
     registerRiffOnboardingResource(server);
     server.registerTool('show_riff_welcome', WELCOME_REGISTRATION, async () => {
-      if (!token || !await auth.verifier.verify(token)) return {
+      let identity: Awaited<ReturnType<IdentityVerifier['verify']>> = null;
+      try { identity = token ? await auth.verifier.verify(token) : null; } catch { identity = null; }
+      if (!identity || !Id.safeParse(identity.account_id).success) return {
         content: [{ type: 'text' as const, text: 'Connect or reauthorize your Riff account.' }],
         isError: true,
-        _meta: { 'mcp/www_authenticate': [challenge(auth.config)] },
+        _meta: { 'mcp/www_authenticate': [challenge(auth.config, 'invalid_token')] },
+      };
+      if (!identity.scopes.includes(ACCOUNT_CONTRACT.scope)) return {
+        content: [{ type: 'text' as const, text: 'Connect or reauthorize your Riff account.' }],
+        isError: true,
+        _meta: { 'mcp/www_authenticate': [challenge(auth.config, 'insufficient_scope')] },
       };
       return {
         content: [{ type: 'text' as const, text: 'Riff works in three steps: Start with what you have, Find your breakout idea, then Make it yours.' }],
-        structuredContent: { steps: ['Start', 'Find', 'Make'] as ['Start', 'Find', 'Make'] },
+        structuredContent: {
+          steps: ['Start', 'Find', 'Make'] as ['Start', 'Find', 'Make'],
+          expected_account_id: identity.account_id,
+        },
       };
     });
   }

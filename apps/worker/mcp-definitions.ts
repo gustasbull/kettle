@@ -6,7 +6,7 @@ import { pipelineContracts } from '../../packages/contracts/creator-pipeline.ts'
 import { riffCreatorContracts } from '../../packages/contracts/riff-creator.ts';
 import { riffVideoContracts } from '../../packages/contracts/riff-videos.ts';
 import { riffWorkStateContract } from '../../packages/contracts/riff-work-state.ts';
-import { CONTRACT_VERSION, toolContracts } from '../../packages/contracts/index.ts';
+import { CONTRACT_VERSION, Id, toolContracts } from '../../packages/contracts/index.ts';
 import { OpenAIProfile } from '../../packages/contracts/openai-profile.ts';
 import { oauthScopes } from '../../packages/auth/index.ts';
 import { CREATOR_PIPELINE_URI } from './creator-pipeline-resource.ts';
@@ -64,6 +64,7 @@ const READ_ONLY = deepFreezePlain({
 
 export const WELCOME_OUTPUT = z.strictObject({
   steps: z.tuple([z.literal('Start'), z.literal('Find'), z.literal('Make')]),
+  expected_account_id: Id,
 });
 export const WELCOME_META = deepFreezePlain({
   securitySchemes: OAUTH_SECURITY,
@@ -72,7 +73,7 @@ export const WELCOME_META = deepFreezePlain({
 });
 export const WELCOME_REGISTRATION = deepFreezePlain({
   title: 'Welcome to Riff',
-  description: 'Show the inline Riff guide in chat while Home remains usable. The tool itself is read-only; only the guide’s visible final action can record completion.',
+  description: 'Show the inline Riff guide in chat while Home remains usable. The read-only result binds the guide to the verified account; only the guide’s visible final action can record completion.',
   inputSchema: z.strictObject({}),
   outputSchema: WELCOME_OUTPUT,
   annotations: READ_ONLY,

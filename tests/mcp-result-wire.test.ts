@@ -32,7 +32,7 @@ test('account and profile tools publish safe text with the required profile comp
       return failure('NOT_FOUND');
     },
   });
-  const invoke = async (name: string, credential?: string) => {
+  const invoke = async (name: string, credential?: string, args: unknown = {}) => {
     const response = await handleMcp(new Request(config.resource, {
       method: 'POST',
       headers: {
@@ -40,7 +40,7 @@ test('account and profile tools publish safe text with the required profile comp
         Accept: 'application/json, text/event-stream',
         ...(credential ? { Authorization: `Bearer ${credential}` } : {}),
       },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} } }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
     }), { config, verifier: identity.verifier, operations });
     return (await response.json() as { result: {
       structuredContent?: unknown;
@@ -56,7 +56,7 @@ test('account and profile tools publish safe text with the required profile comp
   assert.ok(!account.content[0]!.text.includes(accountA));
   assert.ok(!account.content[0]!.text.includes(accountState.data.account.display_name));
 
-  const onboarding = await invoke('mark_riff_onboarding_seen', token);
+  const onboarding = await invoke('mark_riff_onboarding_seen', token, { expected_account_id: accountA });
   assert.equal(onboarding.content[0]!.text, 'Riff onboarding is complete.');
   assert.deepEqual(onboarding.structuredContent,
     { ok: true, data: { onboarding_seen_at: '2026-10-11T08:05:00Z' } });

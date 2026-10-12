@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const CONTRACT_VERSION = '1.0.0' as const;
+export const CONTRACT_VERSION = '2.0.0' as const;
 export const Id = z.uuid();
 export const Timestamp = z.iso.datetime({ offset: true });
 const text = (max: number) => z.string().trim().min(1).max(max);
@@ -69,7 +69,9 @@ export const GetAccountStateOutput = result(z.strictObject({
   entitlements: z.strictObject({ status: z.literal('not_configured') }),
   usage: z.strictObject({ status: z.literal('not_configured'), reset_at: z.null() }),
 }));
-export const MarkRiffOnboardingSeenInput = z.strictObject({});
+/** A concurrency precondition issued by `show_riff_welcome`. The application
+ * still derives ownership exclusively from the verified bearer credential. */
+export const MarkRiffOnboardingSeenInput = z.strictObject({ expected_account_id: Id });
 export const MarkRiffOnboardingSeenOutput = result(z.strictObject({ onboarding_seen_at: Timestamp }));
 export const GetProjectInput = z.strictObject({ project_id: Id });
 export const GetProjectOutput = result(z.strictObject({ project: Project }));

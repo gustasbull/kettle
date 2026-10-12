@@ -12,7 +12,7 @@ Never render the welcome on the sign-in website or inside Riff Home. The first-u
 1. Call `open_riff` as the first tool call. It is the protected action that starts OAuth when connection is required and opens the Riff app after authorization succeeds.
 2. Inspect only a strict, coherent successful `open_riff` structured result. When `data.account.onboarding_seen_at` is exactly `null`, call `show_riff_welcome` exactly once in the same originating response. This renders the Start → Find → Make Paper carousel inline in chat while Home remains usable on the right. If the result is failed, malformed, or omits the marker, do not infer first use or call the welcome automatically.
 3. When `data.account.onboarding_seen_at` is set, do not call `show_riff_welcome` unless the user explicitly asks to replay the guide.
-4. Never call `mark_riff_onboarding_seen` from the model. Only the inline welcome app may call it after the user explicitly finishes the visible final step; replaying the guide never resets account state.
+4. Never call `mark_riff_onboarding_seen` from the model. Only the inline welcome app may call it after the user explicitly finishes the visible final step. The app pins the strict account precondition issued by `show_riff_welcome`; the server independently verifies the current OAuth owner and rejects a stale panel after an account switch. Replaying the guide never resets account state.
 5. Respond in the ChatGPT conversation with one concise Start → Find → Make introduction: start with creator context, find an evidence-backed direction, then make a filmable version.
 6. Offer one next action: paste a creator profile or public video link, describe an idea, or attach a video through the ChatGPT composer.
 

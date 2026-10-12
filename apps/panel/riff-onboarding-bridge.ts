@@ -4,6 +4,7 @@ import {
 } from './mcp-app-lite.ts';
 import { mountRiffOnboarding } from './riff-onboarding/index.ts';
 import { parseOnboardingSeenResult } from './riff-home-validation.ts';
+import { parseWelcomeAccountBinding } from './riff-onboarding-validation.ts';
 
 type OpenAIHost = { callTool?: (name: string, args: Record<string, unknown>) => Promise<unknown> };
 
@@ -12,21 +13,23 @@ export function mountRiffOnboardingBridge(root: HTMLElement, options: { timeoutM
   const toolTimeoutMs = options.toolTimeoutMs ?? 45_000;
   const app = new App({ name: 'riff-onboarding', version: '1.0.0' }, { availableDisplayModes: ['inline'] }, { autoResize: false });
   let connected = false;
+  let expectedAccountId: string | undefined;
   const finishWelcome = async () => {
-    if (!connected) return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
+    const completionAccountId = expectedAccountId;
+    if (!connected || !completionAccountId) return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), toolTimeoutMs);
     try {
       let result: unknown;
       if (app.getHostCapabilities()?.serverTools) {
         result = await app.callServerTool(
-          { name: 'mark_riff_onboarding_seen', arguments: {} },
+          { name: 'mark_riff_onboarding_seen', arguments: { expected_account_id: completionAccountId } },
           { signal: controller.signal, timeout: toolTimeoutMs, maxTotalTimeout: toolTimeoutMs },
         );
       } else if ((window as Window & { openai?: OpenAIHost }).openai?.callTool) {
         const callTool = (window as Window & { openai?: OpenAIHost }).openai!.callTool!;
         result = await Promise.race([
-          callTool('mark_riff_onboarding_seen', {}),
+          callTool('mark_riff_onboarding_seen', { expected_account_id: completionAccountId }),
           new Promise<never>((_, reject) => controller.signal.addEventListener('abort', () => reject(new Error('timeout')), { once: true })),
         ]);
       } else return { status: 'failed' as const, message: 'Riff could not confirm welcome completion. Try the same action again safely.' };
@@ -71,9 +74,15 @@ export function mountRiffOnboardingBridge(root: HTMLElement, options: { timeoutM
     disposed = true; connected = false; handshake.abort(); resize?.disconnect();
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
     view.dispose(); window.removeEventListener('pagehide', dispose);
-    app.onhostcontextchanged = undefined; void app.close();
+    app.ontoolresult = undefined; app.onhostcontextchanged = undefined; void app.close();
   }
   app.onhostcontextchanged = applyContext;
+  app.ontoolresult = (result) => {
+    const binding = parseWelcomeAccountBinding(result);
+    // Bind this mounted welcome to its first coherent server issuance. A later
+    // account switch must reopen the guide rather than retarget a stale panel.
+    if (binding && expectedAccountId === undefined) expectedAccountId = binding;
+  };
   app.onclose = () => { connected = false; };
   app.onteardown = async () => { setTimeout(dispose, 0); return {}; };
   window.addEventListener('pagehide', dispose, { once: true });

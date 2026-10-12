@@ -17,8 +17,8 @@ The reviewed local CURRENT-workflow acceptance is recorded in the
 The current immutable local-build candidates are Home v6
 (`ui://riff/home-v6.html`,
 `sha256:15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`),
-inline onboarding v5 (`ui://riff/onboarding-v5.html`,
-`sha256:890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a`),
+inline onboarding v6 (`ui://riff/onboarding-v6.html`,
+`sha256:895affa9aaf20db9569e8efa763dcbe20b3608c0874204613af6fb66791da204`),
 and standalone pipeline v6 (`ui://kettle/creator-pipeline-v6.html`,
 `sha256:0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`).
 These are deterministic local identities, not hosted-deployment proof.

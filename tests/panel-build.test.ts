@@ -114,7 +114,7 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   const panel = join(root, 'apps/panel');
   const fixtures = [
     { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v6' },
-    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v5' },
+    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v6' },
     { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v6' },
   ] as const;
   for (const fixture of fixtures) {

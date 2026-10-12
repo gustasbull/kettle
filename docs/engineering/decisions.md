@@ -32,12 +32,12 @@ fullscreen chrome are not part of the visual target.
   replaces persisted truth after only a conversational handoff.
 - The canonical immutable local release candidates are `ui://riff/home-v6.html`
   (`riff-home-v6`, SHA-256 `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4`,
-  246025 raw / 67032 gzip bytes), `ui://riff/onboarding-v5.html`
-  (`riff-onboarding-v5`, SHA-256 `890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a`,
-  36472 raw / 10835 gzip bytes), and `ui://kettle/creator-pipeline-v6.html`
+  246025 raw / 67032 gzip bytes), `ui://riff/onboarding-v6.html`
+  (`riff-onboarding-v6`, SHA-256 `895affa9aaf20db9569e8efa763dcbe20b3608c0874204613af6fb66791da204`,
+  37064 raw / 11033 gzip bytes), and `ui://kettle/creator-pipeline-v6.html`
   (`creator-pipeline-v6`, SHA-256 `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358`,
   177195 raw / 47988 gzip bytes). Home keeps v1–v5 compatibility URIs,
-  onboarding keeps v1–v4, and the pipeline keeps v2–v5; all aliases serve the same
+  onboarding keeps v1–v5, and the pipeline keeps v2–v5; all aliases serve the same
   current static document so existing turns do not lose their resource. These local
   identities are not evidence that the hosted Worker serves the same bytes.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
@@ -50,10 +50,14 @@ fullscreen chrome are not part of the visual target.
   private recent-work read. The MCP instructions and packaged setup sequence then
   call `show_riff_welcome` once so the standalone Paper carousel renders inline in
   the originating ChatGPT response while Home remains open on the right. Only that
-  inline app's explicit final action may call `mark_riff_onboarding_seen`; the model
-  never calls it. Malformed output, rejection, timeout, an account switch, or a stale
-  action leaves onboarding unmarked and safely retryable. Returning users skip the
-  automatic welcome, and an explicit replay never changes account state.
+  inline app pins the first strict `show_riff_welcome` account precondition, and only
+  its explicit final action may call `mark_riff_onboarding_seen`; the model never
+  calls it. Completion derives ownership again from the current credential, compares
+  the precondition without using it to select ownership, and rejects account switches
+  before storage. Malformed or rejected output remains retryable. A timeout is
+  unconfirmed because dispatch may already have committed; the idempotent retry
+  reconciles the original account. Returning users skip the automatic welcome, and
+  an explicit replay never changes account state.
 - Instagram remains presentation/fixture-only until a permitted live provider path is
   verified. The server publishes the same strict first-use sequence through its MCP
   instructions and `open_riff` result; the packaged setup skill pins the supported

@@ -30,7 +30,7 @@ test('product descriptions persist additively while historical strict briefs rem
   assert.equal(Brief.safeParse({ ...historical.brief, description: 'x'.repeat(4_001) }).success, false);
   assert.equal(Brief.safeParse({ ...historical.brief, description: 'Valid', unknown: 'not allowed' }).success, false);
 });
-test('onboarding state is nullable and marking accepts no client-owned fields', () => {
+test('onboarding state is nullable and marking requires only a verified-account precondition', () => {
   const account = {
     id: crypto.randomUUID(), display_name: 'Riff member', state: 'active', preferred_language: 'en',
     created_at: '2026-10-10T00:00:00Z', onboarding_seen_at: null,
@@ -38,8 +38,10 @@ test('onboarding state is nullable and marking accepts no client-owned fields', 
   assert.ok(Account.safeParse(account).success);
   assert.ok(Account.safeParse({ ...account, onboarding_seen_at: '2026-10-10T00:01:00Z' }).success);
   assert.equal(Account.safeParse({ ...account, onboarding_seen_at: 'not-a-timestamp' }).success, false);
-  assert.ok(MarkRiffOnboardingSeenInput.safeParse({}).success);
-  assert.equal(MarkRiffOnboardingSeenInput.safeParse({ account_id: crypto.randomUUID() }).success, false);
+  assert.ok(MarkRiffOnboardingSeenInput.safeParse({ expected_account_id: account.id }).success);
+  assert.equal(MarkRiffOnboardingSeenInput.safeParse({}).success, false);
+  assert.equal(MarkRiffOnboardingSeenInput.safeParse({ account_id: account.id }).success, false);
+  assert.equal(MarkRiffOnboardingSeenInput.safeParse({ expected_account_id: account.id, replay: true }).success, false);
   assert.ok(MarkRiffOnboardingSeenOutput.safeParse({
     ok: true, data: { onboarding_seen_at: '2026-10-10T00:01:00Z' },
   }).success);

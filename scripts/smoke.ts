@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { unstable_dev } from 'wrangler';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { CONTRACT_VERSION } from '../packages/contracts/index.ts';
 
 process.env.WRANGLER_SEND_METRICS = 'false';
 const state = await mkdtemp(join(tmpdir(), 'kettle-smoke-'));
@@ -35,7 +36,7 @@ try {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((tool) => tool.name), ['kettle_diagnostic']);
   const result = await client.callTool({ name: 'kettle_diagnostic', arguments: {} });
-  assert.deepEqual(result.structuredContent, { status: 'ok', contract_version: '1.0.0' });
+  assert.deepEqual(result.structuredContent, { status: 'ok', contract_version: CONTRACT_VERSION });
   for (const name of ['show_riff_welcome', 'save_project', 'get_project', 'get_account_state']) {
     const denied = await client.callTool({ name, arguments: {} });
     assert.equal(denied.isError, true, `${name} must not be exposed`);

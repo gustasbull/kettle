@@ -35,7 +35,12 @@ test('Riff onboarding marks only from its visible final step after a real mounte
           protocolVersion:message.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},
           hostCapabilities:{serverTools:{}},hostContext:{theme:'light',locale:'en'}
         }},'*');
-        if(message.method==='ui/notifications/initialized') window.ready=true;
+        if(message.method==='ui/notifications/initialized') {
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{
+            structuredContent:{steps:['Start','Find','Make'],expected_account_id:'11111111-1111-4111-8111-111111111111'},content:[],isError:false,_meta:{}
+          }},'*');
+          window.ready=true;
+        }
         if(message.method==='tools/call') {
           window.calls.push(message.params);
           frame().postMessage({jsonrpc:'2.0',id:message.id,result:{
@@ -69,7 +74,9 @@ test('Riff onboarding marks only from its visible final step after a real mounte
   assert.deepEqual(await page.evaluate(()=>window.calls),[], 'viewing the guide does not mark onboarding');
   await frame.getByRole('button',{name:'Finish welcome'}).click();
   await frame.getByRole('status').getByText(/Welcome completed.*Home is ready/i).waitFor();
-  assert.deepEqual(await page.evaluate(()=>window.calls),[{name:'mark_riff_onboarding_seen',arguments:{}}]);
+  assert.deepEqual(await page.evaluate(()=>window.calls),[{name:'mark_riff_onboarding_seen',arguments:{
+    expected_account_id:'11111111-1111-4111-8111-111111111111',
+  }}]);
 });
 
 test('Riff onboarding keeps completion retryable across unsupported, malformed, rejected, and timed-out writes',async t=>{
@@ -94,7 +101,11 @@ test('Riff onboarding keeps completion retryable across unsupported, malformed, 
     res.end(`<script>window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
       addEventListener('message',event=>{const message=event.data;
         if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,hostInfo:{name:'welcome-failures',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
-        if(message.method==='ui/notifications/initialized')window.ready=true;
+        if(message.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{
+            structuredContent:{steps:['Start','Find','Make'],expected_account_id:'11111111-1111-4111-8111-111111111111'},content:[],isError:false,_meta:{}
+          }},'*');window.ready=true;
+        }
       });</script><iframe src="/frame"></iframe>`);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
@@ -115,4 +126,66 @@ test('Riff onboarding keeps completion retryable across unsupported, malformed, 
   await frame.getByRole('status').getByText(/Welcome completed.*Home is ready/i).waitFor();
   assert.equal(await frame.evaluate(()=>window.markCalls),6,
     'unsupported transport never reached a tool; five failed attempts and one confirmed retry did');
+});
+
+test('Riff onboarding requires a coherent issuance and rejects a stale account before confirming completion',async t=>{
+  const bundle=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
+    import { mountRiffOnboardingBridge } from './apps/panel/riff-onboarding-bridge.ts';
+    window.bridge=mountRiffOnboardingBridge(document.getElementById('mount'),{timeoutMs:300,toolTimeoutMs:200});
+  `},bundle:true,platform:'browser',format:'iife',write:false});
+  const accountA='11111111-1111-4111-8111-111111111111',accountB='22222222-2222-4222-8222-222222222222';
+  const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');
+    if(req.url==='/frame')return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;window.calls=[];window.writes=[];window.activeAccount='${accountB}';
+      const frame=()=>document.querySelector('iframe').contentWindow;
+      window.issue=value=>frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:value},'*');
+      window.useAccount=value=>window.activeAccount=value;
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{
+          protocolVersion:message.params.protocolVersion,hostInfo:{name:'account-switch',version:'1'},
+          hostCapabilities:{serverTools:{}},hostContext:{}
+        }},'*');
+        if(message.method==='ui/notifications/initialized'){
+          window.issue({structuredContent:{steps:['Start','Find','Make']},content:[]});window.ready=true;
+        }
+        if(message.method==='tools/call'){
+          window.calls.push(message.params);const expected=message.params.arguments.expected_account_id;
+          if(expected!==window.activeAccount){
+            frame().postMessage({jsonrpc:'2.0',id:message.id,result:{structuredContent:{ok:false,error:{
+              code:'VERSION_CONFLICT',message:'Riff state changed.',retryable:false,recovery:'reload'
+            }},content:[],isError:true,_meta:{}}},'*');return;
+          }
+          window.writes.push(window.activeAccount);
+          frame().postMessage({jsonrpc:'2.0',id:message.id,result:{structuredContent:{ok:true,data:{
+            onboarding_seen_at:'2026-10-11T08:05:00Z'
+          }},content:[],isError:false,_meta:{}}},'*');
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(4_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  await frame.getByRole('button',{name:'Next step'}).click();await frame.getByRole('button',{name:'Next step'}).click();
+
+  await frame.getByRole('button',{name:'Finish welcome'}).click();
+  await frame.getByRole('status').getByText(/could not confirm/i).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.calls),[],'missing account binding must not invoke a write');
+
+  await page.evaluate(value=>window.issue({structuredContent:{
+    steps:['Start','Find','Make'],expected_account_id:value,
+  },content:[],isError:false,_meta:{}}),accountA);
+  await frame.getByRole('button',{name:'Finish welcome'}).click();
+  await frame.getByRole('status').getByText(/could not confirm/i).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.writes),[],'account switch rejection leaves both accounts unmarked');
+  assert.deepEqual(await page.evaluate(()=>window.calls),[{name:'mark_riff_onboarding_seen',arguments:{expected_account_id:accountA}}]);
+  assert.equal(await frame.getByRole('button',{name:'Finish welcome'}).isEnabled(),true);
+
+  await page.evaluate(value=>window.useAccount(value),accountA);
+  await frame.getByRole('button',{name:'Finish welcome'}).click();
+  await frame.getByRole('status').getByText(/Welcome completed.*Home is ready/i).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.writes),[accountA]);
 });

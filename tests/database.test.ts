@@ -74,14 +74,18 @@ test('migrations and seed apply; account state reports unconfigured billing hone
   assert.equal(rows.rows.length, 1);
 });
 test('onboarding is marked once per internal account and replay returns the original timestamp', async () => {
-  const first = MarkRiffOnboardingSeenOutput.parse(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', {}));
+  const first = MarkRiffOnboardingSeenOutput.parse(await ops.execute(
+    'mark_riff_onboarding_seen', 'fixture-a', { expected_account_id: accountA }));
   assert.ok(first.ok);
-  const replay = MarkRiffOnboardingSeenOutput.parse(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', {}));
+  const replay = MarkRiffOnboardingSeenOutput.parse(await ops.execute(
+    'mark_riff_onboarding_seen', 'fixture-a', { expected_account_id: accountA }));
   assert.deepEqual(replay, first);
   const state = GetAccountStateOutput.parse(await ops.execute('get_account_state', 'fixture-a', {}));
   assert.ok(state.ok);
   assert.equal(state.data.account.onboarding_seen_at, first.data.onboarding_seen_at);
-  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', { replay: true }), failure('VALIDATION_ERROR'));
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture-a', {
+    expected_account_id: accountA, replay: true,
+  }), failure('VALIDATION_ERROR'));
 });
 test('custom token hook binds OAuth tokens to canonical Riff while leaving website audience unchanged', async () => {
   const requiredClaims = {

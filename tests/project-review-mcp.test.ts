@@ -12,6 +12,7 @@ import {
   RIFF_ONBOARDING_LEGACY_URI,
   RIFF_ONBOARDING_MIME,
   RIFF_ONBOARDING_URI,
+  RIFF_ONBOARDING_V5_URI,
   RIFF_ONBOARDING_V2_URI,
   RIFF_ONBOARDING_V3_URI,
   RIFF_ONBOARDING_V4_URI,
@@ -125,6 +126,7 @@ test('project-review render tool uses signed identity, exact read contract and r
   const resources = await (await rpc('resources/list', {}, auth)).json() as { result: { resources: Record<string, unknown>[] } };
   assert.deepEqual(resources.result.resources.map((r) => [r.name, r.uri, r.mimeType]),
     [['riff-onboarding', RIFF_ONBOARDING_URI, RIFF_ONBOARDING_MIME],
+      ['riff-onboarding-v5-compat', RIFF_ONBOARDING_V5_URI, RIFF_ONBOARDING_MIME],
       ['riff-onboarding-v4-compat', RIFF_ONBOARDING_V4_URI, RIFF_ONBOARDING_MIME],
       ['riff-onboarding-v3-compat', RIFF_ONBOARDING_V3_URI, RIFF_ONBOARDING_MIME],
       ['riff-onboarding-v2-compat', RIFF_ONBOARDING_V2_URI, RIFF_ONBOARDING_MIME],

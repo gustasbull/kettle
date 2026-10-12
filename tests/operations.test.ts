@@ -25,7 +25,7 @@ test('ownership comes from verifier and malformed inputs stop before storage', a
   assert.deepEqual(await ops.execute('save_project', 'fixture', createInput()), failure('NOT_FOUND'));
   assert.equal(calls, 1);
 });
-test('marking onboarding is an authenticated idempotent write routed with verified ownership', async () => {
+test('marking onboarding is bound to the verified account and strips the precondition before storage', async () => {
   let calls = 0;
   const seenAt = '2026-10-10T00:01:00Z';
   const ops = createOperations({ async verify() {
@@ -37,9 +37,12 @@ test('marking onboarding is an authenticated idempotent write routed with verifi
     assert.deepEqual(input, {});
     return { ok: true, data: { onboarding_seen_at: seenAt } };
   } });
-  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', {}), {
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', { expected_account_id: accountA }), {
     ok: true, data: { onboarding_seen_at: seenAt },
   });
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', { expected_account_id: crypto.randomUUID() }),
+    failure('VERSION_CONFLICT'));
+  assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', {}), failure('VALIDATION_ERROR'));
   assert.deepEqual(await ops.execute('mark_riff_onboarding_seen', 'fixture', { account_id: accountA }), failure('VALIDATION_ERROR'));
   assert.equal(calls, 1);
 });

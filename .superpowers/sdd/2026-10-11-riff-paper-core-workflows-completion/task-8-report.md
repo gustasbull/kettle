@@ -7,7 +7,7 @@ read-only Paper authority. The acceptance surface now has a deterministic,
 test-only 42-row fixture matrix; 15 executable browser suites; one-root Home
 navigation through Product, loading, analysis, Discovery, Studio, Saved, and
 resume; equivalent standalone pipeline behavior; and current immutable Home v6,
-inline onboarding v5, and standalone pipeline v6 resources with compatibility
+inline onboarding v6, and standalone pipeline v6 resources with compatibility
 aliases.
 
 No provider request, paid work, hosted deployment, publication, Paper mutation,
@@ -56,9 +56,13 @@ fake: `open_riff` always opens usable Home, and an exact null marker suppresses
 only private recents. The server's MCP instructions and packaged setup sequence
 then call `show_riff_welcome` once so the standalone Paper carousel renders inline
 in the originating chat. Only its explicit final action may call
-`mark_riff_onboarding_seen`; the model never calls that tool. Rejected, malformed,
-or timed-out completion remains unmarked and retryable. Returning users skip the
-automatic welcome, and an explicit replay never writes account state.
+`mark_riff_onboarding_seen`; the model never calls that tool. The app pins the
+strict credential-derived account precondition from the welcome result, and the
+server re-verifies the current OAuth owner before storage without deriving ownership
+from the echoed value. Rejected or malformed completion remains unmarked and
+retryable; a timeout is unconfirmed and is reconciled by an idempotent retry.
+Returning users skip the automatic welcome, and an explicit replay never writes
+account state.
 The same packaged guidance now reflects the exposed `set_riff_work_state` tool:
 Save, Undo, or Filmed is claimed only after a strict successful receipt and
 authoritative job reconciliation; every other outcome remains unconfirmed or failed.
@@ -146,13 +150,13 @@ are:
 | Resource | Version | SHA-256 | Raw | Gzip | Budget |
 | --- | --- | --- | ---: | ---: | ---: |
 | `ui://riff/home-v6.html` | `riff-home-v6` | `15b80168f342a323fda6e5744e2fab9da2fd0071a38e28caf147785d9fc59cd4` | 246025 | 67032 | 500000 / 110000 |
-| `ui://riff/onboarding-v5.html` | `riff-onboarding-v5` | `890e17d2cc5d85abf0244174969774ecf4949ce083e90713ba64c0b8deefe91a` | 36472 | 10835 | 400000 / 85000 |
+| `ui://riff/onboarding-v6.html` | `riff-onboarding-v6` | `895affa9aaf20db9569e8efa763dcbe20b3608c0874204613af6fb66791da204` | 37064 | 11033 | 400000 / 85000 |
 | `ui://kettle/creator-pipeline-v6.html` | `creator-pipeline-v6` | `0a67b5001c3d53559b352bce4120004269d0adcbc06e0497f02c57e49dbb8358` | 177195 | 47988 | 250000 / 75000 |
 
-Home retains v1–v5, onboarding retains v1–v4, and pipeline retains v2–v5.
+Home retains v1–v5, onboarding retains v1–v5, and pipeline retains v2–v5.
 Those are compatibility handles serving the current static documents, not claims
 that a mutable historical bundle remains under each URI. Telemetry, observations,
-build manifests, benchmarks, and resource tests use the canonical v6/v5/v6
+build manifests, benchmarks, and resource tests use the canonical v6/v6/v6
 versions. Task 9 must still reproduce these bytes from a clean generated state and
 prove the hosted Worker serves them; this section does not claim either result.
 
@@ -201,7 +205,7 @@ migration was added.
 `PRODUCT.md` and `docs/engineering/decisions.md` now distinguish implemented truth
 from intended scope: Discovery's four libraries are local creative lenses over real
 owned lineage, Product save requires explicit validation and a parsed receipt,
-Saved/Filmed/resume state is durable, and the current v6/v5/v6 artifacts are local
+Saved/Filmed/resume state is durable, and the current v6/v6/v6 artifacts are local
 release candidates.
 
 Instagram remains deterministic presentation/fixture coverage only; it is not live

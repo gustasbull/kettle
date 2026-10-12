@@ -39,8 +39,20 @@ export function createOperations(verifier: IdentityVerifier, repository: Project
       if (!identity.scopes.includes(contract.scope)) return failure('FORBIDDEN');
       const input = contract.input.safeParse(rawInput);
       if (!input.success) return failure('VALIDATION_ERROR');
+      let repositoryInput: unknown = input.data;
+      if (operation === 'mark_riff_onboarding_seen') {
+        const expectedAccountId = (input.data as { expected_account_id: string }).expected_account_id;
+        // This echoed value is only a stale-view/concurrency precondition. It
+        // never selects the owner sent to storage, which remains credential-derived.
+        if (expectedAccountId.toLowerCase() !== identity.account_id.toLowerCase()) {
+          return failure('VERSION_CONFLICT');
+        }
+        // Preserve the already-applied server RPC contract: the database sees
+        // verified ownership separately and no client-owned identity field.
+        repositoryInput = {};
+      }
       try {
-        const output = contract.output.parse(await repository.call(operation, identity.account_id, input.data));
+        const output = contract.output.parse(await repository.call(operation, identity.account_id, repositoryInput));
         return output as z.infer<(typeof toolContracts)[K]['output']>;
       } catch {
         // Do not expose database errors, tokens, provider bodies or other customers' data.
