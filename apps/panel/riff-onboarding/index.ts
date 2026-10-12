@@ -1,49 +1,72 @@
 import { riffBaseStyles } from '../riff-ui/styles.ts';
 
-const paperCreatorImage = 'data:image/jpeg;base64,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';
 
 const onboardingStyles = riffBaseStyles + `
 html, body { margin: 0; padding: 0; background: transparent; }
-.riff-onboarding { display: flex; justify-content: center; padding: 4px; }
+.riff-onboarding {
+  --riff-onboarding-card: var(--color-background-primary, #FCFCFE);
+  --riff-onboarding-surface: var(--color-background-primary, #FFFFFF);
+  --riff-onboarding-canvas: var(--color-background-secondary, #F0F3F7);
+  --riff-onboarding-ink: var(--color-text-primary, #202124);
+  --riff-onboarding-muted: var(--color-text-secondary, #596273);
+  --riff-onboarding-line: var(--color-border-secondary, #E5EAF3);
+  --riff-onboarding-wash-a: #DCEBFA;
+  --riff-onboarding-wash-b: #E6DDF6;
+  --riff-onboarding-wash-c: #F5E2EF;
+  display: flex; justify-content: center; padding: 4px;
+}
 .riff-onboarding__card {
   display: flex; width: min(576px, 100%); min-width: 0; flex-direction: column; align-items: center;
-  gap: 22px; overflow: hidden; padding: 28px 24px 24px; border: 1px solid #E5EAF3; border-radius: 24px;
+  gap: 22px; overflow: hidden; padding: 28px 24px 24px; border: 1px solid var(--riff-onboarding-line); border-radius: 24px;
   background:
     radial-gradient(circle, rgba(101, 86, 122, .06) .6px, transparent .85px) center / 16px 16px,
-    radial-gradient(at 10% 70%, #DCEBFA 0%, transparent 60%) center / 100% 100%,
-    radial-gradient(at 70% 65%, #E6DDF6 0%, transparent 58%) center / 100% 100%,
-    radial-gradient(at 92% 30%, #F5E2EF 0%, transparent 55%) center / 100% 100%,
-    #FCFCFE;
+    radial-gradient(at 10% 70%, var(--riff-onboarding-wash-a) 0%, transparent 60%) center / 100% 100%,
+    radial-gradient(at 70% 65%, var(--riff-onboarding-wash-b) 0%, transparent 58%) center / 100% 100%,
+    radial-gradient(at 92% 30%, var(--riff-onboarding-wash-c) 0%, transparent 55%) center / 100% 100%,
+    var(--riff-onboarding-card);
   box-shadow: 0 3px 6px #20355608, 0 12px 26px #20355610;
 }
 .riff-onboarding__intro {
   display: flex; width: 100%; flex-direction: column; align-items: center; gap: 8px; text-align: center;
 }
 .riff-onboarding__eyebrow {
-  width: 100%; max-width: 480px; color: #202124; font-size: 18px; font-weight: 500;
+  width: 100%; max-width: 480px; color: var(--riff-onboarding-ink); font-size: 18px; font-weight: 500;
   line-height: 26px; letter-spacing: -.02em;
 }
-.riff-onboarding__headline { width: 100%; color: #202124; font-size: 34px; font-weight: 600; line-height: 42px; }
+.riff-onboarding__headline { width: 100%; color: var(--riff-onboarding-ink); font-size: 34px; font-weight: 600; line-height: 42px; }
 .riff-onboarding__carousel { width: 526px; max-width: 100%; overflow: clip; padding: 8px 2px 20px; outline: 0; }
 .riff-onboarding__track { display: flex; width: max-content; align-items: stretch; gap: 14px; }
 .riff-onboarding__slide {
   display: flex; width: 454px; flex: 0 0 454px; flex-direction: column; padding: 8px;
-  border-radius: 24px; background: #FFFFFF; box-shadow: 0 3px 6px #2035560A, 0 10px 18px #20355614;
+  border-radius: 24px; background: var(--riff-onboarding-surface); box-shadow: 0 3px 6px #2035560A, 0 10px 18px #20355614;
 }
 .riff-onboarding__visual {
   display: flex; width: 100%; height: 184px; flex: 0 0 184px; flex-direction: column;
   justify-content: center; gap: 8px; overflow: hidden; padding: 16px 16px 28px;
-  border-radius: 18px; background: #F0F3F7;
+  border-radius: 18px; background: var(--riff-onboarding-canvas);
 }
 .riff-onboarding__start { display: flex; width: 100%; align-items: center; justify-content: center; gap: 12px; }
 .riff-onboarding__sample-video {
   width: 80px; height: 124px; flex: 0 0 80px; overflow: hidden; border: 3px solid #FFFFFF;
   border-radius: 15px; background: #DCE3E8; box-shadow: 0 7px 16px #20355626;
 }
-.riff-onboarding__sample-video img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.riff-onboarding__placeholder {
+  position: relative; display: block; width: 100%; height: 100%; overflow: hidden;
+  background:
+    radial-gradient(circle at 68% 20%, #F5D9EE 0 12%, transparent 13%),
+    linear-gradient(145deg, #B6D5F3 0 38%, #CFBCEB 39% 67%, #F0C8D9 68% 100%);
+}
+.riff-onboarding__placeholder::before {
+  position: absolute; inset: 16px 11px 30px; border: 1px solid #FFFFFFB8; border-radius: 9px;
+  background: linear-gradient(160deg, #FFFFFFB8, #FFFFFF4D); box-shadow: 0 5px 12px #3B436A2A; content: "";
+}
+.riff-onboarding__placeholder::after {
+  position: absolute; right: 11px; bottom: 10px; left: 11px; height: 12px; border-radius: 999px;
+  background: linear-gradient(90deg, #FFFFFFE8 0 58%, #FFFFFF70 58%); content: "";
+}
 .riff-onboarding__prompts { display: flex; width: 250px; flex: 0 0 250px; flex-direction: column; gap: 8px; }
 .riff-onboarding__prompt {
-  padding: 12px 14px; border-radius: 13px; background: #FFFFFF; color: #000000;
+  padding: 12px 14px; border-radius: 13px; background: var(--riff-onboarding-surface); color: var(--riff-onboarding-ink);
   font-family: system-ui, sans-serif; font-size: 13px; line-height: 19px; box-shadow: 0 3px 8px #2035560D;
 }
 .riff-onboarding__insight { display: flex; width: 100%; flex-direction: column; gap: 8px; }
@@ -56,50 +79,69 @@ html, body { margin: 0; padding: 0; background: transparent; }
   font-size: 12px; font-weight: 600; line-height: 16px;
 }
 .riff-onboarding__working-copy {
-  padding: 12px; border-radius: 12px; background: #FFFFFF; color: #000000;
+  padding: 12px; border-radius: 12px; background: var(--riff-onboarding-surface); color: var(--riff-onboarding-ink);
   font-family: system-ui, sans-serif; font-size: 13px; line-height: 16px;
 }
 .riff-onboarding__chips { display: flex; justify-content: center; gap: 6px; }
 .riff-onboarding__chip {
-  padding: 8px 12px; border-radius: 999px; background: #FFFFFF; color: #6933A1;
+  padding: 8px 12px; border-radius: 999px; background: var(--riff-onboarding-surface); color: #6933A1;
   font-family: system-ui, sans-serif; font-size: 12px; line-height: 16px;
 }
 .riff-onboarding__script {
   display: flex; flex-direction: column; gap: 7px; padding: 14px; border-radius: 14px;
-  background: #FFFFFF; box-shadow: 0 7px 16px #20355614;
+  background: var(--riff-onboarding-surface); box-shadow: 0 7px 16px #20355614;
 }
-.riff-onboarding__script p { color: #000000; font-family: system-ui, sans-serif; font-size: 13px; line-height: 19px; }
+.riff-onboarding__script p { color: var(--riff-onboarding-ink); font-family: system-ui, sans-serif; font-size: 13px; line-height: 19px; }
 .riff-onboarding__script .riff-onboarding__script-title { color: #6933A1; font-weight: 600; }
 .riff-onboarding__copy {
   display: flex; width: 100%; min-height: 110px; flex-direction: column; gap: 8px;
-  margin-top: -18px; padding: 20px; border-radius: 22px 22px 16px 16px; background: #FFFFFF;
+  margin-top: -18px; padding: 20px; border-radius: 22px 22px 16px 16px; background: var(--riff-onboarding-surface);
 }
-.riff-onboarding__copy h3 { color: #242426; font-family: system-ui, sans-serif; font-size: 22px; font-weight: 600; line-height: 28px; }
-.riff-onboarding__copy p { color: #596273; font-family: system-ui, sans-serif; font-size: 14px; line-height: 21px; }
+.riff-onboarding__copy h3 { color: var(--riff-onboarding-ink); font-family: system-ui, sans-serif; font-size: 22px; font-weight: 600; line-height: 28px; }
+.riff-onboarding__copy p { color: var(--riff-onboarding-muted); font-family: system-ui, sans-serif; font-size: 14px; line-height: 21px; }
 .riff-onboarding__footer { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 18px; }
 .riff-onboarding__progress { display: flex; align-items: center; gap: 16px; }
-.riff-onboarding__controls-label { color: #596273; font-size: 12px; line-height: 18px; }
-.riff-onboarding__dots { display: flex; align-items: center; gap: 6px; }
+.riff-onboarding__controls-label { color: var(--riff-onboarding-muted); font-size: 12px; line-height: 18px; }
+.riff-onboarding__status { min-height: 18px; color: var(--riff-onboarding-muted); font-size: 12px; line-height: 18px; text-align: center; }
+.riff-onboarding__status:empty { display: none; }
+.riff-onboarding__dots { display: flex; align-items: center; gap: 0; }
 .riff-onboarding__dot {
-  width: 5px; height: 5px; flex: 0 0 5px; padding: 0; border: 0; border-radius: 999px;
-  background: #D9E1EE; cursor: pointer;
+  display: flex; width: 44px; height: 44px; flex: 0 0 44px; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer;
 }
-.riff-onboarding__dot[aria-selected="true"] { width: 20px; flex-basis: 20px; background: #7138D4; }
+.riff-onboarding__dot::before { width: 5px; height: 5px; border-radius: 999px; background: #D9E1EE; content: ""; }
+.riff-onboarding__dot[aria-selected="true"]::before { width: 20px; background: #7138D4; }
 @media (forced-colors: active) {
   .riff-onboarding__dot {
     border: 1px solid CanvasText; background: Canvas; forced-color-adjust: none;
   }
-  .riff-onboarding__dot[aria-selected="true"] { border-color: CanvasText; background: Highlight; }
+  .riff-onboarding__dot::before { background: CanvasText; }
+  .riff-onboarding__dot[aria-selected="true"]::before { background: Highlight; }
 }
 .riff-onboarding__next {
-  display: flex; width: 32px; height: 32px; flex: 0 0 32px; align-items: center; justify-content: center;
-  padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; background: #F0F3F7; cursor: pointer;
+  display: flex; width: 44px; height: 44px; flex: 0 0 44px; align-items: center; justify-content: center;
+  padding: 0; border: 1px solid var(--riff-onboarding-line); border-radius: 999px; background: var(--riff-onboarding-canvas); cursor: pointer;
 }
 .riff-onboarding__next svg { display: block; width: 16px; height: 16px; }
 .riff-onboarding__closing { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
-.riff-onboarding__closing strong { color: #242426; font-size: 15px; font-weight: 600; line-height: 21px; }
-.riff-onboarding__closing p { width: 440px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; }
+.riff-onboarding__closing strong { color: var(--riff-onboarding-ink); font-size: 15px; font-weight: 600; line-height: 21px; }
+.riff-onboarding__closing p { width: 440px; max-width: 100%; color: var(--riff-onboarding-muted); font-size: 13px; line-height: 19px; }
 .riff-onboarding__down { display: block; width: 18px; height: 18px; }
+:root[data-theme="dark"] .riff-onboarding {
+  --riff-onboarding-card: var(--color-background-primary, #101318);
+  --riff-onboarding-surface: var(--color-background-secondary, #181D25);
+  --riff-onboarding-canvas: #242832;
+  --riff-onboarding-ink: var(--color-text-primary, #F6F7F9);
+  --riff-onboarding-muted: var(--color-text-secondary, #C1C8D2);
+  --riff-onboarding-line: var(--color-border-secondary, #596273);
+  --riff-onboarding-wash-a: #162433;
+  --riff-onboarding-wash-b: #221D31;
+  --riff-onboarding-wash-c: #2E1E2A;
+}
+:root[data-theme="dark"] .riff-onboarding__working { background: #1F3527; }
+:root[data-theme="dark"] .riff-onboarding__working-label { color: #A9D5B7; }
+:root[data-theme="dark"] .riff-onboarding__chip,
+:root[data-theme="dark"] .riff-onboarding__script-title { color: #C8A8FF; }
 @container riff-app (max-width: 520px) {
   .riff-onboarding__card { padding-inline: 18px; }
   .riff-onboarding__headline { font-size: 30px; line-height: 38px; }
@@ -146,10 +188,9 @@ function startVisual(doc: Document) {
   const visual = element(doc, 'div', 'riff-onboarding__visual');
   const content = element(doc, 'div', 'riff-onboarding__start');
   const video = element(doc, 'div', 'riff-onboarding__sample-video');
-  const image = element(doc, 'img');
-  image.src = paperCreatorImage;
-  image.alt = '';
-  video.append(image);
+  const placeholder = element(doc, 'span', 'riff-onboarding__placeholder');
+  placeholder.setAttribute('aria-hidden', 'true');
+  video.append(placeholder);
   const prompts = element(doc, 'div', 'riff-onboarding__prompts');
   const link = element(doc, 'p', 'riff-onboarding__prompt');
   link.textContent = 'A TikTok or Instagram link';
@@ -230,7 +271,12 @@ function downIcon(doc: Document) {
   return svg;
 }
 
-export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
+type RiffOnboardingCompletion = { status: 'sent' | 'failed'; message: string };
+
+export function mountRiffOnboarding(
+  root: HTMLElement,
+  options: { onComplete?: () => Promise<RiffOnboardingCompletion> } = {},
+): { dispose(): void } {
   const doc = root.ownerDocument;
   const style = element(doc, 'style');
   style.textContent = onboardingStyles;
@@ -281,6 +327,9 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
   next.setAttribute('aria-label', 'Next step');
   next.append(nextIcon(doc));
   progress.append(controlsLabel, dotList, next);
+  const completionStatus = element(doc, 'p', 'riff-onboarding__status');
+  completionStatus.setAttribute('role', 'status');
+  completionStatus.setAttribute('aria-live', 'polite');
   const closing = element(doc, 'footer', 'riff-onboarding__closing');
   const closingTitle = element(doc, 'strong');
   closingTitle.textContent = 'Ready for your next breakout?';
@@ -291,12 +340,14 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
     doc.createTextNode('Start here in chat or use the app on the right.'),
   );
   closing.append(closingTitle, closingCopy, downIcon(doc));
-  footer.append(progress, closing);
+  footer.append(progress, completionStatus, closing);
   card.append(intro, carousel, footer);
   app.append(card);
   root.replaceChildren(style, app);
 
   let active = 0;
+  let completing = false;
+  let disposed = false;
   const select = (index: number, focus = false) => {
     active = Math.max(0, Math.min(steps.length - 1, index));
     const offset = slides[active]!.offsetLeft - slides[0]!.offsetLeft;
@@ -310,6 +361,7 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
       dot.setAttribute('aria-selected', String(position === active));
       dot.tabIndex = position === active ? 0 : -1;
     });
+    next.setAttribute('aria-label', options.onComplete && active === steps.length - 1 ? 'Finish welcome' : 'Next step');
     if (focus) dots[active]!.focus();
   };
   steps.forEach((step, index) => {
@@ -324,7 +376,30 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
     dots.push(dot);
     dotList.append(dot);
   });
-  const onNext = () => select((active + 1) % steps.length);
+  const onNext = async () => {
+    if (completing || disposed) return;
+    if (!options.onComplete || active < steps.length - 1) {
+      select((active + 1) % steps.length);
+      return;
+    }
+    completing = true;
+    next.disabled = true;
+    completionStatus.textContent = 'Finishing your welcome…';
+    try {
+      const result = await options.onComplete();
+      if (disposed) return;
+      completionStatus.textContent = result.message;
+      if (result.status === 'failed') {
+        completing = false;
+        next.disabled = false;
+      }
+    } catch {
+      if (disposed) return;
+      completionStatus.textContent = 'Riff could not finish the welcome. Try again.';
+      completing = false;
+      next.disabled = false;
+    }
+  };
   const onKeydown = (event: KeyboardEvent) => {
     const index = event.key === 'ArrowRight' ? Math.min(steps.length - 1, active + 1)
       : event.key === 'ArrowLeft' ? Math.max(0, active - 1)
@@ -342,6 +417,7 @@ export function mountRiffOnboarding(root: HTMLElement): { dispose(): void } {
   select(0);
   return {
     dispose() {
+      disposed = true;
       resize?.disconnect();
       next.removeEventListener('click', onNext);
       carousel.removeEventListener('keydown', onKeydown);

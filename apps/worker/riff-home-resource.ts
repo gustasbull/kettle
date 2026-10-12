@@ -3,7 +3,8 @@ import type { OpenAIUiResourceMetadata } from '@openai/mcp-extensions/server';
 import { riffHomeScript, riffHomeFingerprint } from '../panel/generated/riff-home-bundle.ts';
 import { TIKTOK_IMAGE_RESOURCE_DOMAINS } from '../../packages/contracts/tiktok-image-policy.ts';
 
-export const RIFF_HOME_URI = 'ui://riff/home-v4.html';
+export const RIFF_HOME_URI = 'ui://riff/home-v5.html';
+export const RIFF_HOME_V4_URI = 'ui://riff/home-v4.html';
 export const RIFF_HOME_V3_URI = 'ui://riff/home-v3.html';
 export const RIFF_HOME_V2_URI = 'ui://riff/home-v2.html';
 export const RIFF_HOME_LEGACY_URI = 'ui://riff/home-v1.html';
@@ -45,7 +46,8 @@ export function registerRiffHomeResource(server: McpServer): void {
   }] }));
   register('riff-home', RIFF_HOME_URI);
   // Existing ChatGPT turns keep the resource URI from their original tool
-  // result. Preserve compatibility aliases while v4 becomes the cache key.
+  // result. Preserve compatibility aliases while v5 becomes the cache key.
+  register('riff-home-v4-compat', RIFF_HOME_V4_URI);
   register('riff-home-v3-compat', RIFF_HOME_V3_URI);
   register('riff-home-v2-compat', RIFF_HOME_V2_URI);
   register('riff-home-v1-compat', RIFF_HOME_LEGACY_URI);

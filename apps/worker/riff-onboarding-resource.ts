@@ -2,7 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OpenAIUiResourceMetadata } from '@openai/mcp-extensions/server';
 import { riffOnboardingScript, riffOnboardingFingerprint } from '../panel/generated/riff-onboarding-bundle.ts';
 
-export const RIFF_ONBOARDING_URI = 'ui://riff/onboarding-v3.html';
+export const RIFF_ONBOARDING_URI = 'ui://riff/onboarding-v4.html';
+export const RIFF_ONBOARDING_V3_URI = 'ui://riff/onboarding-v3.html';
 export const RIFF_ONBOARDING_MIME = 'text/html;profile=mcp-app';
 const openaiUi = {
   availableDisplayModes: ['inline'], preferredDisplayMode: 'inline',
@@ -24,11 +25,13 @@ export function riffOnboardingHtml(script: string, fingerprint?: {resource_versi
 }
 
 export function registerRiffOnboardingResource(server: McpServer): void {
-  server.registerResource('riff-onboarding', RIFF_ONBOARDING_URI, {
+  const register=(name:string,uri:string)=>server.registerResource(name, uri, {
     description: 'A three-step introduction to starting, finding, and making with Riff.',
     mimeType: RIFF_ONBOARDING_MIME, _meta: RIFF_ONBOARDING_META,
   }, async () => ({ contents: [{
-    uri: RIFF_ONBOARDING_URI, mimeType: RIFF_ONBOARDING_MIME,
+    uri, mimeType: RIFF_ONBOARDING_MIME,
     text: riffOnboardingHtml(riffOnboardingScript, riffOnboardingFingerprint), _meta: RIFF_ONBOARDING_META,
   }] }));
+  register('riff-onboarding',RIFF_ONBOARDING_URI);
+  register('riff-onboarding-v3-compat',RIFF_ONBOARDING_V3_URI);
 }

@@ -157,7 +157,7 @@ html, body { margin: 0; background: transparent; }
 .riff-discovery-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 44px; }
 .riff-discovery-title h1 { font-size: 34px; line-height: 42px; }
 .riff-libraries, .riff-discovery-filters, .riff-studio-tabs { display: flex; flex: 0 0 auto; gap: 2px; padding: 4px; overflow-x: auto; border-radius: 999px; background: #f0f0f2; scrollbar-width: none; }
-.riff-library, .riff-filter { flex: 0 0 auto; min-height: 36px; padding: 8px 14px; border-color: transparent; border-radius: 999px; color: #596577; background: transparent; font-size: 13px; line-height: 18px; white-space: normal; }
+.riff-library, .riff-filter { flex: 0 0 auto; min-height: 44px; margin-block: -4px; padding: 8px 14px; border-color: transparent; border-radius: 999px; color: #596577; background: transparent; font-size: 13px; line-height: 18px; white-space: normal; }
 .riff-app button.riff-library, .riff-app button.riff-filter { font-size:13px;line-height:18px; }
 .riff-library--active, .riff-filter--active { color: #6933a1; font-weight: 600; background: #fff; box-shadow: 0 2px 4px #29203612; }
 .riff-discovery-copy { color: #6d6d72; font-size: 14px; line-height: 22px; }
@@ -191,12 +191,13 @@ html, body { margin: 0; background: transparent; }
 .riff-idea-card--active .riff-idea-actions:has(.riff-bookmark) { width:216px;min-height:44px;margin-left:-1px;gap:6px; }
 .riff-idea-card--active .riff-idea-actions:has(.riff-bookmark) .riff-button { flex:0 1 166px;width:166px;min-height:44px;white-space:normal; }
 .riff-bookmark { display: flex; flex: 0 0 44px; align-items: center; justify-content: center; width: 44px;height:44px; padding: 0; border-radius: 999px; box-shadow: 0 1px 2px #18243a0a, 0 4px 10px #18243a08; }
-.riff-carousel-navigation { position: absolute; top: 506px; left: 50%; display: flex; align-items: center; justify-content:center; width:340px; gap:10px; translate: -50% 0; }
-.riff-carousel-arrow { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 999px; box-shadow: 0 1px 3px #18243a14; }
-.riff-discovery-dots { display: flex; align-items: center; gap: 6px; }
-.riff-discovery-dot { display: flex; align-items: center; justify-content: center; width: 14px; height: 36px; min-height: 36px; padding: 0; border: 0; background: transparent; }
+.riff-carousel-navigation { position: absolute; top: 506px; left: 50%; display: flex; align-items: center; justify-content:center; width:340px; gap:4px; translate: -50% 0; }
+.riff-carousel-arrow { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; flex:0 0 44px; padding: 0; border: 0; border-radius: 999px; box-shadow: 0 1px 3px #18243a14; }
+.riff-discovery-dots { display: flex; min-width:0; flex:1 1 auto; align-items: center; gap: 0; overflow-x:auto; scrollbar-width:none; }
+.riff-discovery-dots::-webkit-scrollbar { display:none; }
+.riff-discovery-dot { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; flex:0 0 44px; padding: 0; border: 0; background: transparent; }
 .riff-discovery-dot::before { width: 5px; height: 5px; border-radius: 99px; background: #d3dbe9; content: ""; }
-.riff-discovery-dot[aria-current="true"] { width: 29px; }
+.riff-discovery-dot[aria-current="true"] { width: 44px; }
 .riff-discovery-dot[aria-current="true"]::before { width: 20px; background: #7138D4; }
 .riff-carousel-hint { position: absolute; top: 552px; left: 0; width: 100%; color: #667182; font-size: 12px; line-height: 16px; text-align: center; }
 .riff-catalog-provenance { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap; }
@@ -219,12 +220,12 @@ html, body { margin: 0; background: transparent; }
 .riff-button--soft { background:#edf3ff; color:#544276; }
 .riff-studio-filmed-status { align-self:flex-start; margin:0; color:#3c6849; font-size:14px; line-height:22px; }
 .riff-studio-variants { display:flex;align-self:flex-start;max-width:900px;gap:4px;padding:3px;overflow-x:auto;border:1px solid #e3e8f1;border-radius:999px;background:#f0f3f7;scrollbar-width:none; }
-.riff-studio-variant { appearance:none;min-height:32px;padding:6px 12px;border:1px solid transparent;border-radius:999px;color:#52617a;background:transparent;font:600 13px/18px var(--font-sans,system-ui,sans-serif);white-space:nowrap;cursor:pointer; }
+.riff-studio-variant { appearance:none;min-height:44px;margin-block:-6px;padding:6px 12px;border:1px solid transparent;border-radius:999px;color:#52617a;background:transparent;font:600 13px/18px var(--font-sans,system-ui,sans-serif);white-space:nowrap;cursor:pointer; }
 .riff-studio-variant[aria-checked="true"] { color:#6933a1;background:#fff;box-shadow:0 1px 3px #18243a14; }
 .riff-studio-shell { display: flex; align-self: flex-start; flex-direction: column; gap: 18px; width: 900px; max-width: 100%; padding: 18px; border-radius: 18px; background:linear-gradient(in oklab 150deg,oklab(93.2% -.012 -.016/.333) 0%,oklab(98.3% -.002 -.003/.4) 100%),#f0f6fa; box-shadow:inset 0 1px 0 #ffffffaa,0 8px 18px #396e9012; }
 .riff-studio-shell--part { gap:24px;padding:20px;background:radial-gradient(circle,rgba(101,86,122,.06) .6px,transparent .85px) center/16px 16px,radial-gradient(at 10% 70%,#DCEBFA 0%,transparent 60%),radial-gradient(at 70% 65%,#E6DDF6 0%,transparent 58%),radial-gradient(at 92% 30%,#F5E2EF 0%,transparent 55%),#FCFCFE;box-shadow:0 2px 4px #18243a0a,0 12px 24px #18243a14; }
 .riff-studio-tabs { width: 100%; min-height: 44px; gap: 8px; background: #f0f3f7; }
-.riff-app .riff-studio-tab { display: flex; flex: 1 0 auto; align-items: center; justify-content: center; min-height: 36px; padding: 8px; border-color: transparent; border-radius: 999px; color: #52617a; background: transparent; font-size: 15px; font-weight: 600; line-height: 18px; white-space: normal; }
+.riff-app .riff-studio-tab { display: flex; flex: 1 0 auto; align-items: center; justify-content: center; min-height: 44px; margin-block:-4px; padding: 8px; border-color: transparent; border-radius: 999px; color: #52617a; background: transparent; font-size: 15px; font-weight: 600; line-height: 18px; white-space: normal; }
 .riff-studio-tab[aria-selected="true"] { color: #6933a1; background: #fff; box-shadow: 0 1px 3px #18243a14; }
 .riff-studio-body { display: flex; align-items: flex-start; gap: 24px; }
 .riff-studio-player { position: relative; display: flex; flex: 0 0 240px; align-items: center; justify-content: center; width: 240px; height: 427px; overflow: hidden; border: 4px solid #fff; border-radius: 16px; background: linear-gradient(155deg, #e5ebf3, #b7c4d4); box-shadow: 0 3px 6px #18243a10, 0 12px 24px #18243a20; text-decoration: none; }
@@ -254,9 +255,9 @@ html, body { margin: 0; background: transparent; }
 .riff-studio-caption { z-index: 1; display: flex; align-self: flex-start; flex-direction: column; gap: 14px; width: 900px; max-width: 100%; padding-block: 20px; border-top: 1px solid #e5e5e7; }
 .riff-studio-caption__header { display: flex; align-items: center; gap: 12px; }
 .riff-studio-caption__header h2 { color: #242426; font-size: 16px; font-weight: 600; line-height: 22px; }
-.riff-caption-copy { display: flex; flex: 0 0 32px; align-items: center; justify-content: center; width: 32px; height: 32px; min-height: 32px; padding: 0; border: 1px solid #e3e8f1; border-radius: 999px; background: #f3f6fc; box-shadow: 0 2px 4px #2035560a; cursor: pointer; }
+.riff-caption-copy { display: flex; flex: 0 0 44px; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 1px solid #e3e8f1; border-radius: 999px; background: #f3f6fc; box-shadow: 0 2px 4px #2035560a; cursor: pointer; }
 .riff-caption-platforms { display:flex;gap:2px;padding:3px;border-radius:999px;background:#f0f3f7; }
-.riff-app .riff-caption-platform { appearance:none;display:flex;align-items:center;min-height:30px;padding:5px 14px;border:1px solid transparent;border-radius:999px;color:#596273;background:transparent;font:600 13px/18px var(--font-sans,system-ui,sans-serif);white-space:normal;cursor:pointer; }
+.riff-app .riff-caption-platform { appearance:none;display:flex;align-items:center;min-height:44px;margin-block:-3px;padding:5px 14px;border:1px solid transparent;border-radius:999px;color:#596273;background:transparent;font:600 13px/18px var(--font-sans,system-ui,sans-serif);white-space:normal;cursor:pointer; }
 .riff-caption-platform[aria-pressed="true"] { color:#202020;background:#fff;box-shadow:0 1px 2px #0000000a,0 6px 16px #00000008; }
 .riff-studio-caption__copy { color: #242426; font-size: 16px; line-height: 24px; }
 .riff-studio-caption__hashtags { color: #6d6d72; font-size: 14px; line-height: 20px; }

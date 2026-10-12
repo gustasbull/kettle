@@ -18,7 +18,7 @@ test('creator telemetry emits only a frozen allowlisted event with integer monot
     clock: 'monotonic', duration_ms: 12.6, provider: 'scrapecreators', operation: 'feed',
     endpoint: 'scrapecreators_feed', http_status: 200, request_bytes: 48,
     response_bytes: 1_024, item_count: 3, cache_state: 'miss',
-    resource_version: 'riff-home-v4', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-home-v5', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
 
   assert.deepEqual(event, {
@@ -26,7 +26,7 @@ test('creator telemetry emits only a frozen allowlisted event with integer monot
     clock: 'monotonic', duration_ms: 13, provider: 'scrapecreators', operation: 'feed',
     endpoint: 'scrapecreators_feed', http_status: 200, request_bytes: 48,
     response_bytes: 1_024, item_count: 3, cache_state: 'miss',
-    resource_version: 'riff-home-v4', bundle_version: `sha256:${'a'.repeat(64)}`,
+    resource_version: 'riff-home-v5', bundle_version: `sha256:${'a'.repeat(64)}`,
   });
   assert.equal(Object.isFrozen(event), true);
   assert.equal(Object.getPrototypeOf(event), Object.prototype);
@@ -150,14 +150,14 @@ test('panel performance measurements remain browser-local and carry only the ser
     measure: (name: string, options: Record<string, unknown>) => { entries.push({ name, ...options }); return {} as PerformanceMeasure; },
   };
   const tracker = createPanelPerformance(performance, {
-    resource_version: 'riff-home-v4', bundle_version: `sha256:${'b'.repeat(64)}`,
+    resource_version: 'riff-home-v5', bundle_version: `sha256:${'b'.repeat(64)}`,
   });
   const finish = tracker.start('panel_render');
   now = 17.4;
   finish('ok');
   assert.deepEqual(entries, [{
     name: 'riff:panel_render', start: 5, end: 17.4,
-    detail: { stage: 'panel_render', status: 'ok', resource_version: 'riff-home-v4', bundle_version: `sha256:${'b'.repeat(64)}` },
+    detail: { stage: 'panel_render', status: 'ok', resource_version: 'riff-home-v5', bundle_version: `sha256:${'b'.repeat(64)}` },
   }]);
   assert.doesNotMatch(JSON.stringify(entries), /source_url|caption|token|email|account_id/i);
 });

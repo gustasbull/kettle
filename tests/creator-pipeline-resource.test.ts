@@ -4,7 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { creatorPipelineHtml, registerCreatorPipelineResource, CREATOR_PIPELINE_URI,
-  CREATOR_PIPELINE_V3_URI, CREATOR_PIPELINE_V2_URI,
+  CREATOR_PIPELINE_V4_URI, CREATOR_PIPELINE_V3_URI, CREATOR_PIPELINE_V2_URI,
   CREATOR_PIPELINE_MIME, CREATOR_PIPELINE_META, CREATOR_PIPELINE_DOCUMENT } from '../apps/worker/creator-pipeline-resource.ts';
 import { creatorPipelineFingerprint } from '../apps/panel/generated/creator-pipeline-bundle.ts';
 import { panelManifest } from '../apps/panel/generated/panel-manifest.ts';
@@ -22,12 +22,13 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
   await server.connect(a); await client.connect(b);
   t.after(async()=>{ await client.close(); await server.close(); });
   const list = await client.listResources();
-  assert.equal(list.resources.length,3);
+  assert.equal(list.resources.length,4);
   assert.equal(list.resources[0]!.uri,CREATOR_PIPELINE_URI);
   assert.equal(list.resources[0]!.title,'Riff creator workflow');
   assert.equal(list.resources[0]!.mimeType,CREATOR_PIPELINE_MIME);
-  assert.equal(list.resources[1]!.uri,CREATOR_PIPELINE_V3_URI);
-  assert.equal(list.resources[2]!.uri,CREATOR_PIPELINE_V2_URI);
+  assert.equal(list.resources[1]!.uri,CREATOR_PIPELINE_V4_URI);
+  assert.equal(list.resources[2]!.uri,CREATOR_PIPELINE_V3_URI);
+  assert.equal(list.resources[3]!.uri,CREATOR_PIPELINE_V2_URI);
   assert.deepEqual(list.resources[0]!._meta,CREATOR_PIPELINE_META);
   const result = await client.readResource({uri:CREATOR_PIPELINE_URI});
   assert.equal(result.contents.length,1);
@@ -45,11 +46,11 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
   });
   assert.ok('text' in content);
   assert.equal(content.text, CREATOR_PIPELINE_DOCUMENT);
-  assert.equal(CREATOR_PIPELINE_URI,'ui://kettle/creator-pipeline-v4.html');
-  assert.equal(creatorPipelineFingerprint.resource_version,'creator-pipeline-v4');
+  assert.equal(CREATOR_PIPELINE_URI,'ui://kettle/creator-pipeline-v5.html');
+  assert.equal(creatorPipelineFingerprint.resource_version,'creator-pipeline-v5');
   assert.deepEqual(panelManifest.panels.find(panel=>panel.panel==='creator-pipeline'),creatorPipelineFingerprint);
-  assert.match(content.text as string,new RegExp(`content="${creatorPipelineFingerprint.bundle_version}" data-resource-version="creator-pipeline-v4"`));
-  for(const alias of [CREATOR_PIPELINE_V3_URI,CREATOR_PIPELINE_V2_URI]){
+  assert.match(content.text as string,new RegExp(`content="${creatorPipelineFingerprint.bundle_version}" data-resource-version="creator-pipeline-v5"`));
+  for(const alias of [CREATOR_PIPELINE_V4_URI,CREATOR_PIPELINE_V3_URI,CREATOR_PIPELINE_V2_URI]){
     const compatible=(await client.readResource({uri:alias})).contents[0]!;
     assert.ok('text' in compatible);
     assert.equal(compatible.text,content.text);
@@ -66,7 +67,7 @@ test('Creator pipeline resource is a static bundled MCP App with narrowly scoped
 });
 
 test('resource escapes closing script tags and legacy HTML comment openers',()=>{
-  const html=creatorPipelineHtml('const untrusted = "</ScRiPt><!--";',{resource_version:'creator-pipeline-v4',bundle_version:`sha256:${'a'.repeat(64)}`});
+  const html=creatorPipelineHtml('const untrusted = "</ScRiPt><!--";',{resource_version:'creator-pipeline-v5',bundle_version:`sha256:${'a'.repeat(64)}`});
   assert.equal((html.match(/<\/script>/gi)||[]).length,1);
   assert.ok(!html.includes('<!--'));
   assert.ok(html.includes('<\\/script>'));

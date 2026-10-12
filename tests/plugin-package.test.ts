@@ -55,18 +55,15 @@ test('Riff setup skill is narrowly triggered and keeps onboarding/account/provid
   assert.match(skill, /^---\nname: setup\ndescription: .+\n---/);
   assert.match(skill, /installation|setup|connection|first use/i);
   const home = skill.indexOf('Call `open_riff`');
-  const welcome = skill.indexOf('call `show_riff_welcome`');
-  const mark = skill.indexOf('call `mark_riff_onboarding_seen`');
-  assert.ok(home > 0 && welcome > home && mark > welcome,
-    'Home must trigger OAuth before the first-use chat welcome is rendered and recorded');
+  assert.ok(home > 0, 'Home must trigger OAuth and open the app-owned first-use router');
+  assert.match(skill, /Stop there.*app owns first-use routing/is);
+  assert.match(skill, /Never call `mark_riff_onboarding_seen` from the model/i);
+  assert.match(skill, /show_riff_welcome.*only when.*explicitly asks to replay/is);
   assert.match(skill, /onboarding_seen_at.*null/i);
-  assert.match(skill, /same|originating/i);
   assert.match(skill, /Start → Find → Make/);
   assert.match(skill, /explicit user request|explicit user action/i);
   assert.match(skill, /conversation|conversational/i);
-  assert.match(skill, /complete only when.*mark_riff_onboarding_seen.*success/i);
-  assert.match(skill, /welcome.*(?:fails|failure).*malformed.*(?:times out|timeout).*never call `mark_riff_onboarding_seen`/is,
-    'failure, malformed output, and timeout are all non-success and must leave onboarding unmarked');
+  assert.match(skill, /complete only when.*app confirms.*explicit completion write/is);
   assert.match(skill, /attach.*ChatGPT/i);
   assert.match(skill, /never.*(?:uploaded|upload receipt)/i);
   assert.match(skill, /recent work only from `list_riff_work`/i);

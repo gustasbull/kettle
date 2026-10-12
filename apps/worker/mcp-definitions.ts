@@ -107,7 +107,10 @@ export const PRODUCT_TOOLS = Object.freeze([
 ].map(tool => {
   const contract = toolContracts[tool.operation];
   const annotations = { readOnlyHint: contract.readOnly, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-  const meta = { securitySchemes: OAUTH_SECURITY, ...(tool.ui ? { ui: tool.ui } : {}) };
+  const meta = { securitySchemes: OAUTH_SECURITY,
+    ...(tool.name==='mark_riff_onboarding_seen'
+      ? {ui:{visibility:['app'] as const}}
+      : tool.ui ? { ui: tool.ui } : {}) };
   return freezeTool({ ...tool, contract, securitySchemes: OAUTH_SECURITY, annotations, _meta: meta,
     registration: { title: tool.title, description: tool.description, inputSchema: contract.input,
       outputSchema: contract.output.options[0], annotations, _meta: meta },
@@ -234,7 +237,7 @@ export const PROFILE_REGISTRATION = deepFreezePlain({
 });
 export const HOME_REGISTRATION = deepFreezePlain({
   title: 'Riff Home',
-  description: 'Open Riff Home for creator input, idea discovery, and continuing into video creation. Reads account state only.',
+  description: 'Open Riff. The app routes first-use accounts through the Paper welcome before Home; returning accounts open Home directly. This tool reads account state only.',
   inputSchema: ACCOUNT_CONTRACT.input, outputSchema: ACCOUNT_CONTRACT.output.options[0],
   annotations: READ_ONLY, _meta: HOME_META,
 });

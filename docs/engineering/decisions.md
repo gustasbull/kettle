@@ -27,26 +27,29 @@ part of the visual target.
   job/work-state activity, with source provenance kept on the selected job. A filmed
   Studio state exposes a receipt-backed `Undo filmed` correction to `active` and never
   replaces persisted truth after only a conversational handoff.
-- The canonical immutable resources are `ui://riff/home-v4.html`
-  (`riff-home-v4`, SHA-256 `ea782861dad5196b48380f47b83d7c384a64fbade08c0fe9555fd90d854fb454`,
-  242423 raw / 66574 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
-  (`creator-pipeline-v4`, SHA-256 `7e4af97edd472e49958e44fbb3ac25a6f832e07a925531144fb64df6ee8e2187`,
-  175538 raw / 47646 gzip bytes). Home keeps v1–v3 compatibility URIs and the
-  pipeline keeps v2–v3 compatibility URIs; all aliases serve the same current static
-  document so existing turns do not lose their resource.
+- The canonical immutable resources are `ui://riff/home-v5.html`
+  (`riff-home-v5`, SHA-256 `502c67c7528e242d885472fee5c9b8dc4a54ee1421a729c648dbbc76c9fa43fc`,
+  262701 raw / 71385 gzip bytes), `ui://riff/onboarding-v4.html`
+  (`riff-onboarding-v4`, SHA-256 `3e25c39b3e55481d337a93d107595bd251c4ba5f9db5a95322f6aa3a1e194585`,
+  27988 raw / 8333 gzip bytes), and `ui://kettle/creator-pipeline-v5.html`
+  (`creator-pipeline-v5`, SHA-256 `805a66311bcb4cb1183659cd0c76179273ca9b41d6ad1cb2ba2f8135df13c2f8`,
+  176643 raw / 47928 gzip bytes). Home keeps v1–v4 compatibility URIs,
+  onboarding keeps v3, and the pipeline keeps v2–v4; all aliases serve the same
+  current static document so existing turns do not lose their resource.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
   against real `color-scheme`, `data-theme`, and host variables, including nested
   analysis bands and Studio on-screen text. Discovery and Studio now have explicit
   roving-key, activation, geometry, safe-link, retry-focus, and scope-reset evidence;
   every major route checks reachable controls at 320, 375, 768, and 1440 CSS pixels.
-- The packaged first-use contract is `open_riff` → `show_riff_welcome` →
-  `mark_riff_onboarding_seen`. Home is usable while the conversational welcome is
-  pending, and welcome failure, malformed output, or timeout must stop before the
-  mark. This is package/host orchestration; the raw MCP server does not secretly run
-  those later calls.
+- The first-use contract is one protected `open_riff` call. The Home app routes a
+  null `onboarding_seen_at` marker to the embedded Paper carousel and keeps Home and
+  recents hidden until the user completes the final visible step. Only the app can
+  advertise `mark_riff_onboarding_seen`; malformed output, rejection, timeout, an
+  account switch, or a stale action leaves onboarding unmarked and safely retryable.
+  `show_riff_welcome` is an explicit replay surface and never changes account state.
 - Instagram remains presentation/fixture-only until a permitted live provider path is
-  verified. A raw custom MCP URL can receive truthful first-open prose but cannot
-  distribute the package-controlled onboarding skill and carousel ordering.
+  verified. Raw MCP clients receive the same app-owned first-use router through
+  `open_riff`; the packaged setup skill is guidance, not a required multi-tool sequence.
 - Verified scope is local static resources, parsed fixtures, bridge behavior, ordered
   local migrations through PGlite, and generated-bundle determinism. This acceptance
   authorizes no provider call, spend, deployment, publication, external outreach,

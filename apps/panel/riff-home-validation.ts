@@ -26,8 +26,9 @@ const text = (value: unknown, max: number, allowEmpty = false): value is string 
   typeof value === 'string' && value.length <= max && (allowEmpty || value.trim().length > 0);
 const id = (value: unknown): value is string => typeof value === 'string'
   && /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i.test(value);
-const timestamp = (value: unknown): value is string => typeof value === 'string'
+export const isRiffTimestamp = (value: unknown): value is string => typeof value === 'string'
   && /^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8])))T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value);
+const timestamp = isRiffTimestamp;
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const positiveNumber = (value: unknown): value is number => number(value) && value > 0;
@@ -77,7 +78,7 @@ function recentWorkState(value: unknown) {
   const state = shape(value, ['job_id', 'variant_id', 'state', 'version', 'updated_at']);
   return !!state && id(state.job_id) && id(state.variant_id) && enumValue(state.state, ['active', 'saved', 'filmed'])
     && Number.isSafeInteger(state.version) && Number(state.version) > 0 && Number(state.version) <= 2_147_483_647
-    && timestamp(state.updated_at);
+    && isRiffTimestamp(state.updated_at);
 }
 
 function recentWork(value: unknown): value is RiffWorkSummary {
@@ -88,7 +89,7 @@ function recentWork(value: unknown): value is RiffWorkSummary {
     || work.project_name.length < 1 || work.project_name.length > 120 || work.project_name.trim() !== work.project_name
     || !id(work.job_id) || !enumValue(work.kind, ['scan', 'recommendations', 'scripts'])
     || !enumValue(work.state, ['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'])
-    || !timestamp(work.updated_at) || !recentSource(work.source)
+    || !isRiffTimestamp(work.updated_at) || !recentSource(work.source)
     || !nullable(work.variant_id, id) || !(work.work_state === null || recentWorkState(work.work_state))) return false;
   if ((work.variant_id === null) !== (work.work_state === null)) return false;
   if (work.work_state !== null) {
@@ -110,6 +111,17 @@ export function parseListRiffWorkResult(raw: unknown): RiffWorkSummary[] | undef
     if (!envelope || !result || result.ok !== true || !isBusinessResultFlagCoherent(envelope, true)
       || !data || !Array.isArray(data.work) || data.work.length > 20 || !data.work.every(recentWork)) return;
     return data.work as RiffWorkSummary[];
+  } catch { return; }
+}
+
+/** Strict receipt boundary for the app-only onboarding completion write. */
+export function parseOnboardingSeenResult(raw: unknown): string | undefined {
+  try {
+    const envelope=parseStrictCallToolResult(raw);
+    const result=strictObjectShape(envelope?.structuredContent,['ok','data']);
+    const data=strictObjectShape(result?.data,['onboarding_seen_at']);
+    return envelope&&result?.ok===true&&isBusinessResultFlagCoherent(envelope,true)&&data
+      &&isRiffTimestamp(data.onboarding_seen_at)?data.onboarding_seen_at:undefined;
   } catch { return; }
 }
 

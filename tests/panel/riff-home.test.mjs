@@ -259,6 +259,11 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
       start:async()=>({status:'sent',message:'Started.'}),
       send:async prompt=>{window.events.push({kind:'message',prompt});return {status:'sent',message:'Sent.'}},
       showWelcome:async()=>{window.events.push({kind:'welcome'});return {status:'sent',message:'Requested in chat.'}},
+      completeOnboarding:async()=>{
+        window.events.push({kind:'complete-onboarding'});
+        window.renderAccount('2026-10-11T12:00:00Z');
+        return {status:'sent',message:'Welcome completed.'};
+      },
       openRecent:async jobId=>{window.events.push({kind:'recent',jobId});return {status:'sent',message:'Opened.'}},
       refreshRecents:async()=>{window.events.push({kind:'refresh-recents'});return {status:'sent',message:'Recent work refreshed.'}},
     });
@@ -272,9 +277,13 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1000, height: 812 } });
+  page.setDefaultTimeout(4_000);
   await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
 
   assert.equal(await page.getByText('Loading recent work…').count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'View recent work' }).isHidden(), true,
+    'Home controls stay private until the account result is validated');
+  await page.evaluate(() => window.renderAccount('2026-10-11T12:00:00Z'));
   await page.evaluate(() => window.view.setRecentsState({status:'error',message:'Recent work is temporarily unavailable.'}));
   assert.equal(await page.getByText('Recent work is temporarily unavailable.').count(), 1);
   await page.getByRole('button', { name: 'View recent work' }).click();
@@ -288,7 +297,16 @@ test('Riff Home renders Paper-shaped owned recents and account recovery without 
     ]);
   });
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 0,
-    'an explicit null marker is first use, so Home does not compete with the chat welcome by showing recents');
+    'an explicit null marker is first use, so Home does not show recents before welcome completion');
+  assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).isVisible(), true,
+    'the raw Home resource guarantees the Paper welcome for a first-use account');
+  assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isHidden(), true);
+  await page.getByRole('button', { name: 'Next step' }).click();
+  await page.getByRole('button', { name: 'Next step' }).click();
+  await page.getByRole('button', { name: 'Finish welcome' }).click();
+  assert.equal(await page.evaluate(() => window.events.filter(event=>event.kind==='complete-onboarding').length), 1);
+  assert.equal(await page.getByRole('region', { name: 'Welcome to Riff' }).count(), 0);
+  assert.equal(await page.getByPlaceholder('Share a video or profile link, or tell me what you want to make…').isVisible(), true);
 
   await page.evaluate(() => window.renderError());
   assert.equal(await page.getByRole('button', { name: /Open @alex.focus/ }).count(), 1,

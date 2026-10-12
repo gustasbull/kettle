@@ -17,9 +17,9 @@ export const PANEL_BUDGETS = Object.freeze({
 const panels = {
   project: { name: 'project-review', symbol: 'projectReviewScript', fingerprintSymbol: 'projectReviewFingerprint', entry: 'apps/panel/bridge.ts', component: 'apps/panel/project-review.ts' },
   creator: { name: 'creator-review', symbol: 'creatorReviewScript', fingerprintSymbol: 'creatorReviewFingerprint', entry: 'apps/panel/creator-review-bridge.ts', component: 'apps/panel/creator-review.ts' },
-  pipeline: { name: 'creator-pipeline', symbol: 'creatorPipelineScript', fingerprintSymbol: 'creatorPipelineFingerprint', resourceVersion: 'creator-pipeline-v4', entry: 'apps/panel/creator-pipeline-bridge.ts', component: 'apps/panel/creator-pipeline/index.ts' },
-  'riff-onboarding': { name: 'riff-onboarding', symbol: 'riffOnboardingScript', fingerprintSymbol: 'riffOnboardingFingerprint', resourceVersion: 'riff-onboarding-v3', entry: 'apps/panel/riff-onboarding-bridge.ts', component: 'apps/panel/riff-onboarding/index.ts' },
-  'riff-home': { name: 'riff-home', symbol: 'riffHomeScript', fingerprintSymbol: 'riffHomeFingerprint', resourceVersion: 'riff-home-v4', entry: 'apps/panel/riff-home-bridge.ts', component: 'apps/panel/riff-home/index.ts' },
+  pipeline: { name: 'creator-pipeline', symbol: 'creatorPipelineScript', fingerprintSymbol: 'creatorPipelineFingerprint', resourceVersion: 'creator-pipeline-v5', entry: 'apps/panel/creator-pipeline-bridge.ts', component: 'apps/panel/creator-pipeline/index.ts' },
+  'riff-onboarding': { name: 'riff-onboarding', symbol: 'riffOnboardingScript', fingerprintSymbol: 'riffOnboardingFingerprint', resourceVersion: 'riff-onboarding-v4', entry: 'apps/panel/riff-onboarding-bridge.ts', component: 'apps/panel/riff-onboarding/index.ts' },
+  'riff-home': { name: 'riff-home', symbol: 'riffHomeScript', fingerprintSymbol: 'riffHomeFingerprint', resourceVersion: 'riff-home-v5', entry: 'apps/panel/riff-home-bridge.ts', component: 'apps/panel/riff-home/index.ts' },
 };
 
 /** No fixture or fallback component is emitted by this build. */

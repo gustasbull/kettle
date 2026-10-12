@@ -164,6 +164,17 @@ const assertActiveControlsWithinViewport = async page => {
   assert.deepEqual(clipped, []);
 };
 
+const assertMinimumTargetSizes = async page => {
+  const undersized = await page.locator('button:visible,a[href]:visible').evaluateAll(nodes => nodes.flatMap(node => {
+    if (node.closest('[aria-hidden="true"]')) return [];
+    const box = node.getBoundingClientRect();
+    return box.width + .01 < 44 || box.height + .01 < 44
+      ? [{ label: node.getAttribute('aria-label') || node.textContent?.trim(), width: box.width, height: box.height, className: node.className }]
+      : [];
+  }));
+  assert.deepEqual(undersized, []);
+};
+
 const assertSafeImages = async page => {
   const imageSources = await page.evaluate(() => window.imageSources ?? []);
   for (const source of imageSources) {
@@ -655,7 +666,7 @@ test('Studio four-part semantics, variants, lineage, local format, and receipt-b
   const shell=page.locator('.riff-studio-shell');
   assert.equal(await shell.evaluate(node=>Math.round(node.getBoundingClientRect().width)),900);
   assert.equal(await page.locator('.riff-studio-player').evaluate(node=>{const b=node.getBoundingClientRect();return `${Math.round(b.width)}x${Math.round(b.height)}`;}),'240x427');
-  assert.equal(await page.locator('.riff-studio-tab').evaluateAll(nodes=>nodes.map(node=>Math.round(node.getBoundingClientRect().height)).every(height=>height===36)),true);
+  assert.equal(await page.locator('.riff-studio-tab').evaluateAll(nodes=>nodes.map(node=>Math.round(node.getBoundingClientRect().height)).every(height=>height===44)),true);
   assert.equal(await page.locator('.riff-script-part').count(),4,'full view keeps two hook beats plus main and CTA');
   assert.ok(await page.locator('.riff-studio-reference').count() >= 2);
 
@@ -1022,6 +1033,7 @@ test('key CURRENT routes retain semantics, boundaries, focus, and unclipped cont
       document.head.append(style);
     });
     const routes = [
+      ['onboarding', async()=>page.evaluate(()=>window.bootOnboarding())],
       ['home', async()=>page.evaluate(()=>window.bootHome('returning','recents'))],
       ['menu', async()=>{await page.evaluate(()=>window.bootMenu('instagram'));await page.getByRole('button',{name:'Open Riff menu'}).click();}],
       ['loading', async()=>page.evaluate(()=>window.bootPipeline('fetch'))],
@@ -1038,6 +1050,7 @@ test('key CURRENT routes retain semantics, boundaries, focus, and unclipped cont
       assert.equal(fit.scroll<=fit.client,true,`${mode}/${route} overflows: ${JSON.stringify(fit)}`);
       await assertNamedNativeControls(page);
       await assertActiveControlsWithinViewport(page);
+      await assertMinimumTargetSizes(page);
       assert.ok(await page.locator('h1,[role="dialog"]').count(), `${mode}/${route} keeps a semantic route landmark`);
       const dialog=page.locator('[role="dialog"]:visible');const scope=await dialog.count()?dialog:page;
       const first = scope.locator('button:not([disabled]):visible,a[href]:visible,input:visible,textarea:visible').first();
@@ -1163,7 +1176,7 @@ test('dark host variables drive every pipeline, Product, Discovery, Studio, and 
   assert.equal(await page.evaluate(() => window.external.length), 0);
 });
 
-test('the generated Home v4 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
+test('the generated Home v5 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {
   const { RIFF_HOME_DOCUMENT } = await import('../../apps/worker/riff-home-resource.ts');
   const scan = structuredClone(riffCoreWorkflowFixtures.scans.videoFull.value);
   scan.revision = 2;
@@ -1287,7 +1300,7 @@ test('the generated Home v4 resource and real bridge keep one root through Home,
     ['save_project','start_riff_creator','start_creator_recommendations','set_riff_work_state']);
   assert.equal(await page.evaluate(()=>window.calls.some(call=>Object.hasOwn(call.arguments??{},'account_id'))),false);
   assert.equal(await page.evaluate(()=>window.calls.find(call=>call.name==='list_riff_videos').arguments.role),'discovered_reference');
-  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v4$/);
+  assert.match(await frame.locator('meta[name="riff-bundle-version"]').getAttribute('data-resource-version'),/^riff-home-v5$/);
   assert.equal(await frame.evaluate(()=>window.__task8ImageSources.some(source=>/^javascript:|^https?:\/\/(?![^/]*(?:tiktokcdn\.com|tiktokcdn-us\.com))/i.test(source))),false);
   assert.deepEqual(network.filter(url=>!url.startsWith(base)&&url!=='about:blank'),[]);
   assert.doesNotMatch(await frame.locator('body').textContent(),/Bearer |service[_ -]?role|postgres(?:ql)?:\/\//i);

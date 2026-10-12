@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCreatorJobView,parseCreatorJobView,parseListRiffWorkResult } from '../../apps/panel/riff-home-validation.ts';
+import { isCreatorJobView,parseCreatorJobView,parseListRiffWorkResult,parseOnboardingSeenResult } from '../../apps/panel/riff-home-validation.ts';
 import { pipelineFixture } from '../../apps/panel/creator-pipeline/fixtures.ts';
 import { CreatorJobView } from '../../packages/contracts/creator-pipeline.ts';
 
@@ -26,6 +26,20 @@ function recentWorkResult() {
     variant_id: workState.variant_id, work_state: workState,
   }] } }, content: [] };
 }
+
+test('Home accepts only an exact coherent onboarding completion receipt',()=>{
+  const exact=()=>({structuredContent:{ok:true,data:{onboarding_seen_at:'2026-10-11T12:00:00Z'}},content:[]});
+  assert.equal(parseOnboardingSeenResult(exact()),'2026-10-11T12:00:00Z');
+  const cases:Array<[string,(value:any)=>void]>=[
+    ['incoherent isError',value=>{value.isError=true;}],
+    ['extra result key',value=>{value.structuredContent.debug=true;}],
+    ['extra receipt key',value=>{value.structuredContent.data.account_id='private';}],
+    ['missing timestamp',value=>{delete value.structuredContent.data.onboarding_seen_at;}],
+    ['calendar-invalid timestamp',value=>{value.structuredContent.data.onboarding_seen_at='2026-02-30T12:00:00Z';}],
+    ['permissive Date.parse value',value=>{value.structuredContent.data.onboarding_seen_at='0';}],
+  ];
+  for(const [name,mutate] of cases){const value=exact();mutate(value);assert.equal(parseOnboardingSeenResult(value),undefined,name);}
+});
 
 test('Home parses the exact public recent-work result as one all-or-nothing value', () => {
   const raw = recentWorkResult();

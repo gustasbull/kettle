@@ -10,6 +10,7 @@ import type { Project } from '../../../packages/contracts/index.ts';
 import type { RiffWorkState } from '../../../packages/contracts/riff-work-state.ts';
 import { cloneStrictJsonObject, strictObjectShape } from '../call-tool-result-validation.ts';
 import { mountRiffMenu } from '../riff-shell/menu.ts';
+import { mountRiffOnboarding } from '../riff-onboarding/index.ts';
 import { riffLockup, riffSymbol } from '../riff-ui/brand.ts';
 import type { RiffActionResult, RiffPanelAction } from '../riff-ui/dom.ts';
 import { riffBaseStyles } from '../riff-ui/styles.ts';
@@ -50,6 +51,7 @@ export type RiffHomeActions = {
   send: RiffPanelAction;
   upload?: () => Promise<RiffActionResult>;
   showWelcome?: () => Promise<RiffActionResult>;
+  completeOnboarding?: () => Promise<RiffActionResult & { status: 'sent' | 'failed' }>;
   accountSettings?: () => Promise<RiffActionResult>;
   support?: () => Promise<RiffActionResult>;
   feedback?: () => Promise<RiffActionResult>;
@@ -114,6 +116,8 @@ ${riffBaseStyles}
 html, body { margin: 0; min-height: 100%; background: #FCFCFE; }
 body { min-height: 100vh; }
 .riff-home { min-height: 100vh; padding: 12px; background: radial-gradient(circle, rgba(101,86,122,.06) .6px, transparent .85px) center/16px 16px, radial-gradient(at 10% 70%, #DCEBFA 0%, transparent 60%), radial-gradient(at 70% 65%, #E6DDF6 0%, transparent 58%), radial-gradient(at 92% 30%, #F5E2EF 0%, transparent 55%), #FCFCFE; color: #242426; }
+.riff-home__onboarding { display:flex; min-height:calc(100vh - 24px); align-items:center; justify-content:center; }
+.riff-home__onboarding[hidden] { display:none; }
 .riff-home__account { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .riff-home__chrome { display:flex; width:100%; flex:0 0 auto; align-items:center; justify-content:space-between; padding:calc(16px + var(--riff-safe-top,0px)) 24px 8px; border-radius:24px 24px 0 0; }
 .riff-home__chrome-trail { display:flex; width:fit-content; height:44px; flex:0 0 auto; align-items:center; gap:14px; white-space:nowrap; }
@@ -132,15 +136,15 @@ body { min-height: 100vh; }
 .riff-home__label { display: none; }
 .riff-home__chips { display: flex; width: 100%; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .riff-home__chip, .riff-home__upload, .riff-home__submit, .riff-home__recent-next, .riff-home__recent-card { appearance: none; border: 0; cursor: pointer; }
-.riff-home__chip { display: flex; min-height: 32px; max-width: 100%; flex: 0 1 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #6933A1; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; white-space: normal; }
+.riff-home__chip { display: flex; min-height: 44px; max-width: 100%; flex: 0 1 auto; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border: 1px solid #DDE5F1; border-radius: 999px; color: #6933A1; background: #FFFFFFA6; font-size: 12px; font-weight: 400; line-height: 18px; white-space: normal; }
 .riff-home__chip svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .riff-home__input-shell { display: flex; width: 100%; flex-direction: column; gap: 22px; padding: 18px; border: 1px solid #DDE5F4; border-radius: 14px; background: #FFFFFF; }
 .riff-home__composer textarea { display: block; width: 100%; height: 1.5em; min-height: 1.5em; resize: none; overflow: auto; padding: 0; border: 0; outline: 0; color: #242426; background: transparent; font-size: 15px; line-height: 22px; }
 .riff-home__composer textarea::placeholder { color: #687386; opacity: 1; }
 .riff-home__composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.riff-home__upload { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0; color: #566279; background: transparent; font-size: 13px; font-weight: 400; line-height: 20px; }
+.riff-home__upload { display: flex; min-width: 0; min-height: 44px; align-items: center; gap: 7px; padding: 0; color: #566279; background: transparent; font-size: 13px; font-weight: 400; line-height: 20px; }
 .riff-home__upload svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.riff-home__submit { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 10px 22px; border-radius: 999px; color: #FFFFFF; background: radial-gradient(circle farthest-corner at 50% 45% in oklab, oklab(46.1% .087 -.206) 0%, oklab(50.7% .09 -.203) 55%, oklab(61.7% .089 -.17) 100%), #7138D4; box-shadow: inset 0 1px 2px #FFFFFF55, 0 4px 8px #54259B33, 0 10px 20px #7444CD33; font-size: 14px; font-weight: 600; line-height: 20px; white-space: normal; }
+.riff-home__submit { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 10px 22px; border-radius: 999px; color: #FFFFFF; background: radial-gradient(circle farthest-corner at 50% 45% in oklab, oklab(46.1% .087 -.206) 0%, oklab(50.7% .09 -.203) 55%, oklab(61.7% .089 -.17) 100%), #7138D4; box-shadow: inset 0 1px 2px #FFFFFF55, 0 4px 8px #54259B33, 0 10px 20px #7444CD33; font-size: 14px; font-weight: 600; line-height: 20px; white-space: normal; }
 .riff-home__composer textarea:focus-visible { outline: 3px solid var(--color-ring-primary, #3865F8); outline-offset: 3px; border-radius: 2px; }
 .riff-home__chip:disabled, .riff-home__upload:disabled, .riff-home__submit:disabled, .riff-home__recent-next:disabled, .riff-home__recent-card:disabled { cursor: wait; opacity: .62; }
 .riff-home__status { width: 760px; max-width: 100%; color: #596273; font-size: 13px; line-height: 19px; text-align: left; }
@@ -153,7 +157,7 @@ body { min-height: 100vh; }
 .riff-home__section { display: flex; width: 760px; max-width: 100%; flex-direction: column; gap: 12px; padding-top: 8px; }
 .riff-home__section-head { display: flex; align-items: center; justify-content: space-between; }
 .riff-home__section h2 { color: #202124; font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: 0; }
-.riff-home__recent-next { display: flex; width: 32px; height: 32px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; color: #35578B; background: #F0F3F7; box-shadow: 0 2px 4px #2035560A; }
+.riff-home__recent-next { display: flex; width: 44px; height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; padding: 0; border: 1px solid #E3E8F1; border-radius: 999px; color: #35578B; background: #F0F3F7; box-shadow: 0 2px 4px #2035560A; }
 .riff-home__recent-next svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .riff-home__recents { display: flex; width: 100%; gap: 14px; overflow-x: auto; padding: 2px 0 12px 2px; scrollbar-width: none; scroll-snap-type: x proximity; }
 .riff-home__recents::-webkit-scrollbar { display: none; }
@@ -314,6 +318,7 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   };
   const style = node('style'); style.textContent = homeStyles;
   const app = node('main', undefined, 'riff-app riff-home riff-menu-scope');
+  const onboardingHost=node('section',undefined,'riff-home__onboarding');onboardingHost.hidden=true;
   const chrome=node('header',undefined,'riff-home__chrome');const trail=node('div',undefined,'riff-home__chrome-trail');
   const menuHost=node('span');
   const brand=node('span',undefined,'riff-home__brand');const symbol=riffSymbol(doc);symbol.setAttribute('aria-hidden','true');symbol.removeAttribute('aria-label');symbol.removeAttribute('role');brand.append(symbol,node('span','Riff'));
@@ -369,11 +374,14 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
 
   const workflow = node('section', undefined, 'riff-home__workflow'); workflow.hidden = true;
   const workflowRoot = node('div'); workflow.append(workflowRoot);
-  app.append(chrome,account, home, workflow); root.replaceChildren(style, app);
+  chrome.hidden=true;home.hidden=true;
+  app.append(onboardingHost,chrome,account, home, workflow); root.replaceChildren(style, app);
 
   let disposed = false;
   let pipeline: ReturnType<typeof mountCreatorPipeline> | undefined;
   let product: ReturnType<typeof mountRiffProductContext> | undefined;
+  let onboarding:ReturnType<typeof mountRiffOnboarding>|undefined;
+  let firstUse=false;
   let pendingIntent = '';
   let menu!: ReturnType<typeof mountRiffMenu>;
   let recentsState: RiffRecentsState = { status: 'loading' };
@@ -390,9 +398,22 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     }
     finally { if (control) control.disabled = false; }
   };
+  const hideOnboarding=()=>{
+    onboarding?.dispose();onboarding=undefined;onboardingHost.replaceChildren();onboardingHost.hidden=true;
+  };
+  const showFirstUseOnboarding=()=>{
+    chrome.hidden=true;home.hidden=true;workflow.hidden=true;onboardingHost.hidden=false;
+    onboarding??=mountRiffOnboarding(onboardingHost,{
+      onComplete:actions.completeOnboarding??(async()=>({
+        status:'failed',message:'Riff cannot finish the welcome in this host. Reopen it from ChatGPT.',
+      })),
+    });
+  };
   const showHome = () => {
     if (disposed) return;
+    if(firstUse){showFirstUseOnboarding();return;}
     invocationEpoch++;
+    hideOnboarding();chrome.hidden=false;
     pipeline?.leaveCatalog();
     if (product) { product.dispose(); product = undefined; workflowRoot.replaceChildren(); }
     location.textContent='Home';home.hidden = false; workflow.hidden = true;
@@ -541,17 +562,25 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
   return {
     render(state) {
       if (disposed) return;
-      if (state.status === 'loading') { account.textContent = 'Connecting…'; return; }
+      if (state.status === 'loading') {
+        account.textContent = 'Connecting…';firstUse=false;hideOnboarding();chrome.hidden=true;home.hidden=true;workflow.hidden=true;return;
+      }
       if (state.status === 'error') {
+        firstUse=false;hideOnboarding();chrome.hidden=false;home.hidden=false;workflow.hidden=true;
         account.textContent = 'Account unavailable';
         status.textContent = state.message;
         recentSection.hidden = false;
         return;
       }
+      const wasFirstUse=firstUse;
+      firstUse=state.account.onboarding_seen_at===null;
       account.textContent = `Ready, ${state.account.name}`;
-      recentSection.hidden = state.account.onboarding_seen_at === null;
+      recentSection.hidden = firstUse;
       menu.render({ account: state.account });
       if (/Reconnect|incomplete|could not/i.test(status.textContent)) status.textContent = '';
+      if(firstUse){showFirstUseOnboarding();return;}
+      hideOnboarding();chrome.hidden=false;
+      if(wasFirstUse||(home.hidden&&workflow.hidden))showHome();
     },
     setRecents(items) { if (!disposed) renderRecentsState({ status: 'ready', items }); },
     setRecentsState(state) { if (!disposed) renderRecentsState(state); },
@@ -569,10 +598,10 @@ export function mountRiffHome(root: HTMLElement, actions: RiffHomeActions): {
     setCatalogState(state){pipeline?.setCatalogState(state);},
     showCatalog,
     setWorkflowNotice(message){pipeline?.setNotice(message);},
-    clearPrivate(){if(disposed)return;input.value='';pendingIntent='';intent.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
+    clearPrivate(){if(disposed)return;firstUse=false;hideOnboarding();input.value='';pendingIntent='';intent.hidden=true;menu.render({account:undefined,recents:[],activeRoute:'home'});pipeline?.dispose();pipeline=undefined;product?.dispose();product=undefined;workflowRoot.replaceChildren();showHome();},
     showHome,
     dispose() {
-      if (disposed) return; disposed = true; menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();
+      if (disposed) return; disposed = true; onboarding?.dispose();onboarding=undefined;menu.dispose(); pipeline?.dispose(); product?.dispose(); pipeline = undefined; product=undefined; root.replaceChildren();
     },
   };
 }

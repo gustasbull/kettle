@@ -24,7 +24,7 @@
 - No provider fetch, generation, billing, retry, or credit spend is added by this plan. Existing provider work stays behind its current authenticated durable workflow. Instagram remains a presentation-ready contract plus an honest unsupported production path until a verified provider is integrated.
 - Hooks, Product showcases, and CTAs may reuse validated reference videos as part-specific inspiration. Their filter is a user-selected creative lens, not a claimed server classification. Never label a video as category-ranked without stored evidence.
 - Direct file upload remains a native ChatGPT handoff until the public tool contract accepts OpenAI file parameters and retention/authorization is approved.
-- `open_riff` is still a read-only authenticated alias. First-use onboarding is account-level: clients are instructed to show welcome only when `onboarding_seen_at` is null, and the marker is written only after a successful welcome. Reinstalling the same account must not reset it. Raw MCP client compliance cannot be forced; the packaged setup skill is the deterministic supported sequence.
+- `open_riff` is still a read-only authenticated alias. First-use onboarding is account-level and app-owned: Home shows the Paper carousel only when `onboarding_seen_at` is null, then writes the marker only after the user completes its final visible step. Reinstalling the same account must not reset it. The model never drives the marker write; `show_riff_welcome` is replay-only.
 - Ownership always comes from verified credentials. New mutations require the service role repository path, account-scoped RPC, request-ID idempotency, expected-version/concurrency behavior, and no client-visible service credential.
 - All provider text is untrusted. Continue inert `textContent`, strict safe-URL projection, CSP allowlists, no credential-bearing URL, and no external fetch from static resources.
 - Apply migrations append-only after integration; never edit applied history or reset a remote/shared database. The next allocated migration is `20261011091046_riff_work_state.sql`.
@@ -34,7 +34,7 @@
 
 | State | Paper node / audit locator | Production route |
 | --- | --- | --- |
-| Welcome | `13QH-0` | `show_riff_welcome` → onboarding resource |
+| Welcome | `13QH-0` | `open_riff` first-use route; `show_riff_welcome` is replay-only |
 | Fetch video | `14TG-0` | scan job, video, accepted/reviewing stage |
 | Analyze video | `14QY-0` | scan job, video, building-analysis stage |
 | Profile loading | `14R1-0` | scan job, profile, running |
@@ -70,12 +70,12 @@
 
 **Interfaces:** Preserve `mountRiffOnboarding`, `open_riff`, `show_riff_welcome`, and `mark_riff_onboarding_seen`. Bump immutable UI/performance resource identifiers whenever bundled content or structured-version telemetry changes.
 
-- [ ] Write/finish failing tests for Paper node `13QH-0`: exact 576/526/454/184/80×124 geometry, copy, gradients, media fill, typography, carousel peek, keyboard controls, responsive 320px, and no host-owned chrome/composer.
-- [ ] Add a Home test proving `onboarding_seen_at: null` hides recents on the first-open composition; a set marker renders recents normally; missing marker remains fail-open for historical clients.
-- [ ] Implement the direct Paper JSX/styles and exact embedded Paper fill asset. Do not approximate from screenshots.
-- [ ] Pin MCP initialize instructions and packaged setup skill ordering: `open_riff` → inspect marker → welcome when null → mark only after success.
-- [ ] Bump onboarding and creator-performance immutable versions, rebuild bundles, and prove old cache identities are absent from generated resources.
-- [ ] Run focused browser/resource/auth/build tests and commit `fix: match Riff first launch to Paper`.
+- [x] Write/finish tests for Paper node `13QH-0`: exact 576/526/454/184/80×124 geometry, copy, gradients, typography, carousel peek, keyboard controls, responsive 320px, dark/200% text, and no host-owned chrome/composer.
+- [x] Add a raw `open_riff` Home test proving `onboarding_seen_at: null` hides Home/recents, a strict completion receipt enters Home, and a set marker renders Home normally.
+- [x] Implement the direct Paper structure and styles with owned media-free artwork; do not infer values from screenshots or redistribute Paper's illustrative fill asset.
+- [x] Pin MCP initialize instructions and the packaged setup skill to one `open_riff` call; the app owns first-use routing and is the only advertised caller of the completion write.
+- [x] Bump onboarding, Home, pipeline, and creator-performance immutable versions, rebuild bundles, and retain compatibility aliases for existing turns.
+- [x] Run focused browser/resource/auth/build tests and commit the reviewed first-launch fixes.
 
 ### Task 2: Add the exact shared Riff menu and account dropdown
 
@@ -92,11 +92,11 @@
 
 **Interfaces:** `mountRiffMenu(host, { account, recents, activeRoute, onNavigate, onOpenRecent, onCreate, onClose })` returns `render(...)` and `dispose()`. The menu consumes only already-validated account and recent-work projections.
 
-- [ ] Read the named Paper frames `App menu · account dropdown open` and `Riff menu open · chat remains visible`; pin the exact 288px drawer, backdrop, brand, Home/Discover/Create/recents controls, account trigger, dropdown geometry, focus order, dismissal, and escape behavior in browser tests.
-- [ ] Test that unavailable allowance data is omitted or called unavailable; never hardcode Paper's illustrative `10 analysis left`.
-- [ ] Implement one reusable menu mounted by Home and every pipeline screen. Navigation stays inside the current Riff resource; Create returns to a fresh Home form without mutating the open job.
-- [ ] Preserve account isolation on tool-result replacement: close the menu and clear recents before rendering a new account.
-- [ ] Run focused tests and commit `feat: add Paper Riff navigation menu`.
+- [x] Read the named Paper frames `App menu · account dropdown open` and `Riff menu open · chat remains visible`; pin the exact 288px drawer, backdrop, brand, Home/Discover/Create/recents controls, account trigger, dropdown geometry, focus order, dismissal, and escape behavior in browser tests.
+- [x] Test that unavailable allowance data is omitted or called unavailable; never hardcode Paper's illustrative `10 analysis left`.
+- [x] Implement one reusable menu mounted by Home and every pipeline screen. Navigation stays inside the current Riff resource; Create returns to a fresh Home form without mutating the open job.
+- [x] Preserve account isolation on tool-result replacement: close the menu and clear recents before rendering a new account.
+- [x] Run focused tests and commit `feat: add Paper Riff navigation menu`.
 
 ### Task 3: Complete exact loading, partial, video, and profile analysis states
 
@@ -113,13 +113,13 @@
 
 **Interfaces:** Add presentation fields only when backed by trusted observations: optional platform-neutral profile aggregates and sample description. Maintain backward compatibility for persisted TikTok rows. Do not loosen the existing TikTok provider input boundary.
 
-- [ ] Pin each direct Paper node's exact copy and computed styling: fetch video, analyze video, profile loading, product loading, discovery loading, partial transcript, video result, TikTok profile, and Instagram profile.
-- [ ] Test stage-aware routing: video `accepted/reviewing_video` → Fetching; `building_analysis/saving` → Analyzing; profile stages → Getting to know; recommendations → Discovery loading. No client timer or fake percentage.
-- [ ] Test the partial transcript fallback and reduced-motion static alternative.
-- [ ] Rebuild video analysis using validated seed review/evidence, displaying metrics only with their actual sample/capture/source. Keep absent Paper examples unknown.
-- [ ] Rebuild profile analysis into Paper's three semantic bands (working, improve, next move) and show followers/views/engagement only when the validated contract provides them. Never infer causation.
-- [ ] Add a platform-neutral renderer that can exactly display an Instagram validated fixture, while production Instagram input remains an explicit unsupported-provider handoff.
-- [ ] Run focused contracts/fixture/browser tests and commit `feat: complete Paper analysis states`.
+- [x] Pin each direct Paper node's exact copy and computed styling: fetch video, analyze video, profile loading, product loading, discovery loading, partial transcript, video result, TikTok profile, and Instagram profile.
+- [x] Test stage-aware routing: video `accepted/reviewing_video` → Fetching; `building_analysis/saving` → Analyzing; profile stages → Getting to know; recommendations → Discovery loading. No client timer or fake percentage.
+- [x] Test the partial transcript fallback and reduced-motion static alternative.
+- [x] Rebuild video analysis using validated seed review/evidence, displaying metrics only with their actual sample/capture/source. Keep absent Paper examples unknown.
+- [x] Rebuild profile analysis into Paper's three semantic bands (working, improve, next move) and show followers/views/engagement only when the validated contract provides them. Never infer causation.
+- [x] Add a platform-neutral renderer that can exactly display an Instagram validated fixture, while production Instagram input remains an explicit unsupported-provider handoff.
+- [x] Run focused contracts/fixture/browser tests and commit `feat: complete Paper analysis states`.
 
 ### Task 4: Implement editable Product context using existing project persistence
 
@@ -136,12 +136,12 @@
 
 **Interfaces:** Reuse authenticated `save_project`/`get_project` inputs and receipts. `mountRiffProductContext` exposes controlled fields for product, audience, key benefit/goal, tone, language, duration, and filming constraints; `onSave` returns the real server receipt; `onDiscover` sends the saved project context into the existing supported ChatGPT/workflow handoff.
 
-- [ ] Read Paper node `13WO-0` and the named product-loading frame; test exact fields, chips, edit affordances, `Confirm context`, and `Discover formats` transition.
-- [ ] Route non-URL idea/product text from Home to a prefilled editable brief without claiming AI-derived facts. Unknown fields remain visibly editable/unknown.
-- [ ] Call `save_project` only on explicit confirmation with the bridge's authenticated tool call; display success only from a successful receipt and preserve expected-version/request-ID semantics.
-- [ ] Render `Understanding your product` while the operation is pending, then route to product context or a recoverable error.
-- [ ] `Discover formats` must be clickable. If no creator DNA exists, send an exact editable ChatGPT handoff rather than starting provider work or fabricating references.
-- [ ] Run focused tests and commit `feat: add Paper product context flow`.
+- [x] Read Paper node `13WO-0` and the named product-loading frame; test exact fields, chips, edit affordances, `Confirm context`, and `Discover formats` transition.
+- [x] Route non-URL idea/product text from Home to a prefilled editable brief without claiming AI-derived facts. Unknown fields remain visibly editable/unknown.
+- [x] Call `save_project` only on explicit confirmation with the bridge's authenticated tool call; display success only from a successful receipt and preserve expected-version/request-ID semantics.
+- [x] Render `Understanding your product` while the operation is pending, then route to product context or a recoverable error.
+- [x] `Discover formats` must be clickable. If no creator DNA exists, send an exact editable ChatGPT handoff rather than starting provider work or fabricating references.
+- [x] Run focused tests and commit `feat: add Paper product context flow`.
 
 ### Task 5: Populate all four Discovery libraries truthfully and exactly
 
@@ -157,12 +157,12 @@
 
 **Interfaces:** Keep `RiffDiscoveryLibrary = videos | hooks | showcases | ctas` and `RiffDiscoverySelection`. Every library renders validated catalog/reference cards; `filter` remains the user's selected creative lens and is carried into the explicit adaptation action.
 
-- [ ] Read all four named Paper carousel frames. Pin exact title/subtitle, segmented library navigation, library-specific filters, center-card sizing, neighbor peeks, media/metric/provenance treatment, arrows, position count, and Make/Use action copy.
-- [ ] Remove the intentional blank rendering for Hooks/Showcases/CTAs. Reuse the validated video/reference catalog while labeling the requested part and selected lens; do not claim backend category ranking.
-- [ ] Keep pagination bounded and account/project scoped. A card can show only persisted metrics, thumbnails, capture dates, and source links; absent values do not become zero.
-- [ ] Every library action must produce the correct `RiffDiscoverySelection` and either start the supported full-video flow or send a part-specific proposal request without claiming it was saved.
-- [ ] Preserve carousel focus/index across same-scope refreshes, reset it on scope/account change, and render zero/error states honestly.
-- [ ] Run focused tests and commit `feat: complete Paper Discovery libraries`.
+- [x] Read all four named Paper carousel frames. Pin exact title/subtitle, segmented library navigation, library-specific filters, center-card sizing, neighbor peeks, media/metric/provenance treatment, arrows, position count, and Make/Use action copy.
+- [x] Remove the intentional blank rendering for Hooks/Showcases/CTAs. Reuse the validated video/reference catalog while labeling the requested part and selected lens; do not claim backend category ranking.
+- [x] Keep pagination bounded and account/project scoped. A card can show only persisted metrics, thumbnails, capture dates, and source links; absent values do not become zero.
+- [x] Every library action must produce the correct `RiffDiscoverySelection` and either start the supported full-video flow or send a part-specific proposal request without claiming it was saved.
+- [x] Preserve carousel focus/index across same-scope refreshes, reset it on scope/account change, and render zero/error states honestly.
+- [x] Run focused tests and commit `feat: complete Paper Discovery libraries`.
 
 ### Task 6: Complete Studio tabs, references, platform controls, and part replacement
 
@@ -180,12 +180,12 @@
 
 **Interfaces:** Extend `TimedFilmingSegment` compatibly with optional `reference_ids`; extend `FilmingVariant` with optional explicit platform targets only if Paper needs them. Historical script rows remain valid. `save_creator_scripts` instructions require part lineage when ChatGPT supplies it.
 
-- [ ] Read the exact Full video, Hook, Product showcase/Main content, and CTA Studio frames and pin visual/browser assertions for the header, tabs, variant switcher, script cards, timing, filming directions, on-screen text, captions, hashtags, references, platform controls, Explore actions, Save, and Filmed.
-- [ ] Render all four Studio tabs from real variant data. Do not collapse Hook/Main/CTA into the same generic body.
-- [ ] Make each Explore action open its matching Discovery library and return a part-specific selection intent. Until a mutation contract exists for replacement, preview the proposal in ChatGPT and clearly retain the currently persisted script.
-- [ ] Associate references with the complete script and individual segments when the optional lineage exists; fall back to script-level references for historical rows.
-- [ ] Platform controls change only locally supported copy/format guidance unless a saved contract value exists; never claim cross-platform publication.
-- [ ] Run focused contract/MCP/browser tests and commit `feat: complete Paper Riff Studio`.
+- [x] Read the exact Full video, Hook, Product showcase/Main content, and CTA Studio frames and pin visual/browser assertions for the header, tabs, variant switcher, script cards, timing, filming directions, on-screen text, captions, hashtags, references, platform controls, Explore actions, Save, and Filmed.
+- [x] Render all four Studio tabs from real variant data. Do not collapse Hook/Main/CTA into the same generic body.
+- [x] Make each Explore action open its matching Discovery library and return a part-specific selection intent. Until a mutation contract exists for replacement, preview the proposal in ChatGPT and clearly retain the currently persisted script.
+- [x] Associate references with the complete script and individual segments when the optional lineage exists; fall back to script-level references for historical rows.
+- [x] Platform controls change only locally supported copy/format guidance unless a saved contract value exists; never claim cross-platform publication.
+- [x] Run focused contract/MCP/browser tests and commit `feat: complete Paper Riff Studio`.
 
 ### Task 7: Add durable Save, Filmed, undo, Saved confirmation, and resume state
 
@@ -214,12 +214,12 @@
 
 **Interfaces:** Add authenticated `set_riff_work_state({ job_id, variant_id, state: saved|filmed|active, expected_version, request_id })` and a read projection on `get_creator_job`/`list_riff_work`. RPC derives account ownership from `p_account_id`, locks one row, checks expected version, and stores an idempotent request receipt. No client account ID.
 
-- [ ] Write failing contract/database/MCP tests for account isolation, job/variant lineage, replay, idempotency conflict, stale version conflict, save → undo, filmed → active, append-only receipts, and unchanged foreign rows.
-- [ ] Add the append-only migration/table/RPC/grants and repository/application wiring through the service-role boundary.
-- [ ] Wire Studio Save and `I've filmed this` to the mutation and render Paper's 576×170 Saved confirmation only after the successful receipt. Undo must issue a real mutation and restore the prior view.
-- [ ] Include durable status in recent-work summaries so Home/menu show `Analysis ready`, `Formats ready`, `Continue script`, `Ideas saved`, or filmed state based on stored truth, not a client guess.
-- [ ] Prove reopen/reinstall/account-switch behavior and retry safety in bridge/browser tests.
-- [ ] Run focused contracts, PGlite migration, MCP, bridge, and browser tests and commit `feat: persist Riff work state`.
+- [x] Write failing contract/database/MCP tests for account isolation, job/variant lineage, replay, idempotency conflict, stale version conflict, save → undo, filmed → active, append-only receipts, and unchanged foreign rows.
+- [x] Add the append-only migration/table/RPC/grants and repository/application wiring through the service-role boundary.
+- [x] Wire Studio Save and `I've filmed this` to the mutation and render Paper's 576×170 Saved confirmation only after the successful receipt. Undo must issue a real mutation and restore the prior view.
+- [x] Include durable status in recent-work summaries so Home/menu show `Analysis ready`, `Formats ready`, `Continue script`, `Ideas saved`, or filmed state based on stored truth, not a client guess.
+- [x] Prove reopen/reinstall/account-switch behavior and retry safety in bridge/browser tests.
+- [x] Run focused contracts, PGlite migration, MCP, bridge, and browser tests and commit `feat: persist Riff work state`.
 
 ### Task 8: Integrate full navigation, exact visual acceptance, and immutable resources
 
@@ -240,13 +240,13 @@
 
 **Interfaces:** One Home resource can transition Home → loading → analysis/product → Discovery → Studio → Saved and menu/resume without reload. Standalone `render_creator_job` retains equivalent pipeline behavior.
 
-- [ ] Build a deterministic authored fixture matrix for every Paper CURRENT screen; fixtures are marked test-only and never production fallback.
-- [ ] For each state, use Paper MCP values directly, render at its Paper dimensions, and compare DOM geometry/computed styles plus a screenshot review. Store review artifacts under `.context/`, not tracked source.
-- [ ] Exercise every visible action and keyboard path end-to-end with bridge fakes; assert no dead controls, silent writes, fictional success, external resource request, secret leakage, or document overflow.
-- [ ] Verify first-launch composition, returning Home, menu, account dropdown, every loading/analysis/product/discovery/studio/saved state, and 320px/reduced-motion/dark/forced-colors/200% text variants.
-- [ ] Bump immutable Home/pipeline resource versions and telemetry fingerprints. Rebuild generated bundles and update resource tests.
-- [ ] Reconcile `PRODUCT.md` and engineering decisions with the implemented boundaries, explicitly recording Instagram/provider and raw-MCP onboarding limitations.
-- [ ] Run focused visual/resource tests and commit `test: verify Riff Core workflows against Paper`.
+- [x] Build a deterministic authored fixture matrix for every Paper CURRENT screen; fixtures are marked test-only and never production fallback.
+- [x] For each state, use Paper MCP values directly, render at its Paper dimensions, and compare DOM geometry/computed styles plus a screenshot review. Store review artifacts under `.context/`, not tracked source.
+- [x] Exercise every visible action and keyboard path end-to-end with bridge fakes; assert no dead controls, silent writes, fictional success, external resource request, secret leakage, or document overflow.
+- [x] Verify first-launch composition, returning Home, menu, account dropdown, every loading/analysis/product/discovery/studio/saved state, and 320px/reduced-motion/dark/forced-colors/200% text variants.
+- [x] Bump immutable Home/pipeline resource versions and telemetry fingerprints. Rebuild generated bundles and update resource tests.
+- [x] Reconcile `PRODUCT.md` and engineering decisions with the implemented boundaries, explicitly recording Instagram/provider and app-owned raw-MCP onboarding behavior.
+- [x] Run focused visual/resource tests and commit `test: verify Riff Core workflows against Paper`.
 
 ### Task 9: Whole-repository verification, production migration/deployment, live proof, and merge
 

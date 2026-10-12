@@ -21,9 +21,13 @@ test('Riff Home keeps its first-paint browser bundle below 500 KB', async () => 
   assert.ok(bytes < 500_000, `Riff Home browser bundle is ${bytes} bytes; keep launch-critical code below 500 KB`);
 });
 
-test('Riff onboarding embeds the Paper media while staying within its launch budget', async () => {
+test('Riff onboarding uses an owned media-free Paper composition within its launch budget', async () => {
   const result = await buildPanel(process.cwd(), 'riff-onboarding');
   assert.equal(result.status, 'built');
+  const source = await readFile('apps/panel/generated/riff-onboarding-bundle.ts', 'utf8');
+  const script = generatedScript(source, 'riffOnboardingScript');
+  assert.doesNotMatch(script, /data:image\/|<img\b/i,
+    'Paper geometry is reproduced without redistributing illustrative source media');
   assert.ok(result.fingerprint.raw_bytes <= PANEL_BUDGETS['riff-onboarding'].raw_bytes,
     `${result.fingerprint.raw_bytes} raw bytes`);
   assert.ok(result.fingerprint.gzip_bytes <= PANEL_BUDGETS['riff-onboarding'].gzip_bytes,
@@ -109,9 +113,9 @@ test('Home, onboarding, and pipeline manifest fingerprints exact deterministic b
   t.after(() => rm(root, { recursive: true, force: true }));
   const panel = join(root, 'apps/panel');
   const fixtures = [
-    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v4' },
-    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v3' },
-    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v4' },
+    { kind: 'riff-home', name: 'riff-home', symbol: 'riffHomeScript', resource: 'riff-home-v5' },
+    { kind: 'riff-onboarding', name: 'riff-onboarding', symbol: 'riffOnboardingScript', resource: 'riff-onboarding-v4' },
+    { kind: 'pipeline', name: 'creator-pipeline', symbol: 'creatorPipelineScript', resource: 'creator-pipeline-v5' },
   ] as const;
   for (const fixture of fixtures) {
     const component = join(panel, fixture.name, 'index.ts');

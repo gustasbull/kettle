@@ -40,7 +40,8 @@ export interface McpAuth {
 const MCP_INSTRUCTIONS = [
   'When the user invokes or tags Riff without a more specific request, open Riff immediately with `open_riff`.',
   'Do not call the diagnostic, profile, or account-state tools before `open_riff`.',
-  'After `open_riff` succeeds, inspect `data.account.onboarding_seen_at`: when it is null, call `show_riff_welcome` immediately in the same conversation, then call `mark_riff_onboarding_seen` only after the welcome succeeds.',
+  '`open_riff` owns first-use routing: its app shows the Paper welcome when needed and records completion only after the user finishes it. Never call `mark_riff_onboarding_seen` from the model.',
+  'Call `show_riff_welcome` only when the user explicitly asks to replay the guide; replaying it never changes onboarding state.',
   'When `onboarding_seen_at` is already set, do not replay onboarding unless the user explicitly asks to see the welcome again.',
   'When the user explicitly asks to analyze a public TikTok profile or video URL, call `start_riff_creator` directly.',
 ].join(' ');
@@ -263,7 +264,7 @@ export async function handleMcp(request: Request, auth?: McpAuth, telemetry?: Cr
       };
       const firstOpen = result.data.account.onboarding_seen_at === null;
       const text = firstOpen
-        ? 'Welcome to Riff — unlock your viral potential. Start with what you have: a public creator video, profile, or idea. Find your evidence-backed breakout direction. Make it yours as a filmable script in Studio. Your first-use guide belongs here in ChatGPT, and Riff Home is open on the right.'
+        ? 'Welcome to Riff — unlock your viral potential. The first-use Paper guide is open in the Riff app. Complete its final step to enter Home; Riff records completion only after that explicit action succeeds.'
         : 'Riff Home is open on the right. Start with a public creator video or profile, or pick up saved creator work.';
       return { content: [{ type: 'text' as const, text }], structuredContent: result };
     });

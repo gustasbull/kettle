@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { build } from 'esbuild';
 
@@ -47,8 +46,10 @@ test('Riff onboarding renders the approved Paper carousel without host chrome', 
     'the old segmented Start/Find/Make control is not part of the approved design');
   assert.equal(await page.locator('svg[aria-label="Riff"]').count(), 0, 'inline cards rely on host attribution');
   assert.equal(await page.locator('textarea,input[type="text"],form').count(), 0, 'onboarding does not duplicate the composer');
-  assert.equal(await page.locator('.riff-onboarding__sample-video img[src^="data:image/jpeg;base64,"]').count(), 1,
-    'the first step embeds the exact Paper fill without making a network request');
+  assert.equal(await page.locator('.riff-onboarding__sample-video .riff-onboarding__placeholder').count(), 1,
+    'the first step uses a Riff-owned neutral placeholder in the Paper-shaped frame');
+  assert.equal(await page.locator('.riff-onboarding img').count(), 0,
+    'illustrative Paper media is never redistributed by onboarding');
 
   const exactMetrics = await page.evaluate(() => {
     const box = selector => document.querySelector(selector).getBoundingClientRect();
@@ -83,11 +84,11 @@ test('Riff onboarding renders the approved Paper carousel without host chrome', 
   for (const fragment of ['circle', '10% 70%', '70% 65%', '92% 30%', 'rgb(220, 235, 250)', 'rgb(230, 221, 246)', 'rgb(245, 226, 239)']) {
     assert.match(exactMetrics.cardStyle.backgroundImage, new RegExp(fragment.replace(/[()]/g, '\\$&')));
   }
-  const embeddedMedia = await page.locator('.riff-onboarding__sample-video img').getAttribute('src');
-  assert.ok(embeddedMedia?.startsWith('data:image/jpeg;base64,'));
-  assert.equal(createHash('sha256').update(Buffer.from(embeddedMedia.slice(23), 'base64')).digest('hex'),
-    '2c777547f7ea0e0e5c5290ff069a0a9989c6e5318cd2431a0748ba408089a978',
-    'the locally embedded Paper fill must not drift or become a remote request');
+  const targets = await page.locator('.riff-onboarding button:visible').evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect();
+    return { label: node.getAttribute('aria-label'), width: box.width, height: box.height };
+  }));
+  assert.equal(targets.every(target => target.width >= 44 && target.height >= 44), true, JSON.stringify(targets));
   assert.deepEqual(networkRequests, []);
 
   const viewport = await page.locator('.riff-onboarding__viewport').boundingBox();
@@ -128,11 +129,12 @@ test('Riff onboarding renders the approved Paper carousel without host chrome', 
   await page.emulateMedia({ forcedColors: 'active' });
   const forcedColorDots = await page.locator('.riff-onboarding__dot').evaluateAll(nodes => nodes.map(node => {
     const style = getComputedStyle(node);
+    const indicator = getComputedStyle(node, '::before');
     return {
       selected: node.getAttribute('aria-selected') === 'true',
       borderWidth: style.borderTopWidth,
       borderStyle: style.borderTopStyle,
-      background: style.backgroundColor,
+      background: indicator.backgroundColor,
     };
   }));
   assert.equal(forcedColorDots.every(dot => dot.borderWidth !== '0px' && dot.borderStyle === 'solid'), true,
@@ -160,4 +162,63 @@ test('Riff onboarding keeps the approved composition usable in a 320px inline ca
   assert.equal(await page.getByText('Start with what you have.').isVisible(), true);
   assert.equal(await page.getByRole('button', { name: 'Next step' }).isVisible(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+});
+
+test('Riff onboarding follows dark host colors and survives 200% text without clipped controls', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffOnboarding } from './apps/panel/riff-onboarding/index.ts';
+    window.view = mountRiffOnboarding(document.getElementById('root'));
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 700, height: 1200 } });
+  await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.style.setProperty('--color-background-primary', '#101318');
+    document.documentElement.style.setProperty('--color-background-secondary', '#181d25');
+    document.documentElement.style.setProperty('--color-text-primary', '#f6f7f9');
+    document.documentElement.style.setProperty('--color-text-secondary', '#c1c8d2');
+    document.documentElement.style.setProperty('--color-border-secondary', '#596273');
+  });
+  const dark = await page.locator('.riff-onboarding__card').evaluate(node => {
+    const card = getComputedStyle(node);
+    const heading = getComputedStyle(node.querySelector('.riff-onboarding__headline'));
+    return { background: card.backgroundColor, color: heading.color };
+  });
+  assert.deepEqual(dark, { background: 'rgb(16, 19, 24)', color: 'rgb(246, 247, 249)' });
+
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent = '.riff-onboarding :is(h1,h2,h3,p,strong,span,button){font-size:200%!important;line-height:1.5!important}';
+    document.head.append(style);
+  });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+  const clipped = await page.locator('.riff-onboarding button:visible').evaluateAll(nodes => nodes.filter(node =>
+    node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1,
+  ).map(node => node.getAttribute('aria-label') || node.textContent?.trim()));
+  assert.deepEqual(clipped, []);
+});
+
+test('embedded first-use onboarding completes only after the visible final step', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffOnboarding } from './apps/panel/riff-onboarding/index.ts';
+    window.completions = 0;
+    window.view = mountRiffOnboarding(document.getElementById('root'), {
+      onComplete: async () => { window.completions++; return { status: 'sent', message: 'Welcome completed.' }; },
+    });
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 700, height: 900 } });
+  await page.setContent(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`);
+  const next = page.getByRole('button', { name: 'Next step' });
+  await next.click();
+  assert.equal(await page.evaluate(() => window.completions), 0);
+  await next.click();
+  assert.equal(await page.evaluate(() => window.completions), 0);
+  const finish = page.getByRole('button', { name: 'Finish welcome' });
+  await finish.click();
+  assert.equal(await page.evaluate(() => window.completions), 1);
+  assert.equal(await page.getByRole('status').textContent(), 'Welcome completed.');
 });

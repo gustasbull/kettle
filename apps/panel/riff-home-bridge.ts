@@ -16,7 +16,7 @@ import {
   validateProductDraft,
   type ProductDraft,
 } from './riff-product-context-validation.ts';
-import { parseListRiffWorkResult, riffRecentLabel } from './riff-home-validation.ts';
+import { parseListRiffWorkResult, parseOnboardingSeenResult, riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
 import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 import {
@@ -451,6 +451,24 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       } catch { return { status: 'failed', message: 'The file picker could not complete. Attach the video in ChatGPT instead.' }; }
     },
     showWelcome: () => { actionEpoch++; return send('Show me the Riff welcome guide in this ChatGPT conversation. Keep the introduction in chat, then leave Riff Home open on the right.'); },
+    async completeOnboarding() {
+      const accountId=activeAccountId;
+      if(!accountId||homeState.status!=='ready'||homeState.account.onboarding_seen_at!==null)return {
+        status:'failed',message:'Riff cannot finish this welcome because the account changed. Reopen Riff Home.',
+      };
+      const epoch=++actionEpoch;
+      const outcome=await callTool('mark_riff_onboarding_seen',{});
+      if(disposed||epoch!==actionEpoch||activeAccountId!==accountId)return {
+        status:'failed',message:'A newer Riff account or action is already shown.',
+      };
+      const onboardingSeenAt=outcome.status==='response'?parseOnboardingSeenResult(outcome.value):undefined;
+      if(!onboardingSeenAt)return {
+        status:'failed',message:'Riff could not confirm welcome completion. Try the same action again safely.',
+      };
+      homeState={status:'ready',account:{...homeState.account,onboarding_seen_at:onboardingSeenAt}};
+      render(homeState);ensureInitialWork();
+      return {status:'sent',message:'Welcome completed. Riff Home is ready.'};
+    },
     async openRecent(jobId,variantId) {
       const epoch = ++actionEpoch;
       const outcome = await callTool('get_creator_job', { job_id: jobId });
@@ -606,7 +624,8 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
   }
 
   const ensureInitialWork = () => {
-    if (!connected || disposed || !activeAccountId || initialWorkLoadStarted) return;
+    if (!connected || disposed || !activeAccountId || initialWorkLoadStarted
+      || homeState.status!=='ready'||homeState.account.onboarding_seen_at===null) return;
     initialWorkLoadStarted = true; void loadWork();
   };
 
