@@ -4,7 +4,7 @@
 
 Completed local acceptance of the Riff-owned CURRENT workflows against the
 read-only Paper authority. The acceptance surface now has a deterministic,
-test-only 42-row fixture matrix; 14 executable browser suites; one-root Home
+test-only 42-row fixture matrix; 15 executable browser suites; one-root Home
 navigation through Product, loading, analysis, Discovery, Studio, Saved, and
 resume; equivalent standalone pipeline behavior; and immutable Home/pipeline v4
 resources with compatibility aliases.
@@ -36,8 +36,25 @@ The new assertions exposed concrete differences before the final implementation:
   456px instead of 44px and 454px.
 
 Each difference was corrected in the owned component styles or state rendering.
-The final 14-suite matrix passes both the authored dimensions and responsive/mode
+The final 15-suite matrix passes both the authored dimensions and responsive/mode
 variants.
+
+The post-commit review added a separate hardening round. It verifies real host dark
+variables across all five loading states, partial/video/profile analysis, Product,
+all Discovery libraries, all Studio parts, and Saved, including nested analysis
+bands, Product headings, and Studio on-screen text. It also pins Discovery filters,
+roving tabs, keyboard action activation, exact 160/196/232 lanes, same-scope retry
+focus/identity, account/project resets; Studio roving tabs, exact per-part geometry,
+and safe external-link attributes; and active-control reachability at every requested
+viewport. The upload fake now states that the selection was sent to ChatGPT but was
+not uploaded or analyzed, and the malformed-marker fixture distinguishes parser
+rejection from Home's truthful fail-open recent-work recovery.
+
+Packaged first use is now exercised through the real MCP public surface plus a
+package-host fake: `open_riff` opens usable Home while the welcome can still be
+pending, strict welcome success then permits `mark_riff_onboarding_seen`, and
+failure, malformed output, or timeout stop before the write. This is explicitly a
+package/setup-skill orchestration contract; raw MCP does not run the sequence itself.
 
 ## Fixture and trust boundary
 
@@ -80,13 +97,14 @@ CSS pixels. The real generated Home v4 document and real parent bridge also pass
 same-root journey with exact calls, no account input, and no unexpected network
 request.
 
-Twenty-five deterministic post-implementation PNGs were recaptured and inspected
+Thirty-one deterministic post-implementation PNGs were recaptured and inspected
 under ignored `.context/task8-visual-review/`. They cover first/returning Home,
 menu/account, all loading rows, partial/full/platform analysis, Product, every
 Discovery lens, every Studio part, Saved, dark, forced-colors, reduced-motion, and
-200% text. `manifest.json` records each image's dimensions, byte count, and SHA-256;
-the 7,613-byte manifest SHA-256 is
-`724223cbbc0e04c744a7afd53270e6d0b46f79ff67a77f5b916b51a7d4f7e1cc`.
+200% text. Six additional dark-host captures cover loading, video analysis, Product,
+Discovery, Studio, and Saved. `manifest.json` records each image's dimensions, byte
+count, and SHA-256; the 9,448-byte manifest SHA-256 is
+`6d9d2e8909ecf534391c4137b0fb01580abbb37cfcdf6e4560490eb9481770e6`.
 These images are human-review evidence, not pixel-diff baselines or source data.
 
 ## Immutable resources
@@ -95,8 +113,8 @@ The final deterministic resource identities are:
 
 | Resource | Version | SHA-256 | Raw | Gzip | Budget |
 | --- | --- | --- | ---: | ---: | ---: |
-| `ui://riff/home-v4.html` | `riff-home-v4` | `c715cb402e6d38c613922d5b3bfe0444355208e06e832c862995f540b8d58a62` | 235911 | 65738 | 500000 / 110000 |
-| `ui://kettle/creator-pipeline-v4.html` | `creator-pipeline-v4` | `b312261b78293d5e39ffbb874a1aa9ba81deec1bb61582359f179474bf801186` | 170973 | 47091 | 250000 / 75000 |
+| `ui://riff/home-v4.html` | `riff-home-v4` | `730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09` | 241640 | 66350 | 500000 / 110000 |
+| `ui://kettle/creator-pipeline-v4.html` | `creator-pipeline-v4` | `ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e` | 175107 | 47515 | 250000 / 75000 |
 
 Home retains the v1, v2, and v3 URIs and pipeline retains v2 and v3. Those are
 compatibility handles serving the current static document, not claims that a mutable
@@ -106,24 +124,28 @@ benchmarks, and resource tests use the canonical v4 versions.
 Two consecutive final builds produced identical resource metadata and generated-file
 hashes:
 
-- manifest: `76f4cb68345cd33eda53f1a9a09f69c20365f1c22a417c73c83ec620895d5ec2`;
+- manifest: `3ef5c85a0208e986c00a652306fd07e2b170da83470235f24b5d13c024f3a947`;
 - generated pipeline module:
-  `bef68ea0d7383128fbcfe51cb9c2ce01048aafeb1f371adf7a965e84bc88f6f4`;
+  `e051a409cecba0ebeb19538c3f55e82bc9e7f77cbae1e89669afc865a1d23b82`;
 - generated Home module:
-  `7c7f03322cc532d1d391e11adb5a0fb1e036be7401b7bb2e24a583c209c0a32c`.
+  `7323ac14d4d23b664d0d960eb5f337e6258bcb8253a6b4401baeb31bc4fc0d19`.
 
 ## Final verification
 
 - Serialized build/resource matrix:
-  `node --test --test-concurrency=1 tests/panel-build.test.ts tests/riff-home-resource.test.ts tests/creator-pipeline-resource.test.ts`
+  `node --import tsx --test --test-concurrency=1 tests/panel-build.test.ts tests/riff-home-resource.test.ts tests/creator-pipeline-resource.test.ts`
   — 15/15 passed.
 - Component/visual matrix:
   `node --test tests/panel/riff-home.test.mjs tests/panel/riff-menu.test.mjs tests/panel/creator-pipeline.test.mjs tests/panel/riff-core-workflows-visual.test.mjs`
-  — 40/40 passed.
-- Targeted auth/telemetry/MCP/benchmark TypeScript matrix — 33/33 passed.
-- `npm run test:browser` — 115/115 passed.
+  — 41/41 passed.
+- Plugin package plus real-MCP setup-host orchestration:
+  `node --import tsx --test tests/plugin-package.test.ts tests/riff-setup-orchestration.test.ts`
+  — 3/3 passed; the packaged setup skill also passed its structural validator.
+- Targeted auth/telemetry/MCP/benchmark TypeScript matrix — 33/33 passed before
+  the hardening round; the final full check then covered the updated TypeScript suite.
+- `npm run test:browser` — 116/116 passed.
 - `npm run check` — exit 0: typecheck passed, the main Node run passed
-  581/581, dry-run build and smoke passed, and its browser leg passed.
+  582/582, dry-run build and smoke passed, and its browser leg passed 116/116.
 - `npm run test:db` — 13/13 passed against the ordered migrations in PGlite.
 - Final bundle build run twice — byte-identical generated modules and manifest.
 

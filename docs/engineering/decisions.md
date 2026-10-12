@@ -16,18 +16,28 @@ part of the visual target.
   production resource entrypoints.
 - Acceptance uses roles/text, DOM geometry, computed styles, state semantics,
   keyboard routes, responsive overflow, host dark variables, forced colors, reduced
-  motion, and 200% text. Twenty-five screenshots under ignored `.context/` are the
+  motion, and 200% text. Thirty-one screenshots under ignored `.context/` are the
   recorded human review aid, not a pixel-diff baseline or a production data source.
 - Browser fakes record tool calls and block `fetch`, XHR, WebSocket, EventSource,
   `window.open`, and unexpected image sources. Hostile/malformed/timeout/late and
   account-switch cases must fail closed; mutation success requires a parsed receipt.
 - The canonical immutable resources are `ui://riff/home-v4.html`
-  (`riff-home-v4`, SHA-256 `c715cb402e6d38c613922d5b3bfe0444355208e06e832c862995f540b8d58a62`,
-  235911 raw / 65738 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
-  (`creator-pipeline-v4`, SHA-256 `b312261b78293d5e39ffbb874a1aa9ba81deec1bb61582359f179474bf801186`,
-  170973 raw / 47091 gzip bytes). Home keeps v1–v3 compatibility URIs and the
+  (`riff-home-v4`, SHA-256 `730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09`,
+  241640 raw / 66350 gzip bytes) and `ui://kettle/creator-pipeline-v4.html`
+  (`creator-pipeline-v4`, SHA-256 `ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e`,
+  175107 raw / 47515 gzip bytes). Home keeps v1–v3 compatibility URIs and the
   pipeline keeps v2–v3 compatibility URIs; all aliases serve the same current static
   document so existing turns do not lose their resource.
+- Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
+  against real `color-scheme`, `data-theme`, and host variables, including nested
+  analysis bands and Studio on-screen text. Discovery and Studio now have explicit
+  roving-key, activation, geometry, safe-link, retry-focus, and scope-reset evidence;
+  every major route checks reachable controls at 320, 375, 768, and 1440 CSS pixels.
+- The packaged first-use contract is `open_riff` → `show_riff_welcome` →
+  `mark_riff_onboarding_seen`. Home is usable while the conversational welcome is
+  pending, and welcome failure, malformed output, or timeout must stop before the
+  mark. This is package/host orchestration; the raw MCP server does not secretly run
+  those later calls.
 - Instagram remains presentation/fixture-only until a permitted live provider path is
   verified. A raw custom MCP URL can receive truthful first-open prose but cannot
   distribute the package-controlled onboarding skill and carousel ordering.

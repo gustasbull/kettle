@@ -12,6 +12,14 @@ local previews and [`plugins/riff`](plugins/riff) for the portable plugin bundle
 Internal `kettle_*` names remain compatibility identifiers; they are not the
 display brand.
 
+The reviewed local CURRENT-workflow acceptance is recorded in the
+[Task 8 report](.superpowers/sdd/2026-10-11-riff-paper-core-workflows-completion/task-8-report.md).
+Its canonical static resources are Home v4
+`sha256:730edc5c0c1d625382e79ab5c556464c6e468c1f724fd781fef6f9f472426a09`
+and pipeline v4
+`sha256:ed31fa8157709271c5787ad43649d5d34c7f8af1848b65a84b83b63c3f2f3a8e`.
+These are deterministic local-build identities, not hosted-deployment proof.
+
 ## Runnable engineering foundation
 
 Stage 1 implementation is available alongside this original reference pack.

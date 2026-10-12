@@ -11,7 +11,7 @@ test('Riff is a portable, mixed-auth Agent Plugins package with complete assets'
   assert.equal(manifest.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.equal(manifest.name, 'riff');
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  assert.notEqual(manifest.version, '0.1.0', 'onboarding behavior changes must invalidate the installed package cache');
+  assert.equal(manifest.version, '0.1.2', 'the stricter first-use failure boundary invalidates the installed package cache');
   assert.equal(manifest.extensions['com.openai'].onboardingSkill, './skills/setup/SKILL.md');
   const ui = manifest.extensions['com.openai'].interface;
   assert.equal(ui.displayName, 'Riff');
@@ -65,6 +65,8 @@ test('Riff setup skill is narrowly triggered and keeps onboarding/account/provid
   assert.match(skill, /explicit user request|explicit user action/i);
   assert.match(skill, /conversation|conversational/i);
   assert.match(skill, /complete only when.*mark_riff_onboarding_seen.*success/i);
+  assert.match(skill, /welcome.*(?:fails|failure).*malformed.*(?:times out|timeout).*never call `mark_riff_onboarding_seen`/is,
+    'failure, malformed output, and timeout are all non-success and must leave onboarding unmarked');
   assert.match(skill, /attach.*ChatGPT/i);
   assert.match(skill, /never.*(?:uploaded|upload receipt)/i);
   assert.match(skill, /recent work only from `list_riff_work`/i);

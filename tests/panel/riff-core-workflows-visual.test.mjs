@@ -42,6 +42,8 @@ test('Paper CURRENT acceptance fixtures are complete, parsed, cited, and unmista
   assert.equal(riffCoreWorkflowFixtures.workState.saved.value.state, 'saved');
   assert.equal(riffCoreWorkflowFixtures.catalog.eight.value.page.cards.length, 8);
   assert.equal(riffCoreWorkflowFixtures.accounts.malformedMarker.value.result.status, 'error');
+  assert.equal(riffCoreWorkflowFixtures.accounts.malformedMarker.value.parser_outcome, 'rejected');
+  assert.match(riffCoreWorkflowFixtures.accounts.malformedMarker.value.ui_recovery, /Home fails open.*recent work/i);
 });
 
 async function browserBundle() {
@@ -76,7 +78,7 @@ async function browserBundle() {
           window.replaceMenuAccount=()=>window.view.render({account:f.accounts.accountB.value,activeRoute:'home'});
         };
         const recents=()=>f.home.recents.value.map((item,index)=>({job_id:item.id,title:item.title,stage:item.stage,state:'succeeded',updated_at:'2026-10-11T12:00:00Z',...(item.platform==='tiktok'?{platform:'tiktok'}:{}),variant_id:index===0?'00000000-0000-4000-8000-000000000701':null,work_state:null}));
-        const homeActions=()=>({start:action('start'),send:action('send'),upload:action('upload'),openRecent:action('recent'),accountSettings:action('account'),support:action('support'),feedback:action('feedback'),requestTheme:action('theme'),saveProduct:async()=>({status:'failed',message:'Authored save is intentionally controlled.'})});
+        const homeActions=()=>({start:action('start'),send:action('send'),upload:async(...args)=>{window.events.push({kind:'upload',args});return {status:'sent',message:'Video selection sent to ChatGPT; this fixture was not uploaded or analyzed.'};},openRecent:action('recent'),accountSettings:action('account'),support:action('support'),feedback:action('feedback'),requestTheme:action('theme'),saveProduct:async()=>({status:'failed',message:'Authored save is intentionally controlled.'})});
         window.bootHome=(account='returning',recentState='recents')=>{reset();window.view=mountRiffHome(root(),homeActions());window.view.render({status:'ready',account:f.accounts[account].value});
           if(recentState==='loading')window.view.setRecentsState(f.home.loading.value);else if(recentState==='error')window.view.setRecentsState(f.home.error.value);else if(recentState==='empty')window.view.setRecents(f.home.empty.value);else window.view.setRecents(recents());};
         window.bootHomeEnvelopeState=state=>{reset();window.view=mountRiffHome(root(),homeActions());if(state==='loading')window.view.render({status:'loading'});else if(state==='error')window.view.render({status:'error',message:'Authored account unavailable.'});else window.view.render(f.accounts.malformedMarker.value.result);window.view.setRecentsState(state==='loading'?f.home.loading.value:state==='error'?f.home.error.value:{status:'ready',items:recents()});};
@@ -119,6 +121,9 @@ async function browserBundle() {
           else if(state==='hostile'){const job=structuredClone(f.recommendations.fourLibraries.value);job.result.batch.ideas[0].title=f.host.hostile.value.text;window.view.render(CreatorJobView.parse(job));}
           else if(state.startsWith('catalog-')){window.view.render(f.recommendations.fourLibraries.value);window.view.showCatalog('videos',{accountWide:true});window.view.setCatalogState(f.catalog[state.slice(8)].value);}
         };
+        window.setCatalogFixtureState=(state,count='five')=>{const page=structuredClone(f.catalog[count].value.page);
+          window.view.setCatalogState(state==='ready'?f.catalog[count].value:state==='loading'?{status:'loading',page}:{status:'error',message:'Authored refresh failed.',retryable:true,page});};
+        window.showCatalogScope=projectId=>window.view.showCatalog('videos',projectId?{projectId}:{accountWide:true});
       `,
     },
     bundle: true, platform: 'browser', format: 'iife', write: false,
@@ -146,8 +151,9 @@ const assertActiveControlsWithinViewport = async page => {
     node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     const box = node.getBoundingClientRect();
     if (box.width === 0 || box.height === 0) return [];
-    return box.left < -1 || box.right > document.documentElement.clientWidth + 1
-      ? [{ label: node.getAttribute('aria-label') || node.textContent?.trim(), left: box.left, right: box.right, viewport: document.documentElement.clientWidth }]
+    return box.left < -1 || box.right > document.documentElement.clientWidth + 1 || box.top < -1 || box.bottom > innerHeight + 1
+      ? [{ label: node.getAttribute('aria-label') || node.textContent?.trim(), left: box.left, right: box.right, top:box.top, bottom:box.bottom,
+        viewport:`${document.documentElement.clientWidth}x${innerHeight}` }]
       : [];
   }));
   assert.deepEqual(clipped, []);
@@ -168,6 +174,19 @@ const assertSafeImages = async page => {
       || url.hostname === 'tiktokcdn-us.com' || url.hostname.endsWith('.tiktokcdn-us.com'),
     `unexpected image host ${url.hostname}`);
   }
+};
+
+const assertSafeExternalLinks = async locator => {
+  const unsafe = await locator.locator('a[href]').evaluateAll(nodes => nodes.flatMap(node => {
+    const url = new URL(node.href);
+    const rel = new Set((node.getAttribute('rel') ?? '').split(/\s+/).filter(Boolean));
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && url.username === '' && url.password === ''
+      && rel.has('noopener') && rel.has('noreferrer')
+      && node.getAttribute('referrerpolicy') === 'no-referrer'
+      ? [] : [{href:node.href,rel:[...rel],referrerPolicy:node.getAttribute('referrerpolicy')}];
+  }));
+  assert.deepEqual(unsafe, []);
 };
 
 const boxSummary = locator => locator.evaluate(node => {
@@ -196,7 +215,9 @@ test('Product loading and context require explicit validation plus a receipt, an
   assert.equal(Math.round((await pending.boundingBox()).height), 181);
   assert.equal(await pending.locator('.riff-product__pending-track').evaluate(node => getComputedStyle(node).height), '8px');
   assert.deepEqual(await pending.locator('.riff-product__pending-segment').evaluate(node => {
-    const style=getComputedStyle(node);return {left:Math.round(parseFloat(style.left)),width:Math.round(parseFloat(style.width))};
+    const animation=node.style.animation;node.style.animation='none';
+    const style=getComputedStyle(node);const geometry={left:Math.round(parseFloat(style.left)),width:Math.round(parseFloat(style.width))};
+    node.style.animation=animation;return geometry;
   }), {left:139,width:159});
   assert.equal(await page.evaluate(() => window.productFrames.length), 1, 'product loading is a next-paint transition, never a fabricated timer');
   await page.evaluate(() => window.advanceProduct());
@@ -455,7 +476,7 @@ test('onboarding, Home, recents, shortcuts, upload, and the complete drawer are 
   assert.equal(await page.evaluate(() => window.events.at(-1).kind), 'start');
   await page.getByRole('button', { name: 'Upload a video' }).focus(); await page.keyboard.press('Space');
   assert.equal(await page.evaluate(() => window.events.at(-1).kind), 'upload');
-  assert.match(await page.getByRole('status').textContent(), /upload confirmed by the authored bridge fake/i);
+  assert.match(await page.getByRole('status').textContent(), /sent to ChatGPT.*not uploaded or analyzed/i);
   for (const [shortcut, heading] of [['Trending videos','Find your next breakout idea.'],['Hooks','Stop the scroll.'],['Product showcases','Make your product stand out.'],['Calls to action','Turn views into action.']]) {
     await page.evaluate(() => window.view.showHome());
     await page.getByRole('button', { name: shortcut, exact: true }).focus(); await page.keyboard.press('Enter');
@@ -516,16 +537,42 @@ test('Discovery proves all four creative lenses, catalog truth states, geometry,
   assert.deepEqual(await page.locator('.riff-libraries').evaluate(node => {const s=getComputedStyle(node);return {background:s.backgroundColor,height:s.height};}),
     {background:'rgb(240, 240, 242)',height:'44px'});
 
+  const videosTab=page.getByRole('tab',{name:'Videos',exact:true});
+  await videosTab.focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab',{name:'Hooks',exact:true}).evaluate(node=>node===document.activeElement),true);
+  assert.equal(await videosTab.getAttribute('aria-selected'),'true','roving focus does not select before activation');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await videosTab.evaluate(node=>node===document.activeElement),true);
+  await page.keyboard.press('End');
+  assert.equal(await page.getByRole('tab',{name:'CTAs',exact:true}).evaluate(node=>node===document.activeElement),true);
+  await page.keyboard.press('Home');
+  assert.equal(await videosTab.evaluate(node=>node===document.activeElement),true);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Enter');
+  const hooksTab=page.getByRole('tab',{name:'Hooks',exact:true});
+  assert.equal(await hooksTab.getAttribute('aria-selected'),'true');
+  assert.equal(await hooksTab.evaluate(node=>node===document.activeElement),true,'keyboard activation retains focus on the selected library');
+  const questions=page.getByRole('button',{name:'Questions',exact:true});
+  await questions.focus();await page.keyboard.press('Space');
+  assert.equal(await questions.getAttribute('aria-pressed'),'true');
+  assert.equal(await questions.evaluate(node=>node===document.activeElement),true,'keyboard filter activation retains focus');
+  await page.getByRole('button',{name:'Use this hook',exact:true}).focus();await page.keyboard.press('Enter');
+  await page.getByRole('button',{name:'Bookmark idea',exact:true}).focus();await page.keyboard.press('Space');
+  assert.deepEqual(await page.evaluate(()=>window.events.map(event=>event.kind)),['make-mine','message']);
+  await page.evaluate(()=>{window.events=[]});
+
   const libraries = [
-    ['Videos','Find your next breakout idea.','Make it mine'],
-    ['Hooks','Stop the scroll.','Use this hook'],
-    ['Product showcases','Make your product stand out.','Use this showcase'],
-    ['CTAs','Turn views into action.','Use this CTA'],
+    ['Videos','Find your next breakout idea.','Make it mine',['For you','Quick demos','Before / after','How-to','Reactions','Challenges']],
+    ['Hooks','Stop the scroll.','Use this hook',['For you','Questions','Bold claims','Visual hooks','Problems','Storytelling']],
+    ['Product showcases','Make your product stand out.','Use this showcase',['For you','Quick demos','Before / after','Unboxing','Tutorials','Screen recordings']],
+    ['CTAs','Turn views into action.','Use this CTA',['For you','Save','Comment','Follow','Share','Try it']],
   ];
-  for (const [tabName,title,action] of libraries) {
+  for (const [tabName,title,action,expectedFilters] of libraries) {
     await page.getByRole('tab', { name:tabName, exact:true }).click();
     assert.equal(await page.getByRole('heading', { name:title, exact:true }).count(), 1);
     assert.equal(await page.getByRole('button', { name:action, exact:true }).count(), 1);
+    assert.deepEqual(await page.getByRole('group',{name:'Video filters'}).getByRole('button').allTextContents(),expectedFilters);
     await page.getByRole('button', { name:action, exact:true }).click();
   }
   assert.deepEqual(await page.evaluate(() => window.events.filter(event=>event.kind==='make-mine').map(event=>event.args[0].library)),
@@ -551,6 +598,38 @@ test('Discovery proves all four creative lenses, catalog truth states, geometry,
     await page.evaluate(value => window.bootPipeline(`catalog-${value}`), count);
     assert.equal(await page.locator('[data-active-catalog]').count(), 1);
     assert.equal(await page.getByRole('button', { name:'Make it mine' }).count(), 1);
+    if(count==='five'){
+      assert.deepEqual(await page.locator('.riff-idea-card').evaluateAll(nodes=>Object.fromEntries(nodes.map(node=>{
+        const position=[...node.classList].find(name=>name.startsWith('riff-idea-card--'))?.replace('riff-idea-card--','');
+        const card=node.getBoundingClientRect();const media=node.querySelector('.riff-idea-media').getBoundingClientRect();
+        return [position,{card:`${Math.round(card.width)}x${Math.round(card.height)}`,media:`${Math.round(media.width)}x${Math.round(media.height)}`}];
+      }))),{
+        active:{card:'232x454',media:'214x354'},
+        'right-one':{card:'196x348',media:'178x330'},
+        'right-two':{card:'160x284',media:'142x266'},
+        'left-two':{card:'160x284',media:'142x266'},
+        'left-one':{card:'196x348',media:'178x330'},
+      });
+    }
+  }
+  await page.evaluate(()=>window.bootPipeline('catalog-five'));
+  let catalogCarousel=page.locator('[data-discovery-carousel]');
+  await catalogCarousel.focus();await page.keyboard.press('ArrowRight');
+  const retainedCatalogId=await page.locator('[data-active-catalog]').getAttribute('data-active-catalog');
+  for(const state of ['loading','error']){
+    await page.evaluate(value=>window.setCatalogFixtureState(value),state);
+    catalogCarousel=page.locator('[data-discovery-carousel]');
+    assert.equal(await page.locator('[data-active-catalog]').getAttribute('data-active-catalog'),retainedCatalogId,`${state} refresh retains the active saved video`);
+    assert.equal(await catalogCarousel.evaluate(node=>node===document.activeElement),true,`${state} refresh retains carousel focus`);
+  }
+  for(const scope of ['00000000-0000-4000-8000-000000000901','00000000-0000-4000-8000-000000000902',null]){
+    await page.evaluate(value=>window.showCatalogScope(value),scope);
+    await page.evaluate(()=>window.setCatalogFixtureState('ready'));
+    assert.equal(await page.locator('[data-active-catalog]').getAttribute('data-active-catalog'),riffCoreWorkflowFixtures.catalog.five.value.page.cards[0].id,
+      `${scope??'account'} scope starts at the first saved video`);
+    assert.equal(await page.getByRole('tab',{name:'Videos',exact:true}).getAttribute('aria-selected'),'true');
+    assert.equal(await page.getByRole('button',{name:'For you',exact:true}).getAttribute('aria-pressed'),'true');
+    await page.locator('[data-discovery-carousel]').focus();await page.keyboard.press('ArrowRight');
   }
   assert.equal(await page.locator('[data-active-catalog]').getByLabel('0 views').count(), 1, 'an observed zero is rendered rather than treated as absent');
   assert.equal(await page.locator('[data-active-catalog] .riff-idea-stat').count(), 1, 'null metrics remain omitted');
@@ -576,20 +655,37 @@ test('Studio four-part semantics, variants, lineage, local format, and receipt-b
   assert.ok(await page.locator('.riff-studio-reference').count() >= 2);
 
   const parts=[
-    ['Full video','Your complete video','Explore videos','videos'],
-    ['Hook','Your hook','Explore hooks','hooks'],
-    ['Main content','Your main content','Explore main content','showcases'],
-    ['CTA','Your call to action','Explore CTAs','ctas'],
+    ['Full video','Your complete video','Explore videos','videos',{shell:'900x715',padding:'18px',gap:'18px',tabs:'864x44',panelWidth:600}],
+    ['Hook','Your hook','Explore hooks','hooks',{shell:'900x525',padding:'18px',gap:'18px',tabs:'864x44',panelWidth:600}],
+    ['Main content','Your main content','Explore main content','showcases',{shell:'900x535',padding:'20px',gap:'24px',tabs:'860x44',panelWidth:596}],
+    ['CTA','Your call to action','Explore CTAs','ctas',{shell:'900x535',padding:'20px',gap:'24px',tabs:'860x44',panelWidth:596}],
   ];
-  for(const [tab,title,explore,selectedLibrary] of parts){
+  for(const [tab,title,explore,selectedLibrary,geometry] of parts){
     await page.evaluate(() => window.bootPipeline('studio'));
     await page.getByRole('tab',{name:tab,exact:true}).click();
     assert.equal(await page.getByRole('heading',{name:title,exact:true}).count(),1);
     assert.match(await page.locator('.riff-studio-player__time').textContent(),/\d:\d{2} \/ \d:\d{2}/);
+    assert.deepEqual(await page.locator('.riff-studio-shell').evaluate(node=>{const shell=node.getBoundingClientRect();const style=getComputedStyle(node);const tabs=node.querySelector('.riff-studio-tabs').getBoundingClientRect();const panel=node.querySelector('.riff-studio-panel').getBoundingClientRect();return {
+      shell:`${Math.round(shell.width)}x${Math.round(shell.height)}`,padding:style.padding,gap:style.gap,tabs:`${Math.round(tabs.width)}x${Math.round(tabs.height)}`,panelWidth:Math.round(panel.width),
+    };}),geometry,`${tab} keeps its exact Paper key geometry`);
+    await assertSafeExternalLinks(page.locator('.riff-pipeline__content'));
     await page.getByRole('button',{name:explore,exact:true}).click();
     assert.equal(await page.getByRole('tab',{name:selectedLibrary==='videos'?'Videos':selectedLibrary==='hooks'?'Hooks':selectedLibrary==='showcases'?'Product showcases':'CTAs'}).getAttribute('aria-selected'),'true');
     assert.equal(await page.evaluate(()=>window.events.filter(event=>event.kind==='work-state').length),0,'part exploration does not persist a replacement');
   }
+
+  await page.evaluate(() => window.bootPipeline('studio'));
+  const studioFull=page.getByRole('tab',{name:'Full video',exact:true});
+  await studioFull.focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab',{name:'Hook',exact:true}).getAttribute('aria-selected'),'true');
+  assert.equal(await page.getByRole('tab',{name:'Hook',exact:true}).evaluate(node=>node===document.activeElement),true);
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await studioFull.getAttribute('aria-selected'),'true');
+  await page.keyboard.press('End');
+  assert.equal(await page.getByRole('tab',{name:'CTA',exact:true}).getAttribute('aria-selected'),'true');
+  await page.keyboard.press('Home');
+  assert.equal(await studioFull.getAttribute('aria-selected'),'true');
+  assert.equal(await studioFull.evaluate(node=>node===document.activeElement),true);
 
   await page.evaluate(() => window.bootPipeline('studio-three'));
   assert.equal(await page.getByRole('radio').count(),3);
@@ -757,14 +853,32 @@ test('Every major Riff-owned surface stays reachable without horizontal overflow
       ['video',async()=>page.evaluate(()=>window.bootPipeline('video'))],
       ['tiktok',async()=>page.evaluate(()=>window.bootPipeline('tiktok'))],
       ['instagram',async()=>page.evaluate(()=>window.bootPipeline('instagram'))],
-      ['product',async()=>{await page.evaluate(()=>window.bootProduct('saved','saved'));}],
+      ['product',async()=>{await page.evaluate(()=>window.bootProduct('saved','saved'));await page.evaluate(()=>window.advanceProduct());}],
       ...['Videos','Hooks','Product showcases','CTAs'].map(label=>[`discovery-${label}`,async()=>{await page.evaluate(()=>window.bootPipeline('discovery'));await page.getByRole('tab',{name:label,exact:true}).click();}]),
       ...['loading','empty','error','one','five','eight'].map(state=>[`catalog-${state}`,async()=>page.evaluate(value=>window.bootPipeline('catalog-'+value),state)]),
       ...['Full video','Hook','Main content','CTA'].map(label=>[`studio-${label}`,async()=>{await page.evaluate(()=>window.bootPipeline('studio'));await page.getByRole('tab',{name:label,exact:true}).click();}]),
       ['filmed',async()=>page.evaluate(()=>window.bootPipeline('filmed'))],
       ['saved',async()=>page.evaluate(()=>window.bootPipeline('saved'))],
     ];
-    for(const [name,route] of routes){await route();const fit=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,widest:[...document.querySelectorAll('*')].map(node=>({tag:node.tagName,cls:node.className?.toString?.()??'',right:node.getBoundingClientRect().right,width:node.getBoundingClientRect().width})).filter(item=>item.right>document.documentElement.clientWidth+1).sort((a,b)=>b.right-a.right).slice(0,3)}));assert.equal(fit.fits,true,`${name} overflows at ${viewport.width}px: ${JSON.stringify(fit)}`);await assertNamedNativeControls(page);if(viewport.width===320){await assertActiveControlsWithinViewport(page);const dialog=page.locator('[role="dialog"]:visible');const scope=await dialog.count()?dialog:page;const first=scope.locator('button:not([disabled]):visible,a[href]:visible,input:visible,textarea:visible').first();if(await first.count()){await first.focus();assert.equal(await first.evaluate(node=>node===document.activeElement),true,`${name} retains a keyboard focus target at 320px`);}}}
+    for(const [name,route] of routes){await route();const fit=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,widest:[...document.querySelectorAll('*')].map(node=>({tag:node.tagName,cls:node.className?.toString?.()??'',right:node.getBoundingClientRect().right,width:node.getBoundingClientRect().width})).filter(item=>item.right>document.documentElement.clientWidth+1).sort((a,b)=>b.right-a.right).slice(0,3)}));assert.equal(fit.fits,true,`${name} overflows at ${viewport.width}px: ${JSON.stringify(fit)}`);await assertNamedNativeControls(page);await assertActiveControlsWithinViewport(page);if(viewport.width===320){
+      if(name==='menu')assert.equal(await page.getByRole('dialog',{name:'Riff menu'}).isVisible(),true,'320px menu remains reachable');
+      if(name==='product'){
+        assert.equal(await page.getByRole('form',{name:'Your product brief'}).isVisible(),true,'320px Product form remains visible');
+        assert.equal(await page.getByRole('textbox',{name:'Product'}).isVisible(),true);
+        assert.equal(await page.getByRole('button',{name:'Confirm context'}).isVisible(),true);
+      }
+      if(name.startsWith('discovery-')&&name!=='discovery-loading'){
+        assert.equal(await page.getByRole('tablist',{name:'Discovery libraries'}).isVisible(),true,'320px Discovery tabs remain reachable');
+        assert.equal(await page.getByRole('group',{name:'Video filters'}).isVisible(),true,'320px Discovery filters remain reachable');
+        assert.equal(await page.locator('[data-discovery-carousel]').isVisible(),true,'320px Discovery carousel remains reachable');
+      }
+      if(name.startsWith('studio-')){
+        assert.equal(await page.getByRole('tablist',{name:'Script components'}).isVisible(),true,'320px Studio tabs remain reachable');
+        assert.equal(await page.locator('.riff-studio-player').isVisible(),true,'320px Studio player remains reachable');
+        assert.equal(await page.getByRole('group',{name:'Studio actions'}).isVisible(),true,'320px Studio actions remain reachable');
+      }
+      const dialog=page.locator('[role="dialog"]:visible');const scope=await dialog.count()?dialog:page;const first=scope.locator('button:not([disabled]):visible,a[href]:visible,input:visible,textarea:visible').first();if(await first.count()){await first.focus();assert.equal(await first.evaluate(node=>node===document.activeElement),true,`${name} retains a keyboard focus target at 320px`);}}
+    }
     await assertSafeImages(page);
     assert.equal(await page.evaluate(()=>window.external.length),0);
   }
@@ -942,12 +1056,97 @@ test('key CURRENT routes retain semantics, boundaries, focus, and unclipped cont
         {background:'rgb(24, 29, 37)',color:'rgb(246, 247, 249)'});
       await page.evaluate(()=>window.bootPipeline('studio'));
       assert.deepEqual(await page.locator('.riff-studio-shell').evaluate(node=>({background:getComputedStyle(node).backgroundColor,color:getComputedStyle(node).color})),
-        {background:'rgb(36, 40, 50)',color:'rgb(244, 245, 247)'});
+        {background:'rgb(24, 29, 37)',color:'rgb(246, 247, 249)'});
     }
     await assertSafeImages(page);
     assert.equal(await page.evaluate(()=>window.external.length),0);
     await page.close();
   }
+});
+
+test('dark host variables drive every pipeline, Product, Discovery, Studio, and Saved surface', async t => {
+  const script = await browserBundle();
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+  await page.setContent(`<div id="root"></div><script>${script}</script>`);
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.style.colorScheme = 'dark';
+    for (const [name, value] of Object.entries({
+      '--color-background-primary': '#111827',
+      '--color-background-secondary': '#1e293b',
+      '--color-text-primary': '#f8fafc',
+      '--color-text-secondary': '#cbd5e1',
+      '--color-border-secondary': '#64748b',
+      '--color-ring-primary': '#93c5fd',
+    })) document.documentElement.style.setProperty(name, value);
+  });
+
+  const pipeline = state => page.evaluate(value => window.bootPipeline(value), state);
+  const cases = [
+    ['loading-fetch', () => pipeline('fetch'), '.riff-pipeline', '.riff-loading-card', '.riff-loading-intro h1'],
+    ['loading-analyze', () => pipeline('analyze'), '.riff-pipeline', '.riff-loading-card', '.riff-loading-intro h1'],
+    ['loading-profile', () => pipeline('profile-loading'), '.riff-pipeline', '.riff-loading-card', '.riff-loading-intro h1'],
+    ['loading-product', () => page.evaluate(() => window.bootProduct('draft', 'saved')), '.riff-product', '.riff-product__pending', '.riff-product__pending-intro h1'],
+    ['loading-discovery', () => pipeline('discovery-loading'), '.riff-pipeline', '.riff-loading-card', '.riff-loading-intro h1'],
+    ['partial', () => pipeline('partial'), '.riff-pipeline', '.riff-partial-analysis-card', '.riff-partial-analysis-copy h1', undefined, '.riff-partial-analysis-action'],
+    ['video-analysis', () => pipeline('video'), '.riff-pipeline', '.riff-analysis-card', '.riff-title h1', undefined, '.riff-analysis-detail .riff-button--primary'],
+    ['tiktok-profile', () => pipeline('tiktok'), '.riff-pipeline', '.riff-profile-shell', '.riff-title h1', undefined, '.riff-profile-next .riff-button'],
+    ['instagram-profile', () => pipeline('instagram'), '.riff-pipeline', '.riff-profile-shell', '.riff-title h1', undefined, '.riff-profile-next .riff-button'],
+    ['product', async () => { await page.evaluate(() => window.bootProduct('saved', 'saved')); await page.evaluate(() => window.advanceProduct()); }, '.riff-product', '.riff-product__brief', '.riff-product__header h1', undefined, '.riff-product input'],
+    ...[
+      ['Videos', 'discovery-videos'], ['Hooks', 'discovery-hooks'],
+      ['Product showcases', 'discovery-showcases'], ['CTAs', 'discovery-ctas'],
+    ].map(([tab, name]) => [name, async () => { await pipeline('discovery'); await page.getByRole('tab', { name: tab, exact: true }).click(); },
+      '.riff-pipeline', '.riff-idea-card--active', '.riff-discovery-title h1', '.riff-library[aria-selected="true"]', '.riff-idea-card--active .riff-button']),
+    ...['Full video', 'Hook', 'Main content', 'CTA'].map(tab => [`studio-${tab}`, async () => {
+      await pipeline('studio'); await page.getByRole('tab', { name: tab, exact: true }).click();
+    }, '.riff-pipeline', '.riff-studio-shell', '.riff-studio-title h1', '.riff-studio-tab[aria-selected="true"]', '.riff-studio-tab[aria-selected="true"]']),
+    ['saved', () => pipeline('saved'), '.riff-pipeline', '.riff-saved-confirmation', '.riff-saved-confirmation h1', undefined, '.riff-saved-confirmation .riff-button'],
+  ];
+  const observed = [];
+  for (const [name, mount, canvasSelector, surfaceSelector, textSelector, selectedSelector, focusSelector] of cases) {
+    await mount();
+    const row = {
+      name,
+      canvas: await page.locator(canvasSelector).evaluate(node => getComputedStyle(node).backgroundColor),
+      surface: await page.locator(surfaceSelector).evaluate(node => getComputedStyle(node).backgroundColor),
+      text: await page.locator(textSelector).evaluate(node => getComputedStyle(node).color),
+    };
+    if (selectedSelector) row.selected = await page.locator(selectedSelector).evaluate(node => {
+      const style = getComputedStyle(node); return `${style.backgroundColor}/${style.color}`;
+    });
+    if (focusSelector) {
+      const target = page.locator(focusSelector).first();
+      await target.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      row.focus = await target.evaluate(node => `${node.matches(':focus-visible')}/${getComputedStyle(node).outlineColor}`);
+    }
+    observed.push(row);
+  }
+  assert.deepEqual(observed, cases.map(([name, , , , , selectedSelector, focusSelector]) => ({
+    name,
+    canvas: 'rgb(17, 24, 39)',
+    surface: 'rgb(30, 41, 59)',
+    text: 'rgb(248, 250, 252)',
+    ...(selectedSelector ? { selected: 'rgb(17, 24, 39)/rgb(248, 250, 252)' } : {}),
+    ...(focusSelector ? { focus: 'true/rgb(147, 197, 253)' } : {}),
+  })));
+  await pipeline('video');
+  assert.deepEqual(await page.locator('.riff-analysis-row').first().evaluate(node=>({
+    surface:getComputedStyle(node).backgroundColor,
+    label:getComputedStyle(node.querySelector('.riff-analysis-row__head h2')).color,
+  })),{surface:'rgb(30, 41, 59)',label:'rgb(203, 213, 225)'});
+  await page.evaluate(()=>window.bootProduct('saved','saved'));await page.evaluate(()=>window.advanceProduct());
+  assert.equal(await page.locator('.riff-product__brief-header').evaluate(node=>getComputedStyle(node).color),'rgb(203, 213, 225)');
+  await pipeline('studio');
+  assert.deepEqual(await page.locator('.riff-on-screen-text').first().evaluate(node=>({
+    surface:getComputedStyle(node).backgroundColor,text:getComputedStyle(node).color,border:getComputedStyle(node).borderLeftColor,
+  })),{surface:'rgb(17, 24, 39)',text:'rgb(248, 250, 252)',border:'rgb(147, 197, 253)'});
+  await assertSafeImages(page);
+  assert.equal(await page.evaluate(() => window.external.length), 0);
 });
 
 test('the generated Home v4 resource and real bridge keep one root through Home, product, loading, analysis, Discovery, Studio, Saved, and resume', async t => {

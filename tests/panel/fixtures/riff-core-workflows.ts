@@ -77,7 +77,7 @@ const malformedMarkerInput = accountEnvelope(
   undefined,
 );
 const malformedMarkerResult = riffHomeStructuredOutput(malformedMarkerInput);
-if (malformedMarkerResult.status !== 'error') throw new Error('Expected the missing onboarding marker to fail closed in the public Home parser');
+if (malformedMarkerResult.status !== 'error') throw new Error('Expected the missing onboarding marker to be rejected by the public Home parser');
 
 const parsedCatalogPage = (count: number) => {
   const parsed = riffDiscoveryCatalogStructuredOutput({
@@ -176,6 +176,8 @@ export const riffCoreWorkflowFixtures = Object.freeze({
     malformedMarker: fixture('account-malformed-marker', '13I0-0', {
       input: malformedMarkerInput,
       result: malformedMarkerResult,
+      parser_outcome: 'rejected' as const,
+      ui_recovery: 'Home fails open to truthful recent work while the malformed onboarding marker remains rejected.',
     }),
     accountB: fixture('account-b', 'ZZL-0', accountB),
   }),

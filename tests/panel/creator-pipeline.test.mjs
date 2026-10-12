@@ -1033,7 +1033,7 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await root.locator('.riff-studio-shell').evaluate(node=>getComputedStyle(node).transitionDuration),'0s');
     await page.emulateMedia({reducedMotion:'no-preference'});
     await page.evaluate(()=>document.documentElement.dataset.theme='dark');
-    assert.equal(await root.getByRole('heading',{name:'Your script, ready to film.'}).evaluate(node=>getComputedStyle(node).color),'rgb(244, 245, 247)');
+    assert.equal(await root.getByRole('heading',{name:'Your script, ready to film.'}).evaluate(node=>getComputedStyle(node).color),'rgb(246, 247, 249)');
     await page.evaluate(()=>{document.documentElement.dataset.theme='';document.documentElement.style.fontSize='200%';});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true,'200% text has no page overflow');
     assert.equal(await root.getByRole('button',{name:'Save for later'}).count(),1);
