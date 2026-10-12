@@ -16,9 +16,9 @@ import {
   validateProductDraft,
   type ProductDraft,
 } from './riff-product-context-validation.ts';
-import { riffRecentLabel } from './riff-home-validation.ts';
+import { parseListRiffWorkResult, riffRecentLabel } from './riff-home-validation.ts';
 import type { Project, SaveProjectInput } from '../../packages/contracts/index.ts';
-import { createRiffWorkStateClient,parseRiffWorkState } from './riff-work-state-client.ts';
+import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 import {
   cloneStrictJsonObject,isBusinessResultFlagCoherent,parseStrictCallToolResult,strictObjectShape,
 } from './call-tool-result-validation.ts';
@@ -592,33 +592,15 @@ export function mountRiffHomeBridge(root: HTMLElement, options: BridgeOptions = 
       view.setRecentsState({ status: 'error', message: 'Recent work is temporarily unavailable. Your saved jobs were not changed.' });
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
-    const envelope = parseStrictCallToolResult(outcome.value);
-    const result = envelope?.structuredContent; const data = object(result?.data);
-    if (!envelope || result?.ok !== true || !isBusinessResultFlagCoherent(envelope, true)
-      || !Array.isArray(data?.work) || data.work.length > 20) {
+    const work = parseListRiffWorkResult(outcome.value);
+    if (!work) {
       view.setRecentsState({ status: 'error', message: 'Recent work is temporarily unavailable.' });
       return { status: 'failed', message: 'Recent work could not be refreshed. Try again.' };
     }
-    const items = data.work.flatMap(item => {
-      const work = object(item); const source = object(work?.source);
-      if (!work || typeof work.job_id !== 'string' || !uuid.test(work.job_id)
-        || typeof work.project_name !== 'string' || !work.project_name.trim() || work.project_name.length > 120
-        || typeof work.updated_at !== 'string' || Number.isNaN(Date.parse(work.updated_at))
-        || !['scan', 'recommendations', 'scripts'].includes(String(work.kind))
-        || !['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'].includes(String(work.state))
-        || source?.platform !== 'tiktok' || typeof source.handle !== 'string' || !/^[\w.]{1,100}$/.test(source.handle)) return [];
-      const parsedWorkState=work.work_state===null||work.work_state===undefined?null:parseRiffWorkState(work.work_state);
-      if(work.work_state!==null&&work.work_state!==undefined&&!parsedWorkState)return [];
-      const variantId=work.variant_id===null||work.variant_id===undefined?null:typeof work.variant_id==='string'&&uuid.test(work.variant_id)?work.variant_id:undefined;
-      if(variantId===undefined)return [];
-      if((variantId===null)!==(parsedWorkState===null)||parsedWorkState&&
-        (!sameUuid(parsedWorkState.job_id,work.job_id)||!sameUuid(parsedWorkState.variant_id,variantId!)))return [];
-      return [{ job_id: work.job_id, title: work.project_name, updated_at: work.updated_at,
-        stage:riffRecentLabel(work.kind as CreatorJobView['kind'],work.state as CreatorJobView['state'],parsedWorkState?.state??null),
-        state: work.state as CreatorJobView['state'], platform: 'tiktok' as const, handle: source.handle,
-        variant_id:variantId,work_state:parsedWorkState,
-      }];
-    });
+    const items = work.map(item => ({ job_id: item.job_id, title: item.project_name, updated_at: item.updated_at,
+      stage:riffRecentLabel(item.kind,item.state,item.work_state?.state??null), state:item.state,
+      platform:'tiktok' as const,handle:item.source.handle,variant_id:item.variant_id,work_state:item.work_state,
+    }));
     view.setRecents(items);
     return { status: 'sent', message: items.length ? 'Recent work refreshed.' : 'No recent work yet.' };
   }

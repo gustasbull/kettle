@@ -13,7 +13,8 @@ import { createRiffWorkStateClient } from './riff-work-state-client.ts';
 const WAIT_MS = 10_000;
 const sameUuid=(left:string,right:string)=>left.toLowerCase()===right.toLowerCase();
 
-/** Read-only persisted job view. No provider calls, storage or start/generate capability. */
+/** Provider-free persisted-job reads. Only explicit Studio state controls may
+ * request a receipt-backed durable write; this bridge never starts provider or generation work. */
 export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPipelineLimits = {}) {
   const localPerformance = panelPerformanceFromDocument(root.ownerDocument, performance);
   const timeoutMs = limits.timeoutMs ?? WAIT_MS;
@@ -48,6 +49,16 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
     connection: 'The connection could not load this Riff creator job. Reopen it in ChatGPT or reconnect Riff.',
   } as const;
   let bridgeReady = false;
+  type DeadlineResult<T> = { status: 'resolved'; value: T } | { status: 'rejected' } | { status: 'timeout' };
+  const withDeadline = <T>(promise: Promise<T>, deadlineMs: number): Promise<DeadlineResult<T>> => new Promise(resolve => {
+    let settled = false;
+    const finish = (result: DeadlineResult<T>) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); resolve(result);
+    };
+    const timer = setTimeout(() => finish({ status: 'timeout' }), deadlineMs);
+    promise.then(value => finish({ status: 'resolved', value }), () => finish({ status: 'rejected' }));
+  });
   const sendPrompt = async (prompt: string) => {
     const capabilities = app.getHostCapabilities();
     if (!bridgeReady || (capabilities?.experimental?.['openai/message'] == null && !capabilities?.message?.text)) return {
@@ -59,8 +70,18 @@ export function mountCreatorPipelineBridge(root: HTMLElement, limits: CreatorPip
         content: [{ type: 'text', text: prompt }],
         _meta: { 'openai/message': { target: 'active', send: true } },
       };
-      const result = await app.sendMessage(params as Parameters<typeof app.sendMessage>[0]);
-      return result.isError
+      const outcome = await withDeadline(
+        app.sendMessage(params as Parameters<typeof app.sendMessage>[0]),
+        Math.min(timeoutMs, 750),
+      );
+      if (outcome.status === 'timeout') return {
+        status: 'pending' as const,
+        message: 'Sending this request to ChatGPT. If it does not appear, continue in the composer.',
+      };
+      if (outcome.status === 'rejected') return {
+        status: 'failed' as const, message: 'The handoff failed. Continue in the ChatGPT composer.',
+      };
+      return outcome.value.isError
         ? { status: 'failed' as const, message: 'ChatGPT did not accept that handoff. Continue in the composer.' }
         : { status: 'sent' as const, message: 'Sent to ChatGPT. Continue there when you are ready.' };
     } catch {

@@ -39,7 +39,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'none'");
     if (req.url === '/frame') res.end(`<div id="review"></div><script>${bundle.outputFiles[0].text}</script>`);
     else res.end(`<script>${fixture.outputFiles[0].text}</script><script>
-      window.calls=[]; window.sizes=[]; window.messages=[]; window.displayRequests=[]; window.ready=false; window.respond=true;window.rejectMessages=false;
+      window.calls=[]; window.sizes=[]; window.messages=[]; window.displayRequests=[]; window.ready=false; window.respond=true;window.rejectMessages=false;window.settleMessages=true;
       window.catalogPage={ok:true,data:{cards:[{
         id:'00000000-0000-4000-8000-000000000801',platform:'tiktok',native_id:'9000000000000000801',
         canonical_url:'https://www.tiktok.com/@fictional_catalog/video/9000000000000000801',caption:'Saved studio reference',thumbnail_url:null,
@@ -76,7 +76,7 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
           window.reply(m.id,{structuredContent,content:[]});
         } }
         if(m.method==='ui/request-display-mode') { window.displayRequests.push(m.params); window.reply(m.id,{mode:'fullscreen'}); window.send('ui/notifications/host-context-changed',{displayMode:'fullscreen'}); }
-        if(m.method==='ui/message') { window.messages.push(m.params); window.reply(m.id,window.rejectMessages?{isError:true}:{}); }
+        if(m.method==='ui/message') { window.messages.push(m.params); if(window.settleMessages)window.reply(m.id,window.rejectMessages?{isError:true}:{}); }
         if(m.method==='ui/notifications/size-changed') window.sizes.push(m.params);
         if(m.id==='teardown') window.tornDown=m;
       });
@@ -131,6 +131,15 @@ test('Creator pipeline bridge parent transport, refresh, denial and teardown', a
     assert.doesNotMatch(sent.content[0].text,/\b(?:creator job|recommendation batch|DNA(?: ID)?|script set|variant)\b|\bversion\s+\d+\b/i);
     assert.deepEqual(sent._meta['openai/message'],{target:'active',send:true});
     await page.evaluate(()=>{window.calls=[];});
+  });
+  await t.test('a never-settling ChatGPT message host resolves to an honest bounded pending state',async()=>{
+    frame=await launch();
+    await page.evaluate(()=>{window.messages=[];window.settleMessages=false;});
+    await frame.getByRole('button',{name:'Open discovery'}).click();
+    await frame.getByRole('button',{name:'Make it mine'}).click();
+    await frame.locator('.riff-pipeline__status').getByText(/Sending this request to ChatGPT/i).waitFor({timeout:2_000});
+    assert.equal(await frame.getByRole('button',{name:'Make it mine'}).isEnabled(),true);
+    assert.equal(await page.evaluate(()=>window.messages.length),1);
   });
   await t.test('Studio catalog proposals preserve all four part contexts in the actual ChatGPT handoff',async()=>{
     const mappings=[

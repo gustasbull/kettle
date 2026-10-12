@@ -1,5 +1,11 @@
 import type { CreatorJobStatusView, CreatorJobView, PipelineReference } from '../../packages/contracts/creator-pipeline.ts';
+import type { RiffWorkSummary } from '../../packages/contracts/riff-creator.ts';
 import { isAllowedTikTokImageUrl } from '../../packages/contracts/tiktok-image-policy.ts';
+import {
+  isBusinessResultFlagCoherent,
+  parseStrictCallToolResult,
+  strictObjectShape,
+} from './call-tool-result-validation.ts';
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,6 +48,69 @@ export function riffRecentLabel(kind:CreatorJobView['kind'],state:CreatorJobView
   if(kind==='scan')return 'Analysis ready';
   if(kind==='recommendations')return 'Formats ready';
   return workState==='saved'?'Ideas saved':workState==='filmed'?'Filmed':'Continue script';
+}
+
+const recentCreatorUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 2_048) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.port && !url.search && !url.hash
+      && ['tiktok.com', 'www.tiktok.com', 'instagram.com', 'www.instagram.com'].includes(url.hostname.toLowerCase());
+  } catch { return false; }
+};
+
+function recentSource(value: unknown) {
+  const source = shape(value, ['platform', 'kind', 'handle', 'canonical_url', 'profile_url', 'video_url']);
+  if (!source || source.platform !== 'tiktok' || !enumValue(source.kind, ['profile', 'video'])
+    || typeof source.handle !== 'string' || !/^[\w.]{1,100}$/.test(source.handle)
+    || !recentCreatorUrl(source.canonical_url) || !recentCreatorUrl(source.profile_url)
+    || !nullable(source.video_url, recentCreatorUrl)) return false;
+  const expectedProfile = `https://www.tiktok.com/@${source.handle}`;
+  if (source.profile_url !== expectedProfile || new URL(source.profile_url).pathname !== `/@${source.handle}`) return false;
+  if (source.kind === 'profile') return source.video_url === null && source.canonical_url === source.profile_url;
+  if (source.video_url === null || source.canonical_url !== source.video_url) return false;
+  const escapedHandle = source.handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^/@${escapedHandle}/video/\\d{1,30}$`).test(new URL(source.video_url).pathname);
+}
+
+function recentWorkState(value: unknown) {
+  const state = shape(value, ['job_id', 'variant_id', 'state', 'version', 'updated_at']);
+  return !!state && id(state.job_id) && id(state.variant_id) && enumValue(state.state, ['active', 'saved', 'filmed'])
+    && Number.isSafeInteger(state.version) && Number(state.version) > 0 && Number(state.version) <= 2_147_483_647
+    && timestamp(state.updated_at);
+}
+
+function recentWork(value: unknown): value is RiffWorkSummary {
+  const work = shape(value, [
+    'project_id', 'project_name', 'job_id', 'kind', 'state', 'updated_at', 'source', 'variant_id', 'work_state',
+  ]);
+  if (!work || !id(work.project_id) || typeof work.project_name !== 'string'
+    || work.project_name.length < 1 || work.project_name.length > 120 || work.project_name.trim() !== work.project_name
+    || !id(work.job_id) || !enumValue(work.kind, ['scan', 'recommendations', 'scripts'])
+    || !enumValue(work.state, ['queued', 'running', 'succeeded', 'failed', 'needs_reconciliation'])
+    || !timestamp(work.updated_at) || !recentSource(work.source)
+    || !nullable(work.variant_id, id) || !(work.work_state === null || recentWorkState(work.work_state))) return false;
+  if ((work.variant_id === null) !== (work.work_state === null)) return false;
+  if (work.work_state !== null) {
+    const state = work.work_state as JsonObject;
+    if (work.kind !== 'scripts' || work.state !== 'succeeded'
+      || String(state.job_id).toLowerCase() !== work.job_id.toLowerCase()
+      || String(state.variant_id).toLowerCase() !== work.variant_id?.toLowerCase()) return false;
+  }
+  return true;
+}
+
+/** Strict display boundary for the public `kettle_list_riff_work` result.
+ * Any invalid sibling rejects the complete result; recent work is never partially salvaged. */
+export function parseListRiffWorkResult(raw: unknown): RiffWorkSummary[] | undefined {
+  try {
+    const envelope = parseStrictCallToolResult(raw);
+    const result = strictObjectShape(envelope?.structuredContent, ['ok', 'data']);
+    const data = strictObjectShape(result?.data, ['work']);
+    if (!envelope || !result || result.ok !== true || !isBusinessResultFlagCoherent(envelope, true)
+      || !data || !Array.isArray(data.work) || data.work.length > 20 || !data.work.every(recentWork)) return;
+    return data.work as RiffWorkSummary[];
+  } catch { return; }
 }
 
 const creatorUrl = (value: unknown): value is string => {

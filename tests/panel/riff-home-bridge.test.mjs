@@ -389,6 +389,46 @@ test('Riff Home bounds stalled compatibility calls and reports rejected ChatGPT 
   assert.equal(await submit.isEnabled(), true);
 });
 
+test('Riff Home rejects the whole recent-work result when one sibling violates the public contract', async (t) => {
+  const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
+    import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
+    const recent={project_id:'00000000-0000-4000-8000-000000000100',project_name:'Valid recent work',
+      job_id:'00000000-0000-4000-8000-000000000620',kind:'scan',state:'succeeded',updated_at:'2026-10-11T12:00:00Z',
+      source:{platform:'tiktok',kind:'profile',handle:'fixture',canonical_url:'https://www.tiktok.com/@fixture',
+        profile_url:'https://www.tiktok.com/@fixture',video_url:null},variant_id:null,work_state:null};
+    const invalid={...structuredClone(recent),project_name:'Invalid sibling',updated_at:'2026-02-30T12:00:00Z'};
+    window.openai={callTool:async name=>name==='list_riff_work'
+      ? {structuredContent:{ok:true,data:{work:[recent,invalid]}},content:[]}
+      : {structuredContent:{ok:false,error:{code:'NOT_FOUND',message:'Missing',retryable:false,recovery:'reload'}},content:[]}};
+    window.bridge=mountRiffHomeBridge(document.getElementById('mount'),{timeoutMs:500,toolTimeoutMs:200,maxPolls:0});
+  ` }, bundle: true, platform: 'browser', format: 'iife', write: false });
+  const server = createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/frame') return res.end(`<div id="mount"></div><script>${bundle.outputFiles[0].text}</script>`);
+    res.end(`<script>
+      window.ready=false;const frame=()=>document.querySelector('iframe').contentWindow;
+      addEventListener('message',event=>{const message=event.data;
+        if(message.method==='ui/initialize')frame().postMessage({jsonrpc:'2.0',id:message.id,result:{protocolVersion:message.params.protocolVersion,
+          hostInfo:{name:'strict-recents',version:'1'},hostCapabilities:{},hostContext:{}}},'*');
+        if(message.method==='ui/notifications/initialized'){
+          frame().postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{structuredContent:{ok:true,data:{account:{
+            id:'00000000-0000-4000-8000-000000000001',display_name:'Fixture',state:'active',preferred_language:'en',
+            created_at:'2026-01-01T00:00:00Z',onboarding_seen_at:'2026-10-11T00:00:00Z'},
+            entitlements:{status:'not_configured'},usage:{status:'not_configured',reset_at:null}}},content:[]}},'*');window.ready=true;
+        }
+      });
+    </script><iframe src="/frame"></iframe>`);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(3_000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.waitForFunction(()=>window.ready);
+  const frame=page.frames().find(candidate=>candidate.url().endsWith('/frame'));
+  await frame.getByText('Recent work is temporarily unavailable.',{exact:true}).waitFor();
+  assert.equal(await frame.getByText('Valid recent work',{exact:true}).count(),0,
+    'a valid sibling is never salvaged from an invalid result');
+});
+
 test('Riff Home reconciles the exact reported link after a timed-out start persisted the saved job', async (t) => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'ts', contents: `
     import { mountRiffHomeBridge } from './apps/panel/riff-home-bridge.ts';
@@ -588,7 +628,8 @@ test('Riff Home does not carry an ambiguous request ID across an account change'
     const firstWork={
       project_id:'00000000-0000-4000-8000-000000000010',project_name:'First account work',
       job_id:'00000000-0000-4000-8000-000000000011',kind:'scan',state:'succeeded',updated_at:'2026-10-11T00:00:00Z',
-      source:{platform:'tiktok',kind:'profile',handle:'old.creator',canonical_url:'https://www.tiktok.com/@old.creator',profile_url:'https://www.tiktok.com/@old.creator',video_url:null}
+      source:{platform:'tiktok',kind:'profile',handle:'old.creator',canonical_url:'https://www.tiktok.com/@old.creator',profile_url:'https://www.tiktok.com/@old.creator',video_url:null},
+      variant_id:null,work_state:null
     };
     window.openai={callTool:async(name,args)=>{
       if(name==='list_riff_work')return {structuredContent:{ok:true,data:{work:window.activeAccountId.endsWith('1')?[firstWork]:[]}}};

@@ -41,7 +41,7 @@ export const CREATOR_PIPELINE_DOCUMENT = creatorPipelineHtml(creatorPipelineScri
 export function registerCreatorPipelineResource(server: McpServer): void {
   const register = (name: string, uri: string) => server.registerResource(name, uri, {
       title: 'Riff creator workflow',
-      description: 'Read-only saved Riff creator jobs, ideas and filming variants. Status refresh never starts paid work.',
+      description: 'Provider-free saved Riff job reads with explicit receipt-backed saved and filmed state writes. Refresh never starts paid work.',
       mimeType: CREATOR_PIPELINE_MIME, _meta: CREATOR_PIPELINE_META,
     }, async () => ({ contents: [{
       uri, mimeType: CREATOR_PIPELINE_MIME,

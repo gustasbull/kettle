@@ -116,7 +116,8 @@ const unavailable: RiffPanelAction = async () => ({
 });
 const sameUuid=(left:string|undefined,right:string|undefined)=>!!left&&!!right&&left.toLowerCase()===right.toLowerCase();
 
-/** Pure presentation plus explicit host handoffs. It never fetches, saves, retries, or starts provider work. */
+/** Pure presentation plus explicit host handoffs. It never fetches providers or
+ * starts/retries provider work; durable Studio state changes require an explicit host callback and receipt. */
 export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipelineOptions = {}): {
   render(job: CreatorJobView, presentation?:CreatorPipelinePresentation): void;
   setCatalogState(state:RiffVideoCatalogState):void;
@@ -365,6 +366,8 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
     if(library==='showcases')return `Use ${source} to propose only a main-content product showcase adapted to the “${filter}” lens. Preserve the current hook and CTA, and do not claim the proposal was selected or saved in Riff.`;
     return `Use ${source} to propose only a CTA adapted to the “${filter}” lens. Preserve the current hook and main content, and do not claim the proposal was selected or saved in Riff.`;
   };
+  const catalogBookmarkIntent = (card:RiffVideoCard) =>
+    `Bookmark the saved Riff reference at ${card.canonical_url} for later in ChatGPT. This is a request only; do not claim it was bookmarked, saved, or persisted in Riff unless a Riff tool returns a durable receipt.`;
 
   function renderPending(job: CreatorJobView,statusView?:CreatorJobStatusView) {
     screen('pending');
@@ -793,7 +796,10 @@ export function mountCreatorPipeline(root: HTMLElement, options: CreatorPipeline
             ? await options.proposeCatalogReference({card:structuredClone(card),library:discoveryLibrary,filter:discoveryFilter,intent,...(context?{studioExplore:context}:{})})
             : await sendPrompt(intent);
           return context?{...result,message:`${result.message} The current persisted script remains unchanged.`}:result;
-        }),'catalog-proposal');article.append(el('div',undefined,'riff-idea-actions'));article.lastElementChild!.append(action);}
+        }),'catalog-proposal');
+        const cardActions=el('div',undefined,'riff-idea-actions');cardActions.append(action);
+        const bookmark=button('','riff-bookmark',()=>void run(()=>sendPrompt(catalogBookmarkIntent(card))),'bookmark-catalog');
+        bookmark.setAttribute('aria-label','Bookmark idea');bookmark.append(bookmarkIcon());cardActions.append(bookmark);article.append(cardActions);}
       stage.append(article);
     });
     carousel.append(stage);const navigation=el('div',undefined,'riff-carousel-navigation');

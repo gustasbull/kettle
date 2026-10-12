@@ -17,9 +17,11 @@ view.dispose();
 ```
 
 The component is a presentation layer over a validated `CreatorJobView`. It does
-not fetch providers, retry work, persist state, or infer missing data. Actions are
-explicit host callbacks or ChatGPT message handoffs. All provider text is inserted
-with `textContent`; external media and links must pass the shared safe-URL policy.
+not fetch providers, start or retry provider work, or infer missing data. Save,
+undo, and filmed controls use an explicit host callback and show durable state only
+after its receipt and reconciled job agree; other actions are ChatGPT message
+handoffs. All provider text is inserted with `textContent`; external media and
+links must pass the shared safe-URL policy.
 
 ## Paper states
 
@@ -46,9 +48,11 @@ Fullscreen is the product surface. The host owns app attribution, the ChatGPT
 composer, authorization UI, and surrounding navigation; this component must not
 recreate them.
 
-The bridge may poll only the saved job read tool. Polling and reopening never start
-provider work. Creator actions that need conversation reasoning use the supported
-ChatGPT message capability and target the active conversation.
+Automatic saved-job and catalog reads are provider-free. Polling and reopening
+never start provider work. Only explicit save, undo, and filmed actions invoke the
+authenticated durable work-state write. Creator actions that need conversation
+reasoning use the supported ChatGPT message capability and target the active
+conversation.
 
 ## Verification
 

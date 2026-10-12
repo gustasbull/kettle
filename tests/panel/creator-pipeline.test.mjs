@@ -577,9 +577,18 @@ test('Riff creator pipeline reproduces the Paper CURRENT workflow with persisted
     assert.equal(await page.evaluate(() => window.discoveryLoads.length), loadsAtStart + 1,
       'fullscreen Videos requests one catalog page');
     assert.equal(await root.getByRole('button', { name: 'Make it mine' }).count(), 0);
-    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 0);
+    assert.equal(await root.getByRole('button', { name: 'Bookmark idea' }).count(), 1);
     assert.equal(await root.locator('[data-idea-card]').count(), 0, 'catalog observations are never recommendation ideas');
     assert.equal(await root.getByRole('button', { name: 'Use this hook' }).count(), 1);
+    const promptsBeforeBookmark = await page.evaluate(() => window.actions.length);
+    await root.getByRole('button', { name: 'Bookmark idea' }).click();
+    await page.waitForFunction(count => window.actions.length === count + 1, promptsBeforeBookmark);
+    const bookmarkPrompt = await page.evaluate(() => window.actions.at(-1));
+    assert.match(bookmarkPrompt, /Bookmark the saved Riff reference at https:\/\/www\.tiktok\.com\/@fictional_catalog\/video\/900000000000000080/i);
+    assert.match(bookmarkPrompt, /request only/i);
+    assert.match(bookmarkPrompt, /do not claim.*persisted in Riff.*durable receipt/i);
+    assert.equal(await page.evaluate(() => window.catalogProposals.length), 0,
+      'bookmarking is a ChatGPT intent, not a falsely confirmed Riff catalog write');
     await root.getByRole('button', { name: 'Use this hook' }).click();
     assert.equal(await page.evaluate(() => window.catalogProposals.length), 1);
     assert.deepEqual(await page.evaluate(() => {
