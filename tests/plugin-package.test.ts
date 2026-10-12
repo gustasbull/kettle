@@ -87,6 +87,6 @@ test('Riff setup skill is narrowly triggered and keeps onboarding/account/provid
   assert.equal(marketplace.name, 'riff-local');
   assert.deepEqual(marketplace.plugins, [{
     name: 'riff', source: { source: 'local', path: './plugins/riff' },
-    policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: 'Creativity',
+    policy: { installation: 'AVAILABLE', authentication: 'ON_USE' }, category: 'Creativity',
   }]);
 });

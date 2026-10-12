@@ -72,6 +72,23 @@ Consequently, the live server and its exact resource bytes are verified, while a
 fresh first-use/returning-user render inside the user's ChatGPT session is not
 claimed here.
 
+### ChatGPT distribution follow-up — 2026-10-12
+
+A fresh private ChatGPT App-backed Riff wrapper failed during connection before
+any MCP authorization request reached Supabase. Its initial `1.0.0` release
+contained only the App binding and generic compatibility manifest; it did not
+contain the repository's setup/onboarding skill. The same private plugin and App
+IDs were preserved while the plugin was updated in place to `1.0.1` with
+`skills/setup/SKILL.md` selected as its onboarding skill. Read-back verified the
+unchanged App binding and presentation plus the published setup skill.
+
+The repository-local marketplace entry now defers authentication to first use
+(`ON_USE`), matching the packaged setup sequence in which the protected
+`open_riff` call starts OAuth. This policy does not mutate the App-owned connection
+record and is not claimed as a repair for the earlier host connection failure.
+Fresh ChatGPT connection, authorization, first-use welcome, and returning Home
+remain the unchecked user-session acceptance boundary below.
+
 ## Hosted acceptance update — Bangkok, 2026-10-06
 
 This update supersedes the historical deployment/authentication blockers below.
