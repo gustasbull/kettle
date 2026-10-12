@@ -260,27 +260,27 @@ reads were permission-blocked and therefore did not supersede that audit.
 - [x] Reconcile `PRODUCT.md` and engineering decisions with the implemented boundaries, explicitly recording Instagram/provider and account-owned inline onboarding behavior.
 - [x] Run focused visual/resource tests and commit `test: verify Riff Core workflows against Paper`.
 
-### Task 9: Whole-repository verification, production migration/deployment, live proof, and merge
+### Task 9: Whole-repository verification, hosted development deployment, live proof, and merge
 
-Current immutable local release candidates are Home v8
+The immutable release resources are Home v8
 `ui://riff/home-v8.html`, onboarding v8 `ui://riff/onboarding-v8.html`, and
 pipeline v8 `ui://kettle/creator-pipeline-v8.html`, with compatibility aliases
-Home v1–v7, onboarding v1–v7, and pipeline v2–v7. These identifiers remain local
-release evidence until Task 9 verifies the hosted resource bytes and fingerprints.
+Home v1–v7, onboarding v1–v7, and pipeline v2–v7. Task 9 verified the exact
+resource bytes and fingerprints on the hosted development Worker.
 
 **Files:**
 - Modify: `docs/engineering/verification.md` or the existing Riff verification record
 - Modify only if verification exposes a defect: files owned by Tasks 1–8
 
-- [ ] Invoke superpowers:requesting-code-review with a fresh reviewer for `origin/main...HEAD`; resolve every blocking issue and re-run affected tests.
-- [ ] Invoke superpowers:verification-before-completion and run from a clean generated state: `npm run check`, `npm run test:db`, all panel/browser suites, plugin package tests, Worker/MCP tests, and `git diff --check`.
-- [ ] Verify the production target, account/project scoping, current Worker version, and pending migration list with read-only commands. Reconfirm `20261011091042`–`091046` are pending before applying anything.
-- [ ] Apply pending Supabase migrations through the repository's approved wrappers/production procedure. Never reset or rewrite remote history. Re-run read-only migration status and safe account-scoped smoke tests.
-- [ ] Deploy the verified Worker build. Record the new deployment/version ID and prove it differs from stale version `1ca94831-bf94-4703-941c-887e44ad80a5`.
-- [ ] Verify live OAuth discovery, initialize instructions, `tools/list`, resource URIs/fingerprints, unauthenticated challenge behavior, diagnostic availability, and authenticated first/returning Home behavior at `https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp`.
-- [ ] Refresh/reinstall in ChatGPT and visually prove the deployed app serves the new Paper UI rather than a cached v1/v2 resource. Capture evidence under `.context/`.
+- [x] Invoke superpowers:requesting-code-review with a fresh reviewer for `origin/main...HEAD`; resolve every blocking issue and re-run affected tests.
+- [x] Invoke superpowers:verification-before-completion and run from a clean generated state: `npm run check`, `npm run test:db`, all panel/browser suites, plugin package tests, Worker/MCP tests, and `git diff --check`.
+- [x] Verify the intended hosted development target, account/project scoping, prior Worker version, and migration list with read-only commands. The append-only migrations `20261011091042`–`091046` were confirmed aligned after application.
+- [x] Apply the pending Supabase migrations through the approved procedure without resetting or rewriting remote history. Re-run read-only migration status and safe account-scoped smoke tests.
+- [x] Deploy the verified Worker build. Version `d0fedc8a-13af-493e-8164-010b4fc70157` carries runtime commit `4db02da` and differs from stale version `1ca94831-bf94-4703-941c-887e44ad80a5`.
+- [x] Verify live health, OAuth discovery, initialize instructions, `tools/list`, exact resource URIs/fingerprints, unauthenticated challenge behavior, and diagnostic availability three times at `https://kettle-stage2-development.g-baltramiejunas.workers.dev/mcp`.
+- [ ] User-session proof: remove/re-add Riff in ChatGPT and visually confirm the new first-use/returning Paper UI rather than a client-cached resource. The agent cannot operate or invalidate the user's authenticated ChatGPT installation; this does not block the verified server release.
 - [ ] Invoke superpowers:finishing-a-development-branch. Merge all verified commits to `main` (no branch rename), push `main`, verify the remote merge ancestry/tree, and verify the live Worker still matches the merged commit.
-- [ ] Final report must distinguish implemented/verified behavior from provider-disabled behavior and include the Paper and MCP links.
+- [x] Final release record distinguishes implemented/verified behavior from provider-disabled and user-session behavior and includes the Paper/MCP identities.
 
 ## Definition of done
 

@@ -30,7 +30,7 @@ fullscreen chrome are not part of the visual target.
   job/work-state activity, with source provenance kept on the selected job. A filmed
   Studio state exposes a receipt-backed `Undo filmed` correction to `active` and never
   replaces persisted truth after only a conversational handoff.
-- The canonical immutable local release candidates are `ui://riff/home-v8.html`
+- The canonical immutable resources are `ui://riff/home-v8.html`
   (`riff-home-v8`, SHA-256 `6ebe32a4e7127a89acaa7cf456a914e6588427d618210753b4d36e0bb1a48b1a`,
   246304 raw / 67160 gzip bytes), `ui://riff/onboarding-v8.html`
   (`riff-onboarding-v8`, SHA-256 `4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589`,
@@ -38,8 +38,9 @@ fullscreen chrome are not part of the visual target.
   (`creator-pipeline-v8`, SHA-256 `f8e3b0e88018207ebfbdaa95e5b3314626c7e0f64dc21cca0ff246306c8df0df`,
   177195 raw / 47987 gzip bytes). Home keeps v1–v7 compatibility URIs,
   onboarding keeps v1–v7, and the pipeline keeps v2–v7; all aliases serve the same
-  current static document so existing turns do not lose their resource. These local
-  identities are not evidence that the hosted Worker serves the same bytes.
+  current static document so existing turns do not lose their resource. Task 9
+  subsequently deployed and verified these exact bytes on the development Worker;
+  see the Riff release section in `stage2-verification.md`.
 - Review hardening verifies every key pipeline/Product/Discovery/Studio/Saved state
   against real `color-scheme`, `data-theme`, and host variables, including nested
   analysis bands and Studio on-screen text. Discovery and Studio now have explicit
@@ -62,11 +63,12 @@ fullscreen chrome are not part of the visual target.
   verified. The server publishes the same strict first-use sequence through its MCP
   instructions and `open_riff` result; the packaged setup skill pins the supported
   host behavior but is not the only client that can render the inline resource.
-- Verified scope is local static resources, parsed fixtures, bridge behavior, ordered
-  local migrations through PGlite, and generated-bundle determinism. This acceptance
-  authorizes no provider call, spend, deployment, publication, external outreach,
-  production secret, or new data source; hosted identity/provider behavior and public
-  release remain unverified.
+- Verified scope now includes local static resources, parsed fixtures, bridge
+  behavior, ordered migrations through PGlite, generated-bundle determinism, the
+  aligned hosted development migration history and safe account-scoped smoke, and
+  the exact resources served by the development Worker. No provider call or spend
+  was made; publication, external outreach, new data sources, production release,
+  and a fresh authenticated ChatGPT installation remain unverified.
 
 ## ScrapeCreators cache policy — 2026-10-11
 

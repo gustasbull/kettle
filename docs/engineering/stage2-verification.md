@@ -1,5 +1,72 @@
 # Stage 2 implementation and evidence — 2026-10-06
 
+## Riff Paper Core workflows release — 2026-10-12
+
+This release supersedes the older local-only resource evidence below for the
+development Worker. It does not convert the development target into a public or
+production release.
+
+### Design and release identity
+
+- The implementation authority is the exact read-only Paper design audit for file
+  `01M39TTB7DKFHZY2JVDMAEDZ81`, page `p-5-0`, artboard `Z9H-0`
+  (`7700 × 10112`), token hash `17cc259e`. Screenshots were review aids only and
+  were not used as implementation source. A fresh Paper basic-info read reconfirmed
+  the identity, dimensions and token hash; a fresh node-level read was blocked by
+  Paper edit permissions, so the preserved exact tree/JSX/computed-style audit
+  remains the node-level record.
+- Reviewed runtime commit: `4db02da130917b31f2077571e0f0bbbb86bd15b4`.
+  Two independent final reviews approved that exact clean commit. The final
+  cross-account hardening prevents any account-scoped Home call until a
+  credential-derived account binding exists and clears unbound private state when
+  a delayed binding arrives.
+- Development Worker:
+  `https://kettle-stage2-development.g-baltramiejunas.workers.dev`.
+  Deployment version `d0fedc8a-13af-493e-8164-010b4fc70157` carries
+  `runtime_sha=4db02da130917b31f2077571e0f0bbbb86bd15b4`; it differs from stale
+  version `1ca94831-bf94-4703-941c-887e44ad80a5`.
+
+| Canonical resource | SHA-256 | Raw / gzip bytes |
+| --- | --- | ---: |
+| `ui://riff/home-v8.html` | `6ebe32a4e7127a89acaa7cf456a914e6588427d618210753b4d36e0bb1a48b1a` | 246304 / 67160 |
+| `ui://riff/onboarding-v8.html` | `4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589` | 37664 / 11225 |
+| `ui://kettle/creator-pipeline-v8.html` | `f8e3b0e88018207ebfbdaa95e5b3314626c7e0f64dc21cca0ff246306c8df0df` | 177195 / 47987 |
+
+Home and onboarding retain v1–v7 compatibility URIs; pipeline retains v2–v7.
+All aliases intentionally serve the current static document so older turns keep a
+valid resource handle.
+
+### Verification performed by the integration lead
+
+- `npm run check` passed: 579/579 Node tests, 11/11 serialized build/bundle
+  tests, TypeScript, the default Worker dry run, workerd smoke, and the browser
+  leg. A separate `npm run build:development` passed, and a separate fresh
+  `npm run test:browser` passed 125/125.
+- `npm run test:db` passed 13/13 against the ordered migrations in PGlite;
+  `npm run benchmark:creator -- --fixture` passed its provider-free fixture gate;
+  `npm audit --omit=dev` reported zero vulnerabilities; `git diff --check` was
+  clean.
+- A read-only hosted migration listing showed all 13 local migrations aligned with
+  the development Supabase project, including append-only migrations
+  `20261011091042` through `20261011091046`. The safe hosted smoke then passed
+  account save/read, history, replay, stale-write and cross-account denial,
+  concurrency, role/grant and append-only checks, and removed all temporary data.
+- After deployment, the live MCP proof passed independently three times. Each run
+  verified health, both protected-resource metadata routes, authorization-server
+  discovery, initialize instructions, 23 tools, public diagnostic contract 2.0.0,
+  OAuth challenges on anonymous protected calls, 25 listed resources, the three
+  exact hosted v8 fingerprints above, and every compatibility URI.
+- Provider ceilings remain zero (`CREATOR_SCRAPE_CEILING_MICROUSD=0`,
+  `CREATOR_LIGHTREEL_CEILING_MICROUSD=0`, and
+  `CREATOR_OPENAI_CEILING_MICROUSD=0`). These release checks made no provider
+  call and incurred no provider spend.
+
+An authenticated fresh ChatGPT remove/re-add remains a user-session check: the
+agent cannot invalidate ChatGPT's installed-app cache or operate the user's login.
+Consequently, the live server and its exact resource bytes are verified, while a
+fresh first-use/returning-user render inside the user's ChatGPT session is not
+claimed here.
+
 ## Hosted acceptance update — Bangkok, 2026-10-06
 
 This update supersedes the historical deployment/authentication blockers below.

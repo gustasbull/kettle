@@ -14,14 +14,18 @@ display brand.
 
 The reviewed local CURRENT-workflow acceptance is recorded in the
 [Task 8 report](.superpowers/sdd/2026-10-11-riff-paper-core-workflows-completion/task-8-report.md).
-The current immutable local-build candidates are Home v8
+The current immutable development resources are Home v8
 (`ui://riff/home-v8.html`,
 `sha256:6ebe32a4e7127a89acaa7cf456a914e6588427d618210753b4d36e0bb1a48b1a`),
 inline onboarding v8 (`ui://riff/onboarding-v8.html`,
 `sha256:4ba366c48039217ec25326aa990d629d054ca94438b5adcc02727cb318bbc589`),
 and standalone pipeline v8 (`ui://kettle/creator-pipeline-v8.html`,
 `sha256:f8e3b0e88018207ebfbdaa95e5b3314626c7e0f64dc21cca0ff246306c8df0df`).
-These are deterministic local identities, not hosted-deployment proof.
+The development Worker serves those exact fingerprints; three independent live
+MCP proofs passed after deployment. See the
+[Riff release evidence](docs/engineering/stage2-verification.md#riff-paper-core-workflows-release--2026-10-12).
+This is development evidence, not a public-production release or proof of a fresh
+render in the user's ChatGPT installation.
 
 ## Runnable engineering foundation
 

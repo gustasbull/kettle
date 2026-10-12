@@ -157,12 +157,15 @@ Home retains v1–v7, onboarding retains v1–v7, and pipeline retains v2–v7.
 Those are compatibility handles serving the current static documents, not claims
 that a mutable historical bundle remains under each URI. Telemetry, observations,
 build manifests, benchmarks, and resource tests use the canonical v8/v8/v8
-versions. Task 9 must still reproduce these bytes from a clean generated state and
-prove the hosted Worker serves them; this section does not claim either result.
+versions. Task 9 subsequently reproduced these bytes from a clean generated state
+and proved the development Worker serves them; see the later Riff release section
+in `docs/engineering/stage2-verification.md`. This historical Task 8 section alone
+does not claim either result.
 
 The hosted migration application for `20261011091042` through
-`20261011091046` also remains a Task 9 operation. No remote migration or deployment
-is claimed here.
+`20261011091046` was also a Task 9 operation and was later applied and verified
+without rewriting migration history. No remote migration or deployment is claimed
+by this historical Task 8 record itself.
 
 ## Task 8 verification record
 
