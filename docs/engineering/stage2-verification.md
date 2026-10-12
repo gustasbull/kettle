@@ -22,9 +22,13 @@ production release.
   a delayed binding arrives.
 - Development Worker:
   `https://kettle-stage2-development.g-baltramiejunas.workers.dev`.
-  Deployment version `d0fedc8a-13af-493e-8164-010b4fc70157` carries
-  `runtime_sha=4db02da130917b31f2077571e0f0bbbb86bd15b4`; it differs from stale
-  version `1ca94831-bf94-4703-941c-887e44ad80a5`.
+  Reviewed-code deployment `d0fedc8a-13af-493e-8164-010b4fc70157` carries
+  `runtime_sha=4db02da130917b31f2077571e0f0bbbb86bd15b4`. After the release record
+  was fast-forwarded and pushed to remote `main` at
+  `4667118a95dc3100fa1c49450c38a5d019106289`, merged-tree deployment
+  `c7921fba-5955-4270-a69e-17ce46dcacfa` was created with that commit in its
+  `runtime_sha` version metadata. Both differ from stale version
+  `1ca94831-bf94-4703-941c-887e44ad80a5`.
 
 | Canonical resource | SHA-256 | Raw / gzip bytes |
 | --- | --- | ---: |
@@ -51,11 +55,12 @@ valid resource handle.
   `20261011091042` through `20261011091046`. The safe hosted smoke then passed
   account save/read, history, replay, stale-write and cross-account denial,
   concurrency, role/grant and append-only checks, and removed all temporary data.
-- After deployment, the live MCP proof passed independently three times. Each run
-  verified health, both protected-resource metadata routes, authorization-server
-  discovery, initialize instructions, 23 tools, public diagnostic contract 2.0.0,
-  OAuth challenges on anonymous protected calls, 25 listed resources, the three
-  exact hosted v8 fingerprints above, and every compatibility URI.
+- The live MCP proof passed independently three times before merge and three more
+  times after the merged-tree deployment. Each run verified health, both
+  protected-resource metadata routes, authorization-server discovery, initialize
+  instructions, 23 tools, public diagnostic contract 2.0.0, OAuth challenges on
+  anonymous protected calls, 25 listed resources, the three exact hosted v8
+  fingerprints above, and every compatibility URI.
 - Provider ceilings remain zero (`CREATOR_SCRAPE_CEILING_MICROUSD=0`,
   `CREATOR_LIGHTREEL_CEILING_MICROUSD=0`, and
   `CREATOR_OPENAI_CEILING_MICROUSD=0`). These release checks made no provider
